@@ -1,0 +1,47 @@
+# Production stack: Amber Backup + PostgreSQL, using the pre-built image.
+# Configure secrets in a .env file next to this file (see .env.example), then:
+#   docker compose up -d
+# The app applies pending DB migrations automatically on startup.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: amber
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-amber}
+      POSTGRES_DB: amber
+    volumes:
+      - amber-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amber"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: devpatf/amber-backup:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://amber:${POSTGRES_PASSWORD:-amber}@db:5432/amber
+      # Required — generate with: openssl rand -base64 32  (must decode to 32 bytes)
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?set MASTER_ENCRYPTION_KEY in .env}
+      # Required — generate with: openssl rand -base64 48
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - amber-data:/data
+      # Mount host directories you want to back up as local sources, read-only:
+      # - /srv/important-data:/backup/important-data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  amber-pgdata:
+  amber-data:

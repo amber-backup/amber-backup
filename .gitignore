@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.local
+.DS_Store
+.idea
+coverage/
+
+# Server runtime
+server/dist/
+client/dist/
+
+# Go agent
+agent/bin/
+agent/amber-agent
+
+# Restic cache / temp
+.cache/
+tmp/
+
+# Editor swap files
+*.swp
+*.swo
+*~

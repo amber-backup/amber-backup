@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/build
+**/bin
+.git
+*.log
+**/.env
+**/.env.local
+design-concept
+agent/bin
+.cache
+tmp
