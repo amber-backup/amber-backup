@@ -12,6 +12,7 @@ import { RestoreModule } from './restore/restore.module';
 import { AgentsModule } from './agents/agents.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SettingsModule } from './settings/settings.module';
+import { AuditModule } from './audit/audit.module';
 import { StaticModule } from './static.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { StaticModule } from './static.module';
     AgentsModule,
     NotificationsModule,
     SettingsModule,
+    AuditModule,
     StaticModule,
   ],
 })

@@ -15,10 +15,18 @@ import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SESSION_COOKIE } from '../common/guards/auth.guard';
+import { AuditService } from '../audit/audit.service';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';
 import { UsersService } from './users.service';
 import { ChangePasswordDto, LoginDto } from './dto/auth.dto';
+
+/** Best-effort client IP for audit entries. */
+function clientIp(req: Request): string | null {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
+  return req.ip ?? req.socket?.remoteAddress ?? null;
+}
 
 const OIDC_STATE_COOKIE = 'amber_oidc';
 
@@ -39,6 +47,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly sso: SsoService,
     private readonly users: UsersService,
+    private readonly audit: AuditService,
   ) {}
 
   @Public()
@@ -46,11 +55,45 @@ export class AuthController {
   @ApiOperation({ summary: 'Local email/password login' })
   async login(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.auth.login(dto.email, dto.password);
-    res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
-    return { user: result.user, token: result.token };
+    const ip = clientIp(req);
+    const userAgent = (req.headers['user-agent'] as string) ?? null;
+    try {
+      const result = await this.auth.login(dto.email, dto.password);
+      res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
+      void this.audit.record({
+        actorId: result.user.id,
+        actorEmail: result.user.email,
+        actorType: 'session',
+        actorIsAdmin: result.user.is_admin,
+        action: 'Log in',
+        method: 'POST',
+        path: '/api/auth/login',
+        resourceType: 'auth',
+        statusCode: 200,
+        outcome: 'success',
+        ip,
+        userAgent,
+      });
+      return { user: result.user, token: result.token };
+    } catch (err) {
+      void this.audit.record({
+        actorEmail: dto.email,
+        actorType: 'session',
+        action: 'Failed login',
+        method: 'POST',
+        path: '/api/auth/login',
+        resourceType: 'auth',
+        statusCode: (err as { status?: number } | null)?.status ?? 401,
+        outcome: 'failure',
+        ip,
+        userAgent,
+        details: { email: dto.email },
+      });
+      throw err;
+    }
   }
 
   @Post('logout')

@@ -335,6 +335,43 @@ export type NotificationChannel = Selectable<NotificationChannelsTable>;
 export type NewNotificationChannel = Insertable<NotificationChannelsTable>;
 export type NotificationChannelUpdate = Updateable<NotificationChannelsTable>;
 
+// --- audit_log --------------------------------------------------------------
+
+export type AuditOutcome = 'success' | 'failure';
+
+/** Redacted, structured drill-down info shown when an audit row is opened. */
+export interface AuditDetails {
+  body?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  error?: string;
+  [k: string]: unknown;
+}
+
+export interface AuditLogTable {
+  id: Generated<string>;
+  created_at: CreatedAt;
+  /** User id of the actor; null when unknown (e.g. failed login). */
+  actor_id: string | null;
+  actor_email: string | null;
+  /** 'session' | 'apikey' | 'system'. */
+  actor_type: string;
+  actor_is_admin: ColumnType<boolean, boolean | undefined, boolean>;
+  /** Human-readable summary, e.g. "Run job", "Delete target". */
+  action: string;
+  method: string | null;
+  path: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  status_code: number | null;
+  outcome: ColumnType<AuditOutcome, AuditOutcome | undefined, AuditOutcome>;
+  ip: string | null;
+  user_agent: string | null;
+  details: JSONColumnType<AuditDetails | null, string | null, string | null>;
+}
+export type AuditLog = Selectable<AuditLogTable>;
+export type NewAuditLog = Insertable<AuditLogTable>;
+
 // --- Root DB interface ------------------------------------------------------
 
 export interface Database {
@@ -350,4 +387,5 @@ export interface Database {
   job_runs: JobRunsTable;
   restore_runs: RestoreRunsTable;
   notification_channels: NotificationChannelsTable;
+  audit_log: AuditLogTable;
 }

@@ -11,6 +11,7 @@ import { renderRestore } from './pages/restore';
 import { renderUsers } from './pages/users';
 import { renderNotifications } from './pages/notifications';
 import { renderAdmin } from './pages/admin';
+import { renderAuditLog } from './pages/audit';
 import { renderSettings } from './pages/settings';
 
 async function boot(): Promise<void> {
@@ -32,6 +33,7 @@ async function boot(): Promise<void> {
     { path: '/users', render: renderUsers },
     { path: '/notifications', render: renderNotifications },
     { path: '/admin', render: renderAdmin },
+    { path: '/audit', render: renderAuditLog },
     { path: '/settings', render: renderSettings },
   ]);
 
