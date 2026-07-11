@@ -19,6 +19,8 @@ export interface AppConfig {
   resticBinary: string;
   resticCacheDir: string;
   restoreTmpDir: string;
+  /** Directory holding the compiled agent binaries served to hosts. */
+  agentBinaryDir: string;
   agentOfflineTimeoutSeconds: number;
   bootstrapAdminEmail: string;
   bootstrapAdminPassword: string;
@@ -66,6 +68,8 @@ export function loadConfig(): AppConfig {
     resticBinary: env.RESTIC_BINARY ?? 'restic',
     resticCacheDir: env.RESTIC_CACHE_DIR ?? './.cache/restic',
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
+    // Bundled into the Docker image at /app/agent-bin; overridable in dev.
+    agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
     agentOfflineTimeoutSeconds: int(env.AGENT_OFFLINE_TIMEOUT_SECONDS, 120),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
     bootstrapAdminPassword: env.BOOTSTRAP_ADMIN_PASSWORD ?? '',

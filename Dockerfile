@@ -21,7 +21,19 @@ COPY server ./server
 RUN npm run build --workspace @amber/server \
   && npm prune --omit=dev --workspace @amber/server
 
-# --- Stage 3: runtime ---
+# --- Stage 3: build agent binaries (both arches, served to hosts) ---
+# Cross-compiles on the build host's native arch so a single image can serve
+# every agent architecture, independent of the image's own platform.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS agent-build
+WORKDIR /agent
+COPY agent/go.mod ./
+COPY agent/*.go ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      go build -ldflags="-s -w" -o /out/amber-agent-linux-amd64 . \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+      go build -ldflags="-s -w" -o /out/amber-agent-linux-arm64 .
+
+# --- Stage 4: runtime ---
 FROM node:22-alpine AS runtime
 # Pinned restic version bundled in the image.
 ARG RESTIC_VERSION=0.17.3
@@ -46,6 +58,8 @@ COPY --from=server-build /build/server/dist ./dist
 COPY --from=server-build /build/server/package.json ./package.json
 # Client assets served by the server
 COPY --from=client-build /build/client/dist ./client
+# Precompiled agent binaries served via GET /api/agents/binary/linux-<arch>
+COPY --from=agent-build /out/ ./agent-bin/
 
 VOLUME ["/data"]
 EXPOSE 3000

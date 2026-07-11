@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -32,6 +33,13 @@ export class AgentsController {
   @ApiOperation({ summary: 'Agent install script (referenced by enroll cmd)' })
   installScript(): string {
     return this.agents.installScript();
+  }
+
+  @Public()
+  @Get('binary/:target')
+  @ApiOperation({ summary: 'Download the compiled agent binary (linux-amd64/arm64)' })
+  binary(@Param('target') target: string): StreamableFile {
+    return this.agents.binary(target);
   }
 
   @RequireAdmin()

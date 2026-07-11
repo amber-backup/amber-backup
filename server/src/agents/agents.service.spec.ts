@@ -1,5 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, StreamableFile } from '@nestjs/common';
 import { createPublicKey } from 'crypto';
+import { mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import * as path from 'path';
 import { chain, createDbMock, TEST_MASTER_KEY } from '../testing/db-mock';
 
 process.env.MASTER_ENCRYPTION_KEY = TEST_MASTER_KEY;
@@ -35,6 +38,37 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       expect(stored.token_hash).toMatch(/^[0-9a-f]{64}$/);
       // The plaintext token is embedded in the install command shown to the admin.
       expect(result.installCommand).toContain(result.token);
+    });
+  });
+
+  describe('binary', () => {
+    it('streams a bundled binary for a supported target', () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'agent-bin-'));
+      writeFileSync(path.join(dir, 'amber-agent-linux-amd64'), 'ELF');
+      process.env.AGENT_BINARY_DIR = dir;
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      expect(service.binary('linux-amd64')).toBeInstanceOf(StreamableFile);
+    });
+
+    it('rejects an unsupported target (no path traversal)', () => {
+      process.env.AGENT_BINARY_DIR = tmpdir();
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      expect(() => service.binary('linux-amd64/../../etc/passwd')).toThrow(
+        NotFoundException,
+      );
+      expect(() => service.binary('windows-amd64')).toThrow(NotFoundException);
+    });
+
+    it('404s when the binary is not bundled on this server', () => {
+      process.env.AGENT_BINARY_DIR = mkdtempSync(path.join(tmpdir(), 'empty-'));
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      expect(() => service.binary('linux-arm64')).toThrow(NotFoundException);
     });
   });
 

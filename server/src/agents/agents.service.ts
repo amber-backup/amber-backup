@@ -4,8 +4,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'crypto';
+import { createReadStream, existsSync } from 'fs';
+import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
 import { Db, KYSELY } from '../database/database.module';
 import { CryptoService } from '../crypto/crypto.service';
@@ -106,7 +109,12 @@ case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 
 echo "Installing Amber agent to $INSTALL_DIR (arch=$ARCH)"
 mkdir -p "$INSTALL_DIR"
-curl -sSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/amber-agent"
+# -f makes curl fail (non-zero) on HTTP errors instead of writing the error body
+# into the binary — otherwise systemd would exec a text file (status 203/EXEC).
+if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/amber-agent"; then
+  echo "Failed to download agent binary for linux-$ARCH from $AMBER_URL" >&2
+  exit 1
+fi
 chmod +x "$INSTALL_DIR/amber-agent"
 
 cat > /etc/systemd/system/amber-agent.service <<EOF
@@ -117,6 +125,7 @@ After=network-online.target
 [Service]
 Environment=AMBER_URL=$AMBER_URL
 Environment=AMBER_TOKEN=$AMBER_TOKEN
+Environment=INSTALL_DIR=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/amber-agent
 Restart=always
 RestartSec=10
@@ -129,6 +138,25 @@ systemctl daemon-reload
 systemctl enable --now amber-agent
 echo "Amber agent installed and started."
 `;
+  }
+
+  /** Streams the compiled agent binary for the given os-arch target. */
+  binary(target: string): StreamableFile {
+    const allowed = ['linux-amd64', 'linux-arm64'];
+    if (!allowed.includes(target)) {
+      throw new NotFoundException(`Unsupported agent target: ${target}`);
+    }
+    const dir = path.resolve(loadConfig().agentBinaryDir);
+    const file = path.join(dir, `amber-agent-${target}`);
+    if (!existsSync(file)) {
+      throw new NotFoundException(
+        `Agent binary for ${target} is not available on this server`,
+      );
+    }
+    return new StreamableFile(createReadStream(file), {
+      type: 'application/octet-stream',
+      disposition: 'attachment; filename="amber-agent"',
+    });
   }
 
   async list(): Promise<PublicAgent[]> {
