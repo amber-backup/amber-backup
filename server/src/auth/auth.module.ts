@@ -10,6 +10,7 @@ import { UsersService } from './users.service';
 import { ApiKeysController } from './api-keys.controller';
 import { ApiKeysService } from './api-keys.service';
 import { SsoService } from './sso.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { SsoService } from './sso.service';
       global: true,
       secret: loadConfig().jwtSecret,
     }),
+    SettingsModule,
   ],
   controllers: [AuthController, UsersController, ApiKeysController],
   providers: [

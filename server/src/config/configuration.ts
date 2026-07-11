@@ -21,21 +21,8 @@ export interface AppConfig {
   restoreTmpDir: string;
   /** Directory holding the compiled agent binaries served to hosts. */
   agentBinaryDir: string;
-  agentOfflineTimeoutSeconds: number;
   bootstrapAdminEmail: string;
   bootstrapAdminPassword: string;
-  oidc: {
-    enabled: boolean;
-    issuerUrl: string;
-    clientId: string;
-    clientSecret: string;
-  };
-  entra: {
-    enabled: boolean;
-    tenantId: string;
-    clientId: string;
-    clientSecret: string;
-  };
 }
 
 function bool(value: string | undefined, fallback = false): boolean {
@@ -70,21 +57,8 @@ export function loadConfig(): AppConfig {
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
     // Bundled into the Docker image at /app/agent-bin; overridable in dev.
     agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
-    agentOfflineTimeoutSeconds: int(env.AGENT_OFFLINE_TIMEOUT_SECONDS, 120),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
     bootstrapAdminPassword: env.BOOTSTRAP_ADMIN_PASSWORD ?? '',
-    oidc: {
-      enabled: bool(env.OIDC_ENABLED),
-      issuerUrl: env.OIDC_ISSUER_URL ?? '',
-      clientId: env.OIDC_CLIENT_ID ?? '',
-      clientSecret: env.OIDC_CLIENT_SECRET ?? '',
-    },
-    entra: {
-      enabled: bool(env.ENTRA_ENABLED),
-      tenantId: env.ENTRA_TENANT_ID ?? '',
-      clientId: env.ENTRA_CLIENT_ID ?? '',
-      clientSecret: env.ENTRA_CLIENT_SECRET ?? '',
-    },
   };
 }
 

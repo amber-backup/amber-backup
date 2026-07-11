@@ -24,6 +24,7 @@ import {
   RestoreDestination,
 } from '../database/database.types';
 import { RequestAgent } from '../common/auth/request-user';
+import { SETTINGS_KEYS } from '../settings/settings.service';
 import {
   CreateEnrollmentTokenDto,
   EnrollDto,
@@ -708,7 +709,7 @@ echo "Amber agent installed and started."
 
   @Interval(30_000)
   async sweepOffline(): Promise<void> {
-    const timeout = loadConfig().agentOfflineTimeoutSeconds * 1000;
+    const timeout = (await this.offlineTimeoutSeconds()) * 1000;
     const cutoff = new Date(Date.now() - timeout);
     await this.db
       .updateTable('agents')
@@ -717,5 +718,18 @@ echo "Amber agent installed and started."
       .where('last_seen_at', '<', cutoff)
       .execute()
       .catch((e) => this.logger.warn(`Offline sweep failed: ${e}`));
+  }
+
+  /** Admin-configurable offline threshold (app_settings), default 120s. */
+  private async offlineTimeoutSeconds(): Promise<number> {
+    const row = await this.db
+      .selectFrom('app_settings')
+      .select('value')
+      .where('key', '=', SETTINGS_KEYS.agentOfflineTimeout)
+      .executeTakeFirst();
+    if (!row || row.value == null) return 120;
+    const v =
+      typeof row.value === 'string' ? JSON.parse(row.value) : (row.value as { seconds?: number });
+    return typeof v.seconds === 'number' ? v.seconds : 120;
   }
 }

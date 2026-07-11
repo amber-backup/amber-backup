@@ -11,6 +11,7 @@ import { RunsModule } from './runs/runs.module';
 import { RestoreModule } from './restore/restore.module';
 import { AgentsModule } from './agents/agents.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SettingsModule } from './settings/settings.module';
 import { StaticModule } from './static.module';
 
 @Module({
@@ -27,6 +28,7 @@ import { StaticModule } from './static.module';
     RestoreModule,
     AgentsModule,
     NotificationsModule,
+    SettingsModule,
     StaticModule,
   ],
 })

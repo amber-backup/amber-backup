@@ -101,9 +101,13 @@ docker build -t amber-agent ./agent            # image
 
 ## Configuration
 
-All configuration is via environment variables — see `server/.env.example` for
-the full list (database, encryption key, JWT, restic paths, agent offline
-timeout, bootstrap admin, OIDC/Entra SSO).
+Core configuration is via environment variables — see `server/.env.example` for
+the full list (database, encryption key, JWT, restic paths, bootstrap admin).
+
+Runtime settings that admins can change without a restart live in the **Admin**
+section of the UI and are stored in the database: the agent offline timeout and
+the OIDC / Microsoft Entra SSO configuration (client secrets are encrypted at
+rest).
 
 ## License
 

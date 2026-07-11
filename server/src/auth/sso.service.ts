@@ -10,6 +10,7 @@ import { loadConfig } from '../config/configuration';
 import { AuthSource } from '../database/database.types';
 import { AuthService } from './auth.service';
 import { UsersService } from './users.service';
+import { SettingsService } from '../settings/settings.service';
 
 interface OidcDiscovery {
   authorization_endpoint: string;
@@ -39,33 +40,33 @@ export class SsoService {
     private readonly users: UsersService,
     private readonly auth: AuthService,
     private readonly jwt: JwtService,
+    private readonly settingsService: SettingsService,
   ) {}
 
-  listProviders(): { id: string; label: string }[] {
-    const config = loadConfig();
+  async listProviders(): Promise<{ id: string; label: string }[]> {
+    const sso = await this.settingsService.getResolvedSso();
     const providers: { id: string; label: string }[] = [];
-    if (config.oidc.enabled) providers.push({ id: 'oidc', label: 'SSO' });
-    if (config.entra.enabled)
-      providers.push({ id: 'entra', label: 'Microsoft' });
+    if (sso.oidc.enabled) providers.push({ id: 'oidc', label: 'SSO' });
+    if (sso.entra.enabled) providers.push({ id: 'entra', label: 'Microsoft' });
     return providers;
   }
 
-  private settings(provider: string): ProviderSettings {
-    const config = loadConfig();
-    if (provider === 'oidc' && config.oidc.enabled) {
+  private async settings(provider: string): Promise<ProviderSettings> {
+    const sso = await this.settingsService.getResolvedSso();
+    if (provider === 'oidc' && sso.oidc.enabled) {
       return {
         source: 'oidc',
-        issuer: config.oidc.issuerUrl,
-        clientId: config.oidc.clientId,
-        clientSecret: config.oidc.clientSecret,
+        issuer: sso.oidc.issuerUrl,
+        clientId: sso.oidc.clientId,
+        clientSecret: sso.oidc.clientSecret,
       };
     }
-    if (provider === 'entra' && config.entra.enabled) {
+    if (provider === 'entra' && sso.entra.enabled) {
       return {
         source: 'entra',
-        issuer: `https://login.microsoftonline.com/${config.entra.tenantId}/v2.0`,
-        clientId: config.entra.clientId,
-        clientSecret: config.entra.clientSecret,
+        issuer: `https://login.microsoftonline.com/${sso.entra.tenantId}/v2.0`,
+        clientId: sso.entra.clientId,
+        clientSecret: sso.entra.clientSecret,
       };
     }
     throw new BadRequestException(`SSO provider '${provider}' not enabled`);
@@ -90,7 +91,7 @@ export class SsoService {
   async startLogin(
     provider: string,
   ): Promise<{ authUrl: string; stateCookie: string }> {
-    const settings = this.settings(provider);
+    const settings = await this.settings(provider);
     const disco = await this.discover(settings.issuer);
 
     const verifier = randomBytes(32).toString('base64url');
@@ -138,7 +139,7 @@ export class SsoService {
       throw new UnauthorizedException('SSO state mismatch');
     }
 
-    const settings = this.settings(parsed.provider);
+    const settings = await this.settings(parsed.provider);
     const disco = await this.discover(settings.issuer);
 
     const tokenRes = await fetch(disco.token_endpoint, {
