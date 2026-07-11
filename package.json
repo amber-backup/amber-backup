@@ -14,10 +14,15 @@
     "dev:client": "npm run dev --workspace client",
     "build": "npm run build --workspace server && npm run build --workspace client",
     "migrate": "npm run migrate --workspace server",
-    "lint": "npm run lint --workspace server"
+    "lint": "npm run lint --workspace server",
+    "release": "semantic-release --no-ci",
+    "release:dry": "semantic-release --no-ci --dry-run"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "concurrently": "^9.1.0",
+    "semantic-release": "^25.0.6"
   },
   "engines": {
     "node": ">=22"
