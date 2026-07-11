@@ -72,6 +72,7 @@ input, select, textarea { font-family: inherit; }
 .nav-item .badge-count { margin-left: auto; font-size: 11px; font-weight: 500; background: var(--bg-3); color: var(--text-2); padding: 1px 7px; border-radius: 10px; }
 .nav-item .badge-count.warn { background: var(--amber-glow); color: var(--amber-light); }
 .sidebar-footer { margin-top: auto; }
+.app-version { text-align: center; font-size: 11px; font-family: var(--font-mono); color: var(--text-3); padding: 10px 0 4px; }
 .user-switch { display: flex; align-items: center; gap: 10px; padding: 10px 11px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; }
 .user-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; box-shadow: 0 0 8px var(--success); }
 .user-meta { flex: 1; min-width: 0; }

@@ -85,6 +85,7 @@ export function renderShell(): HTMLElement {
           icon('logout'),
         ),
       ),
+      h('div', { class: 'app-version' }, `v${__APP_VERSION__}`),
     ),
   );
 
