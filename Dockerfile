@@ -25,9 +25,11 @@ RUN npm run build --workspace @amber/server \
 FROM node:22-alpine AS runtime
 # Pinned restic version bundled in the image.
 ARG RESTIC_VERSION=0.17.3
+# Populated by buildx (amd64 / arm64) so the bundled restic matches the target.
+ARG TARGETARCH
 RUN apk add --no-cache bzip2 ca-certificates tar \
   && wget -qO /tmp/restic.bz2 \
-     "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+     "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
   && bunzip2 /tmp/restic.bz2 \
   && mv /tmp/restic /usr/local/bin/restic \
   && chmod +x /usr/local/bin/restic
