@@ -1,3 +1,14 @@
+# [1.5.0](https://github.com/amber-backup/amber-backup/compare/v1.4.0...v1.5.0) (2026-07-11)
+
+
+### Features
+
+* **admin:** add runtime settings management for agents and SSO ([cc3e685](https://github.com/amber-backup/amber-backup/commit/cc3e685a1f984ddce136146612711a2d2cc6890a))
+* **admin:** add system-wide settings page and password change ([fcf360d](https://github.com/amber-backup/amber-backup/commit/fcf360d66110e1ef56e236375b75c0b62c1680a5))
+* **audit:** add comprehensive audit logging system ([f9e528a](https://github.com/amber-backup/amber-backup/commit/f9e528a68e8cdb39c78991362ca08d89b47e42d9))
+* **audit:** add retention policy and automated purging ([b2d1ead](https://github.com/amber-backup/amber-backup/commit/b2d1eadab89783f8a7368222627dc7d1f32fcb73))
+* **ui:** display app version in footer and inject at build ([5ed1e89](https://github.com/amber-backup/amber-backup/commit/5ed1e89195597aaabc1ba4ba6fa82d2e8553a910))
+
 # [1.4.0](https://github.com/amber-backup/amber-backup/compare/v1.3.0...v1.4.0) (2026-07-11)
 
 
