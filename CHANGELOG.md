@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/amber-backup/amber-backup/compare/v1.2.0...v1.3.0) (2026-07-11)
+
+
+### Features
+
+* **agent:** enable self-updating agent capability ([8d78852](https://github.com/amber-backup/amber-backup/commit/8d788523c47ca91f8aa42d0c71aea0a8949c6985))
+
 # [1.2.0](https://github.com/amber-backup/amber-backup/compare/v1.1.0...v1.2.0) (2026-07-11)
 
 
