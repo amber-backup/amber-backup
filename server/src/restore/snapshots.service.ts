@@ -23,11 +23,27 @@ export class SnapshotsService {
   ) {
     await this.acl.assert(user, 'target', targetId, 'view');
     const ctx = await this.targets.resolve(targetId);
-    return this.restic.snapshots(ctx, {
+    const snaps = await this.restic.snapshots(ctx, {
       host: filters.host,
       tags: filters.tags,
       paths: filters.path ? [filters.path] : undefined,
     });
+    // Newest first (restic returns them oldest-first). `time` is ISO-8601, so
+    // a lexicographic compare is chronological.
+    snaps.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+    return snaps;
+  }
+
+  /** Permanently deletes a snapshot (requires 'manage' — this destroys data). */
+  async remove(
+    user: RequestUser,
+    targetId: string,
+    snapshotId: string,
+    prune = false,
+  ) {
+    await this.acl.assert(user, 'target', targetId, 'manage');
+    const ctx = await this.targets.resolve(targetId);
+    return this.restic.forgetSnapshots(ctx, [snapshotId], prune);
   }
 
   async ls(

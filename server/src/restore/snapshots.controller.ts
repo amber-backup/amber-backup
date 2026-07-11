@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
@@ -34,5 +34,16 @@ export class SnapshotsController {
     @Query('path') path?: string,
   ) {
     return this.snapshots.ls(user, targetId, snapshotId, path);
+  }
+
+  @Delete(':snap')
+  @ApiOperation({ summary: 'Delete (forget) a snapshot; optionally prune' })
+  remove(
+    @CurrentUser() user: RequestUser,
+    @Param('id') targetId: string,
+    @Param('snap') snapshotId: string,
+    @Query('prune') prune?: string,
+  ) {
+    return this.snapshots.remove(user, targetId, snapshotId, prune === 'true');
   }
 }

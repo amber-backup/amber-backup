@@ -25,11 +25,12 @@ export async function renderRestore(): Promise<Node> {
     snapPanel.replaceChildren(h('div', { class: 'loading' }, h('span', { class: 'spinner' }), 'Loading snapshots…'));
     try {
       const snaps = await api.get<Snapshot[]>(`/targets/${targetId}/snapshots`);
+      const reload = () => void loadSnapshots(targetId);
       snapPanel.replaceChildren(
         h('div', { class: 'panel-head' }, h('h2', {}, `Snapshots (${snaps.length})`)),
         ...(snaps.length === 0
           ? [h('div', { class: 'empty' }, 'No snapshots in this repository.')]
-          : snaps.map((s) => snapshotRow(targetId, s))),
+          : snaps.map((s) => snapshotRow(targetId, s, reload))),
       );
     } catch (err) {
       snapPanel.replaceChildren(h('div', { class: 'empty' }, err instanceof Error ? err.message : 'Failed to load'));
@@ -51,7 +52,7 @@ export async function renderRestore(): Promise<Node> {
   );
 }
 
-function snapshotRow(targetId: string, s: Snapshot): HTMLElement {
+function snapshotRow(targetId: string, s: Snapshot, reload: () => void): HTMLElement {
   return h(
     'div',
     { class: 'row' },
@@ -63,9 +64,35 @@ function snapshotRow(targetId: string, s: Snapshot): HTMLElement {
       h('div', { class: 'row-sub' }, `${s.short_id ?? s.id.slice(0, 8)} · ${fmtDateTime(s.time)}`),
     ),
     s.tags && s.tags.length ? h('div', { class: 'tags' }, ...s.tags.map((t) => h('span', { class: 'tag' }, t))) : (null as never),
-    h('button', { class: 'btn btn-ghost btn-sm', onclick: () => openBrowser(targetId, s) }, icon('folder'), 'Browse'),
-    h('button', { class: 'btn btn-primary btn-sm', onclick: () => openRestoreDialog(targetId, s, []) }, icon('restore'), 'Restore'),
+    h('button', { class: 'btn btn-ghost btn-sm', title: 'Browse', onclick: () => openBrowser(targetId, s) }, icon('folder'), 'Browse'),
+    h('button', { class: 'btn btn-primary btn-sm', title: 'Restore', onclick: () => openRestoreDialog(targetId, s, []) }, icon('restore'), 'Restore'),
+    h('button', { class: 'btn btn-ghost btn-sm', title: 'Delete snapshot', onclick: () => openDeleteSnapshot(targetId, s, reload) }, icon('trash')),
   );
+}
+
+function openDeleteSnapshot(targetId: string, s: Snapshot, reload: () => void): void {
+  const pruneCb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+  const shortId = s.short_id ?? s.id.slice(0, 8);
+  openModal({
+    title: 'Delete snapshot',
+    body: h(
+      'div',
+      { style: 'display:flex;flex-direction:column;gap:14px' },
+      h('div', { class: 'warn-box' }, `Snapshot ${shortId} (${fmtDateTime(s.time)}) will be permanently removed. This cannot be undone.`),
+      h('label', { class: 'checkbox' }, pruneCb, 'Also prune now — reclaim storage immediately (slower, locks the repository)'),
+    ),
+    confirmLabel: 'Delete',
+    onConfirm: async () => {
+      try {
+        await api.del(`/targets/${targetId}/snapshots/${s.id}?prune=${pruneCb.checked}`);
+        toast(pruneCb.checked ? 'Snapshot deleted and pruned' : 'Snapshot deleted', 'success');
+        reload();
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Delete failed', 'error');
+        return false;
+      }
+    },
+  });
 }
 
 function openBrowser(targetId: string, snap: Snapshot): void {

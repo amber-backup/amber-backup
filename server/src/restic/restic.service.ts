@@ -303,6 +303,35 @@ export class ResticService {
     return { removed, raw };
   }
 
+  /**
+   * Deletes specific snapshots by id (`restic forget <id...>`). With `prune`,
+   * the freed data is repacked and removed from the backend immediately;
+   * otherwise storage is only reclaimed by a later prune.
+   */
+  async forgetSnapshots(
+    ctx: ResticContext,
+    snapshotIds: string[],
+    prune = false,
+    hooks: { onLog?: LogCallback } = {},
+  ): Promise<ForgetResult> {
+    if (snapshotIds.length === 0) return { removed: 0, raw: [] };
+    const args = ['forget', '--json', ...snapshotIds];
+    if (prune) args.push('--prune');
+    const res = await this.run(ctx, args, {
+      onStderrLine: (line) => hooks.onLog?.(line),
+    });
+    if (res.code !== 0) {
+      throw new Error(res.stderr.trim() || 'restic forget failed');
+    }
+    let raw: unknown = [];
+    try {
+      raw = JSON.parse(res.stdout || '[]');
+    } catch {
+      /* ignore non-JSON output */
+    }
+    return { removed: snapshotIds.length, raw };
+  }
+
   async restore(
     ctx: ResticContext,
     snapshotId: string,
