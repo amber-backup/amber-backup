@@ -1,3 +1,18 @@
+# [1.6.0](https://github.com/amber-backup/amber-backup/compare/v1.5.1...v1.6.0) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ui:** add margin-bottom to panels for spacing ([1aceb0f](https://github.com/amber-backup/amber-backup/commit/1aceb0f9cc18d486b03a50cd39d213f6c5cb8ab8))
+* **ui:** remove redundant margin-bottom from panels ([3cf0ee7](https://github.com/amber-backup/amber-backup/commit/3cf0ee7d861582bf75c4db423d786842b3bb9daa))
+
+
+### Features
+
+* **auth:** support multi-provider SSO with expanded types ([deaed13](https://github.com/amber-backup/amber-backup/commit/deaed133253f2f68914e27a1e3047f1caa338b86))
+* **ui:** add standalone input and select components ([a253078](https://github.com/amber-backup/amber-backup/commit/a2530788d85b1fbbc367f23ecbf3b84161fe2d62))
+* **ui:** implement infinite scroll for recent runs panel ([777a6c7](https://github.com/amber-backup/amber-backup/commit/777a6c7fd5fb94872bbec582e5c98bb5e5ea11bb))
+
 ## [1.5.1](https://github.com/amber-backup/amber-backup/compare/v1.5.0...v1.5.1) (2026-07-11)
 
 
