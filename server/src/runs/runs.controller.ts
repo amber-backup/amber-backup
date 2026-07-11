@@ -14,11 +14,13 @@ export class RunsController {
   list(
     @CurrentUser() user: RequestUser,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
     @Query('jobId') jobId?: string,
     @Query('status') status?: string,
   ) {
     return this.runs.list(user, {
       limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
       jobId,
       status,
     });

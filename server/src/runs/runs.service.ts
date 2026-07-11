@@ -36,12 +36,20 @@ export class RunsService {
 
   async list(
     user: RequestUser,
-    opts: { limit?: number; jobId?: string; status?: string } = {},
+    opts: {
+      limit?: number;
+      offset?: number;
+      jobId?: string;
+      status?: string;
+    } = {},
   ) {
     const ids = await this.acl.visibleResourceIds(user, 'job');
     let q = this.baseQuery()
+      // `id` as a tiebreaker keeps pagination stable across equal timestamps.
       .orderBy('job_runs.created_at', 'desc')
+      .orderBy('job_runs.id', 'desc')
       .limit(Math.min(opts.limit ?? 50, 200));
+    if (opts.offset && opts.offset > 0) q = q.offset(opts.offset);
     if (ids !== 'all') {
       if (ids.length === 0) return [];
       q = q.where('backup_jobs.id', 'in', ids);

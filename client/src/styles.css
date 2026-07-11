@@ -122,6 +122,18 @@ input, select, textarea { font-family: inherit; }
 .section-gap { margin-top: 20px; }
 .side-stack { display: flex; flex-direction: column; gap: 20px; }
 
+/* Overview: fill the viewport so the two cards reach the bottom without the
+   whole page scrolling; each card scrolls internally when it overflows. */
+.dashboard { display: flex; flex-direction: column; height: calc(100vh - 86px); }
+.dashboard > .topbar, .dashboard > .stats { flex-shrink: 0; }
+.dashboard > .content-grid { flex: 1; min-height: 0; }
+.dashboard .panel { margin-bottom: 0; }
+.content-grid.dashboard-grid > * { min-height: 0; }
+.panel.fill-col { display: flex; flex-direction: column; height: 100%; }
+.side-stack.fill-col { height: 100%; }
+.side-stack.fill-col > .panel { flex: 1; min-height: 0; }
+.panel-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
 /* ---------- Rows / list ---------- */
 .row { display: flex; align-items: center; gap: 14px; padding: 13px 20px; border-bottom: 1px solid var(--border); }
 .row:last-child { border-bottom: none; }
@@ -255,7 +267,15 @@ input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text-3); }
 
-@media (max-width: 1140px) { .content-grid { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 1140px) {
+  .content-grid { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  /* Below the two-column breakpoint the cards stack; let the page scroll but
+     keep each card's list bounded so infinite scroll still works. */
+  .dashboard { height: auto; }
+  .panel.fill-col, .side-stack.fill-col, .side-stack.fill-col > .panel { height: auto; }
+  .panel.fill-col .panel-scroll { max-height: 60vh; }
+}
 
 /* ---------- Mobile: off-canvas sidebar drawer ---------- */
 @media (max-width: 860px) {
