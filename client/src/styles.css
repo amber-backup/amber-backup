@@ -114,7 +114,7 @@ input, select, textarea { font-family: inherit; }
 
 /* ---------- Panels ---------- */
 .content-grid { display: grid; grid-template-columns: 4.55fr 1fr; gap: 20px; }
-.panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 13px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .panel-head h2 { font-size: 15px; font-weight: 600; }
 .panel-head a, .panel-head .link { font-size: 13px; color: var(--amber); font-weight: 500; cursor: pointer; }
