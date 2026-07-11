@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/amber-backup/amber-backup/compare/v1.5.0...v1.5.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ui:** correct sidebar padding to remove extra bottom gap ([de36963](https://github.com/amber-backup/amber-backup/commit/de36963d015067fbdf1fe73755eed25e04d0f64c))
+
 # [1.5.0](https://github.com/amber-backup/amber-backup/compare/v1.4.0...v1.5.0) (2026-07-11)
 
 
