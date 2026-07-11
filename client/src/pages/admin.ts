@@ -169,7 +169,7 @@ export async function renderAdmin(): Promise<Node> {
     const enabledToggle = h('input', { type: 'checkbox', checked: sys.sso.enabled }) as HTMLInputElement;
 
     // Redirect URI hint.
-    const redirectBox = h('div', { class: 'mono', style: MONO_STYLE }, sys.ssoRedirectUri);
+    const redirectBox = h('div', { class: 'mono', style: `${MONO_STYLE};flex:1;min-width:0` }, sys.ssoRedirectUri);
     const copyRedirect = h('button', { class: 'btn btn-ghost btn-sm', title: 'Copy redirect URI' }, icon('copy'));
     copyRedirect.addEventListener('click', async () => {
       const ok = await copyToClipboard(sys.ssoRedirectUri);
@@ -294,9 +294,11 @@ export async function renderAdmin(): Promise<Node> {
         h('div', { class: 'row-main', style: 'min-width:0' },
           h('div', { class: 'row-title' }, 'Redirect URI'),
           h('div', { class: 'row-sub' }, 'Register this callback URL with every provider.'),
-          redirectBox,
+          h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:6px' },
+            redirectBox,
+            copyRedirect,
+          ),
         ),
-        h('div', { class: 'row-actions' }, copyRedirect),
       ),
       h('div', { style: SUBHEAD_STYLE }, 'Providers'),
       listEl,
