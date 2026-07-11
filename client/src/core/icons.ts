@@ -31,6 +31,7 @@ export const ICONS: Record<string, string> = {
   chart: I('<path d="M4 20V10M12 20V4M20 20v-6"/>'),
   key: I('<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>', 16),
   bell: I('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
+  shield: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>'),
   menu: I('<path d="M3 12h18M3 6h18M3 18h18"/>'),
   send: I('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>', 16),
 };

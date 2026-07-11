@@ -98,4 +98,42 @@ describe('UsersService (password hashing with Argon2)', () => {
       expect(stored.disabled).toBe(true); // SSO users start disabled
     });
   });
+
+  describe('changePassword', () => {
+    it('rejects a wrong current password', async () => {
+      const row = makeUser({ id: 'u1', password_hash: await argon2.hash('right') });
+      const { db } = createDbMock({ selectFrom: chain({ executeTakeFirst: row }) });
+      const service = new UsersService(db);
+
+      await expect(
+        service.changePassword('u1', 'wrong', 'newlongpassword'),
+      ).rejects.toMatchObject({ status: 401 });
+    });
+
+    it('refuses to change an SSO account password', async () => {
+      const row = makeUser({ id: 'u1', auth_source: 'oidc' });
+      const { db } = createDbMock({ selectFrom: chain({ executeTakeFirst: row }) });
+      const service = new UsersService(db);
+
+      await expect(
+        service.changePassword('u1', 'whatever', 'newlongpassword'),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('stores a new verifiable Argon2 hash on success', async () => {
+      const row = makeUser({ id: 'u1', password_hash: await argon2.hash('oldpw') });
+      const update = chain({ execute: [] });
+      const { db } = createDbMock({
+        selectFrom: chain({ executeTakeFirst: row }),
+        updateTable: update,
+      });
+      const service = new UsersService(db);
+
+      await service.changePassword('u1', 'oldpw', 'brandnewpw');
+
+      const patch = update.set.mock.calls[0][0] as { password_hash: string };
+      expect(patch.password_hash).toMatch(/^\$argon2/);
+      await expect(argon2.verify(patch.password_hash, 'brandnewpw')).resolves.toBe(true);
+    });
+  });
 });

@@ -18,6 +18,7 @@ const NAV: NavEntry[] = [
   { path: '/restore', label: 'Restore', iconName: 'restore' },
   { path: '/notifications', label: 'Notifications', iconName: 'bell', adminOnly: true },
   { path: '/users', label: 'Users', iconName: 'users', adminOnly: true },
+  { path: '/admin', label: 'Admin', iconName: 'shield', adminOnly: true },
   { path: '/settings', label: 'Settings', iconName: 'settings' },
 ];
 

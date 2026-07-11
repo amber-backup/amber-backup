@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { Db, KYSELY } from '../database/database.module';
@@ -183,5 +184,32 @@ export class UsersService implements OnModuleInit {
     } catch {
       return false;
     }
+  }
+
+  /** Lets a user change their own local password after confirming the current one. */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.db
+      .selectFrom('users')
+      .selectAll()
+      .where('id', '=', userId)
+      .executeTakeFirst();
+    if (!user) throw new NotFoundException('User not found');
+    if (user.auth_source !== 'local') {
+      throw new BadRequestException(
+        'Password is managed by your identity provider',
+      );
+    }
+    if (!(await this.verifyPassword(user, currentPassword))) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    await this.db
+      .updateTable('users')
+      .set({ password_hash: await argon2.hash(newPassword), updated_at: new Date() })
+      .where('id', '=', userId)
+      .execute();
   }
 }

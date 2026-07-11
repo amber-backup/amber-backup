@@ -18,7 +18,7 @@ import { SESSION_COOKIE } from '../common/guards/auth.guard';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';
 import { UsersService } from './users.service';
-import { LoginDto } from './dto/auth.dto';
+import { ChangePasswordDto, LoginDto } from './dto/auth.dto';
 
 const OIDC_STATE_COOKIE = 'amber_oidc';
 
@@ -64,6 +64,20 @@ export class AuthController {
   @ApiOperation({ summary: 'Current authenticated user' })
   async me(@CurrentUser() user: RequestUser) {
     return this.users.findById(user.id);
+  }
+
+  @Post('change-password')
+  @ApiOperation({ summary: 'Change the current user password' })
+  async changePassword(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    await this.users.changePassword(
+      user.id,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    return { ok: true };
   }
 
   @Public()

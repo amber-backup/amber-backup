@@ -5,14 +5,6 @@ import { api } from '../core/api';
 import { auth } from '../core/auth';
 import { openModal, toast, field, confirmDialog, fmtRelative, copyToClipboard } from '../core/ui';
 
-interface GlobalEnroll {
-  enabled: boolean;
-  token: string | null;
-}
-
-const MONO_STYLE =
-  'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;word-break:break-all;color:var(--amber-light)';
-
 interface ApiKey {
   id: string;
   name: string;
@@ -26,10 +18,14 @@ interface ApiKey {
 export async function renderSettings(): Promise<Node> {
   const keys = await api.get<ApiKey[]>('/api-keys');
 
+  const isLocal = auth.user?.auth_source === 'local';
   const profilePanel = h(
     'div',
     { class: 'panel' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Profile')),
+    h('div', { class: 'panel-head' },
+      h('h2', {}, 'Profile'),
+      isLocal ? h('span', { class: 'link', onclick: openChangePassword }, 'Change password') : (null as never),
+    ),
     h('div', { class: 'row' },
       h('div', { class: 'row-main' },
         h('div', { class: 'row-title' }, auth.user?.display_name ?? ''),
@@ -37,72 +33,6 @@ export async function renderSettings(): Promise<Node> {
       ),
     ),
   );
-
-  // Admin-only: global agent self-registration.
-  const enrollPanel = h('div', { class: 'panel section-gap' });
-  const renderEnroll = async (): Promise<void> => {
-    let g: GlobalEnroll;
-    try {
-      g = await api.get<GlobalEnroll>('/agents/enrollment/global');
-    } catch {
-      enrollPanel.replaceChildren();
-      return;
-    }
-    const toggle = h('input', { type: 'checkbox', checked: g.enabled }) as HTMLInputElement;
-    toggle.addEventListener('change', async () => {
-      try {
-        await api.patch('/agents/enrollment/global', { enabled: toggle.checked });
-        toast(toggle.checked ? 'Self-registration enabled' : 'Self-registration disabled', 'success');
-      } catch (err) {
-        toast(err instanceof Error ? err.message : 'Error', 'error');
-      }
-      void renderEnroll();
-    });
-
-    const children: Node[] = [
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Agent self-registration')),
-      h('div', { class: 'row' },
-        h('div', { class: 'row-main' },
-          h('div', { class: 'row-title' }, 'Global enrollment token'),
-          h('div', { class: 'row-sub' }, 'When enabled, agents register themselves with this shared token — they choose their own name and exchange the token for their own credential.'),
-        ),
-        h('label', { class: 'checkbox' }, toggle, 'Enabled'),
-      ),
-    ];
-
-    if (g.enabled && g.token) {
-      const token = g.token;
-      const tokenBox = h('div', { class: 'mono', style: MONO_STYLE }, token);
-      const copyBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Copy token' }, icon('copy'));
-      copyBtn.addEventListener('click', async () => {
-        const ok = await copyToClipboard(token);
-        toast(ok ? 'Token copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
-      });
-      const rotateBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Rotate token' }, icon('refresh'));
-      rotateBtn.addEventListener('click', () =>
-        confirmDialog(
-          'Rotate global token',
-          'The current token stops working for new rollouts. Agents already enrolled keep working.',
-          async () => {
-            await api.post('/agents/enrollment/global/rotate');
-            toast('Token rotated', 'success');
-            void renderEnroll();
-          },
-        ),
-      );
-      children.push(
-        h('div', { class: 'row' },
-          h('div', { class: 'row-main', style: 'min-width:0' },
-            h('div', { class: 'row-title' }, 'Token'),
-            tokenBox,
-          ),
-          h('div', { class: 'row-actions' }, copyBtn, rotateBtn),
-        ),
-      );
-    }
-    enrollPanel.replaceChildren(...children);
-  };
-  if (auth.isAdmin) void renderEnroll();
 
   const keysPanel = h('div', { class: 'panel section-gap' });
   const renderKeys = (list: ApiKey[]) => {
@@ -191,6 +121,42 @@ export async function renderSettings(): Promise<Node> {
     });
   }
 
+  function openChangePassword(): void {
+    const current = h('input', { type: 'password', placeholder: 'Current password' }) as HTMLInputElement;
+    const next = h('input', { type: 'password', placeholder: 'New password (min. 8 characters)' }) as HTMLInputElement;
+    const confirm = h('input', { type: 'password', placeholder: 'Repeat new password' }) as HTMLInputElement;
+
+    openModal({
+      title: 'Change password',
+      body: h('div', { style: 'display:flex;flex-direction:column;gap:16px' },
+        field('Current password', current),
+        field('New password', next),
+        field('Confirm new password', confirm),
+      ),
+      confirmLabel: 'Update password',
+      onConfirm: async () => {
+        if (next.value.length < 8) {
+          toast('New password must be at least 8 characters', 'error');
+          return false;
+        }
+        if (next.value !== confirm.value) {
+          toast('New passwords do not match', 'error');
+          return false;
+        }
+        try {
+          await api.post('/auth/change-password', {
+            currentPassword: current.value,
+            newPassword: next.value,
+          });
+          toast('Password changed', 'success');
+        } catch (err) {
+          toast(err instanceof Error ? err.message : 'Failed to change password', 'error');
+          return false;
+        }
+      },
+    });
+  }
+
   renderKeys(keys);
 
   return h('div', {},
@@ -198,7 +164,6 @@ export async function renderSettings(): Promise<Node> {
       actionButton('Sign out', 'logout', async () => { await auth.logout(); location.reload(); }, 'ghost'),
     ]),
     profilePanel,
-    auth.isAdmin ? enrollPanel : null,
     keysPanel,
   );
 }

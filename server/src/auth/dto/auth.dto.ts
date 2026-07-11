@@ -20,6 +20,18 @@ export class LoginDto {
   password!: string;
 }
 
+export class ChangePasswordDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  currentPassword!: string;
+
+  @ApiProperty({ minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+
 export class CreateUserDto {
   @ApiProperty()
   @IsEmail()
