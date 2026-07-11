@@ -209,8 +209,10 @@ input, select, textarea { font-family: inherit; }
 
 /* Dropdown menu (e.g. the SSO "Add provider" picker). */
 .dropdown { position: relative; display: inline-flex; }
+/* Positioned as fixed (coords set in JS) so it is not clipped by the panel's
+   overflow: hidden. */
 .dropdown-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 220px;
+  position: fixed; z-index: 60; min-width: 220px;
   flex-direction: column; gap: 2px; padding: 6px;
   background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);

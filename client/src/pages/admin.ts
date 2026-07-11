@@ -252,6 +252,7 @@ export async function renderAdmin(): Promise<Node> {
     const closeMenu = () => {
       menu.style.display = 'none';
       document.removeEventListener('click', onDocClick);
+      window.removeEventListener('scroll', closeMenu, true);
     };
     const onDocClick = (e: MouseEvent) => {
       if (!dropdown.contains(e.target as Node)) closeMenu();
@@ -260,8 +261,13 @@ export async function renderAdmin(): Promise<Node> {
       e.stopPropagation();
       const open = menu.style.display !== 'none';
       if (open) return closeMenu();
+      // Fixed positioning (coords from the button) escapes the panel's clipping.
+      const r = addBtn.getBoundingClientRect();
+      menu.style.left = `${r.left}px`;
+      menu.style.top = `${r.bottom + 6}px`;
       menu.style.display = 'flex';
       document.addEventListener('click', onDocClick);
+      window.addEventListener('scroll', closeMenu, true);
     });
     for (const m of SSO_PROVIDER_META) {
       const opt = h('button', { class: 'dropdown-item' }, m.name);
