@@ -9,14 +9,36 @@ interface GlobalEnroll {
   token: string | null;
 }
 
+type SsoProviderType = 'oidc' | 'entra' | 'google' | 'github';
+
+interface SsoProviderView {
+  id: string;
+  type: SsoProviderType;
+  label: string;
+  clientId: string;
+  issuerUrl: string;
+  tenantId: string;
+  clientSecretSet: boolean;
+}
+
 interface SystemSettings {
   agentOfflineTimeoutSeconds: number;
-  sso: {
-    oidc: { enabled: boolean; issuerUrl: string; clientId: string; clientSecretSet: boolean };
-    entra: { enabled: boolean; tenantId: string; clientId: string; clientSecretSet: boolean };
-  };
+  sso: { enabled: boolean; providers: SsoProviderView[] };
   ssoRedirectUri: string;
 }
+
+/** Provider kinds selectable in the "Add provider" menu. */
+const SSO_PROVIDER_META: {
+  type: SsoProviderType;
+  name: string;
+  issuer?: boolean;
+  tenant?: boolean;
+}[] = [
+  { type: 'oidc', name: 'OpenID Connect (OIDC)', issuer: true },
+  { type: 'entra', name: 'Microsoft Entra ID', tenant: true },
+  { type: 'google', name: 'Google' },
+  { type: 'github', name: 'GitHub' },
+];
 
 const MONO_STYLE =
   'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;word-break:break-all;color:var(--amber-light)';
@@ -141,25 +163,9 @@ export async function renderAdmin(): Promise<Node> {
   // --- SSO -----------------------------------------------------------------
 
   const renderSso = (sys: SystemSettings): void => {
-    const oidc = sys.sso.oidc;
-    const entra = sys.sso.entra;
+    const enabledToggle = h('input', { type: 'checkbox', checked: sys.sso.enabled }) as HTMLInputElement;
 
-    const oidcEnabled = h('input', { type: 'checkbox', checked: oidc.enabled }) as HTMLInputElement;
-    const oidcIssuer = h('input', { type: 'text', value: oidc.issuerUrl, placeholder: 'https://id.example.com' }) as HTMLInputElement;
-    const oidcClientId = h('input', { type: 'text', value: oidc.clientId }) as HTMLInputElement;
-    const oidcSecret = h('input', {
-      type: 'password',
-      placeholder: oidc.clientSecretSet ? '•••••••• (unchanged)' : 'Client secret',
-    }) as HTMLInputElement;
-
-    const entraEnabled = h('input', { type: 'checkbox', checked: entra.enabled }) as HTMLInputElement;
-    const entraTenant = h('input', { type: 'text', value: entra.tenantId, placeholder: 'tenant id' }) as HTMLInputElement;
-    const entraClientId = h('input', { type: 'text', value: entra.clientId }) as HTMLInputElement;
-    const entraSecret = h('input', {
-      type: 'password',
-      placeholder: entra.clientSecretSet ? '•••••••• (unchanged)' : 'Client secret',
-    }) as HTMLInputElement;
-
+    // Redirect URI hint.
     const redirectBox = h('div', { class: 'mono', style: MONO_STYLE }, sys.ssoRedirectUri);
     const copyRedirect = h('button', { class: 'btn btn-ghost btn-sm', title: 'Copy redirect URI' }, icon('copy'));
     copyRedirect.addEventListener('click', async () => {
@@ -167,24 +173,109 @@ export async function renderAdmin(): Promise<Node> {
       toast(ok ? 'Redirect URI copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
     });
 
+    // Provider cards, each exposing a collect() for the save payload.
+    const cards: { el: HTMLElement; collect: () => Record<string, unknown> }[] = [];
+    const listEl = h('div', { style: 'display:flex;flex-direction:column;gap:14px' });
+    const emptyHint = h('div', { class: 'row-sub', style: 'padding:2px 0' }, 'No providers yet. Add one below.');
+
+    const syncEmpty = () => {
+      if (cards.length === 0) listEl.append(emptyHint);
+      else emptyHint.remove();
+    };
+
+    const buildCard = (v: SsoProviderView): void => {
+      const meta = SSO_PROVIDER_META.find((m) => m.type === v.type)!;
+      const label = h('input', { class: 'input', type: 'text', value: v.label, placeholder: meta.name }) as HTMLInputElement;
+      const clientId = h('input', { class: 'input', type: 'text', value: v.clientId }) as HTMLInputElement;
+      const secret = h('input', {
+        class: 'input',
+        type: 'password',
+        placeholder: v.clientSecretSet ? '•••••••• (unchanged)' : 'Client secret',
+      }) as HTMLInputElement;
+      const issuer = meta.issuer
+        ? (h('input', { class: 'input', type: 'text', value: v.issuerUrl, placeholder: 'https://id.example.com' }) as HTMLInputElement)
+        : undefined;
+      const tenant = meta.tenant
+        ? (h('input', { class: 'input', type: 'text', value: v.tenantId, placeholder: 'directory (tenant) id' }) as HTMLInputElement)
+        : undefined;
+
+      const removeBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Remove provider' }, icon('trash'));
+
+      const card = h(
+        'div',
+        { style: 'border:1px solid var(--border);border-radius:10px;padding:14px 16px;background:var(--bg-2);display:flex;flex-direction:column;gap:12px' },
+        h('div', { style: 'display:flex;align-items:center;justify-content:space-between' },
+          h('div', { style: 'font-weight:600;font-size:13.5px' }, meta.name),
+          removeBtn,
+        ),
+        issuer ? field('Issuer URL', issuer, 'Base URL exposing /.well-known/openid-configuration.') : (null as never),
+        tenant ? field('Directory (tenant) ID', tenant) : (null as never),
+        field('Client ID', clientId),
+        field('Client secret', secret, v.clientSecretSet ? 'A secret is stored. Leave blank to keep it.' : undefined),
+        field('Login button label (optional)', label, `Defaults to "${meta.name}".`),
+      );
+
+      const entry = {
+        el: card,
+        collect: (): Record<string, unknown> => ({
+          id: v.id || undefined,
+          type: v.type,
+          label: label.value.trim(),
+          clientId: clientId.value.trim(),
+          issuerUrl: issuer ? issuer.value.trim() : undefined,
+          tenantId: tenant ? tenant.value.trim() : undefined,
+          clientSecret: secret.value, // blank leaves the stored secret unchanged
+        }),
+      };
+      removeBtn.addEventListener('click', () => {
+        const i = cards.indexOf(entry);
+        if (i >= 0) cards.splice(i, 1);
+        card.remove();
+        syncEmpty();
+      });
+      cards.push(entry);
+      emptyHint.remove();
+      listEl.append(card);
+    };
+
+    sys.sso.providers.forEach(buildCard);
+    syncEmpty();
+
+    // "Add provider" button + dropdown menu.
+    const menu = h('div', { class: 'dropdown-menu', style: 'display:none' });
+    const addBtn = h('button', { class: 'btn btn-ghost btn-sm' }, icon('plus'), 'Add provider');
+    const dropdown = h('div', { class: 'dropdown' }, addBtn, menu);
+
+    const closeMenu = () => {
+      menu.style.display = 'none';
+      document.removeEventListener('click', onDocClick);
+    };
+    const onDocClick = (e: MouseEvent) => {
+      if (!dropdown.contains(e.target as Node)) closeMenu();
+    };
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = menu.style.display !== 'none';
+      if (open) return closeMenu();
+      menu.style.display = 'flex';
+      document.addEventListener('click', onDocClick);
+    });
+    for (const m of SSO_PROVIDER_META) {
+      const opt = h('button', { class: 'dropdown-item' }, m.name);
+      opt.addEventListener('click', () => {
+        closeMenu();
+        buildCard({ id: '', type: m.type, label: '', clientId: '', issuerUrl: '', tenantId: '', clientSecretSet: false });
+      });
+      menu.append(opt);
+    }
+
     const saveBtn = h('button', { class: 'btn btn-primary btn-sm' }, 'Save SSO');
     saveBtn.addEventListener('click', async () => {
-      const body = {
-        oidc: {
-          enabled: oidcEnabled.checked,
-          issuerUrl: oidcIssuer.value.trim(),
-          clientId: oidcClientId.value.trim(),
-          clientSecret: oidcSecret.value, // blank leaves it unchanged
-        },
-        entra: {
-          enabled: entraEnabled.checked,
-          tenantId: entraTenant.value.trim(),
-          clientId: entraClientId.value.trim(),
-          clientSecret: entraSecret.value,
-        },
-      };
       try {
-        const updated = await api.put<SystemSettings>('/settings/sso', body);
+        const updated = await api.put<SystemSettings>('/settings/sso', {
+          enabled: enabledToggle.checked,
+          providers: cards.map((c) => c.collect()),
+        });
         toast('SSO configuration saved', 'success');
         renderSso(updated);
       } catch (err) {
@@ -192,27 +283,31 @@ export async function renderAdmin(): Promise<Node> {
       }
     });
 
+    // Editor is only shown when SSO is enabled.
+    const editor = h(
+      'div',
+      { style: `display:${sys.sso.enabled ? 'flex' : 'none'};flex-direction:column;gap:16px` },
+      h('div', { class: 'row', style: 'padding:0' },
+        h('div', { class: 'row-main', style: 'min-width:0' },
+          h('div', { class: 'row-title' }, 'Redirect URI'),
+          h('div', { class: 'row-sub' }, 'Register this callback URL with every provider.'),
+          redirectBox,
+        ),
+        h('div', { class: 'row-actions' }, copyRedirect),
+      ),
+      h('div', { style: SUBHEAD_STYLE }, 'Providers'),
+      listEl,
+      h('div', {}, dropdown),
+    );
+    enabledToggle.addEventListener('change', () => {
+      editor.style.display = enabledToggle.checked ? 'flex' : 'none';
+    });
+
     ssoPanel.replaceChildren(
       h('div', { class: 'panel-head' }, h('h2', {}, 'Single sign-on')),
       h('div', { style: BODY_STYLE },
-        h('div', { class: 'row', style: 'padding:0' },
-          h('div', { class: 'row-main', style: 'min-width:0' },
-            h('div', { class: 'row-title' }, 'Redirect URI'),
-            h('div', { class: 'row-sub' }, 'Register this callback URL with your identity provider.'),
-            redirectBox,
-          ),
-          h('div', { class: 'row-actions' }, copyRedirect),
-        ),
-        h('div', { style: SUBHEAD_STYLE }, 'Generic OIDC'),
-        h('label', { class: 'checkbox' }, oidcEnabled, 'Enable OIDC login'),
-        field('Issuer URL', oidcIssuer, 'The provider base URL exposing /.well-known/openid-configuration.'),
-        field('Client ID', oidcClientId),
-        field('Client secret', oidcSecret, oidc.clientSecretSet ? 'A secret is stored. Leave blank to keep it.' : undefined),
-        h('div', { style: SUBHEAD_STYLE }, 'Microsoft Entra ID'),
-        h('label', { class: 'checkbox' }, entraEnabled, 'Enable Microsoft login'),
-        field('Tenant ID', entraTenant),
-        field('Client ID', entraClientId),
-        field('Client secret', entraSecret, entra.clientSecretSet ? 'A secret is stored. Leave blank to keep it.' : undefined),
+        h('label', { class: 'checkbox' }, enabledToggle, 'Enable single sign-on'),
+        editor,
         h('div', { style: ACTIONS_STYLE }, saveBtn),
       ),
     );

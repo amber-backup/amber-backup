@@ -10,7 +10,11 @@ import { loadConfig } from '../config/configuration';
 import { AuthSource } from '../database/database.types';
 import { AuthService } from './auth.service';
 import { UsersService } from './users.service';
-import { SettingsService } from '../settings/settings.service';
+import {
+  ResolvedProvider,
+  SettingsService,
+  SsoProviderType,
+} from '../settings/settings.service';
 
 interface OidcDiscovery {
   authorization_endpoint: string;
@@ -19,17 +23,23 @@ interface OidcDiscovery {
   jwks_uri: string;
 }
 
-interface ProviderSettings {
-  source: AuthSource;
-  issuer: string;
-  clientId: string;
-  clientSecret: string;
-}
+/** Default login-button labels per provider type. */
+const DEFAULT_LABEL: Record<SsoProviderType, string> = {
+  oidc: 'SSO',
+  entra: 'Microsoft',
+  google: 'Google',
+  github: 'GitHub',
+};
+
+/** Which AuthSource a provider maps to (only 'entra' is distinct). */
+const authSourceFor = (type: SsoProviderType): AuthSource =>
+  type === 'entra' ? 'entra' : 'oidc';
 
 /**
- * Generic OIDC + Microsoft Entra ID login using the Authorization Code flow
- * with PKCE (§11). New SSO users are created disabled until an admin enables
- * them; no automatic role mapping.
+ * Multi-provider SSO. OIDC / Entra / Google use the OpenID Connect
+ * Authorization Code flow with PKCE (§11); GitHub uses plain OAuth2. Admins
+ * configure any number of providers in the UI. New SSO users are created
+ * disabled until an admin enables them; no automatic role mapping.
  */
 @Injectable()
 export class SsoService {
@@ -45,31 +55,42 @@ export class SsoService {
 
   async listProviders(): Promise<{ id: string; label: string }[]> {
     const sso = await this.settingsService.getResolvedSso();
-    const providers: { id: string; label: string }[] = [];
-    if (sso.oidc.enabled) providers.push({ id: 'oidc', label: 'SSO' });
-    if (sso.entra.enabled) providers.push({ id: 'entra', label: 'Microsoft' });
-    return providers;
+    if (!sso.enabled) return [];
+    return sso.providers
+      .filter((p) => this.isConfigured(p))
+      .map((p) => ({ id: p.id, label: p.label || DEFAULT_LABEL[p.type] }));
   }
 
-  private async settings(provider: string): Promise<ProviderSettings> {
+  /** True when a provider has enough config to attempt a login. */
+  private isConfigured(p: ResolvedProvider): boolean {
+    if (!p.clientId || !p.clientSecret) return false;
+    if (p.type === 'oidc') return !!p.issuerUrl;
+    if (p.type === 'entra') return !!p.tenantId;
+    return true;
+  }
+
+  private async resolveProvider(id: string): Promise<ResolvedProvider> {
     const sso = await this.settingsService.getResolvedSso();
-    if (provider === 'oidc' && sso.oidc.enabled) {
-      return {
-        source: 'oidc',
-        issuer: sso.oidc.issuerUrl,
-        clientId: sso.oidc.clientId,
-        clientSecret: sso.oidc.clientSecret,
-      };
+    if (!sso.enabled) throw new BadRequestException('SSO is disabled');
+    const provider = sso.providers.find((p) => p.id === id);
+    if (!provider || !this.isConfigured(provider)) {
+      throw new BadRequestException(`SSO provider '${id}' is not available`);
     }
-    if (provider === 'entra' && sso.entra.enabled) {
-      return {
-        source: 'entra',
-        issuer: `https://login.microsoftonline.com/${sso.entra.tenantId}/v2.0`,
-        clientId: sso.entra.clientId,
-        clientSecret: sso.entra.clientSecret,
-      };
+    return provider;
+  }
+
+  /** OIDC issuer URL for discovery-based providers. */
+  private issuerFor(p: ResolvedProvider): string {
+    switch (p.type) {
+      case 'oidc':
+        return p.issuerUrl;
+      case 'entra':
+        return `https://login.microsoftonline.com/${p.tenantId}/v2.0`;
+      case 'google':
+        return 'https://accounts.google.com';
+      default:
+        throw new BadRequestException(`Provider '${p.type}' is not OIDC`);
     }
-    throw new BadRequestException(`SSO provider '${provider}' not enabled`);
   }
 
   private async discover(issuer: string): Promise<OidcDiscovery> {
@@ -89,24 +110,35 @@ export class SsoService {
 
   /** Builds the authorization URL and a signed state cookie value. */
   async startLogin(
-    provider: string,
+    providerId: string,
   ): Promise<{ authUrl: string; stateCookie: string }> {
-    const settings = await this.settings(provider);
-    const disco = await this.discover(settings.issuer);
+    const provider = await this.resolveProvider(providerId);
 
     const verifier = randomBytes(32).toString('base64url');
-    const challenge = createHash('sha256')
-      .update(verifier)
-      .digest('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
     const state = randomBytes(16).toString('base64url');
 
     const stateCookie = await this.jwt.signAsync(
-      { provider, state, verifier },
+      { providerId, state, verifier },
       { secret: loadConfig().jwtSecret, expiresIn: '10m' },
     );
 
+    if (provider.type === 'github') {
+      const params = new URLSearchParams({
+        client_id: provider.clientId,
+        redirect_uri: this.redirectUri(),
+        scope: 'read:user user:email',
+        state,
+      });
+      return {
+        authUrl: `https://github.com/login/oauth/authorize?${params.toString()}`,
+        stateCookie,
+      };
+    }
+
+    const disco = await this.discover(this.issuerFor(provider));
     const params = new URLSearchParams({
-      client_id: settings.clientId,
+      client_id: provider.clientId,
       response_type: 'code',
       scope: 'openid email profile',
       redirect_uri: this.redirectUri(),
@@ -120,14 +152,14 @@ export class SsoService {
     };
   }
 
-  /** Handles the OIDC callback: verifies state, exchanges code, upserts user. */
+  /** Handles the OAuth/OIDC callback: verifies state, resolves the user. */
   async handleCallback(
     code: string,
     state: string,
     stateCookie: string | undefined,
   ): Promise<{ token: string; userDisabled: boolean }> {
     if (!stateCookie) throw new UnauthorizedException('Missing SSO state');
-    let parsed: { provider: string; state: string; verifier: string };
+    let parsed: { providerId: string; state: string; verifier: string };
     try {
       parsed = await this.jwt.verifyAsync(stateCookie, {
         secret: loadConfig().jwtSecret,
@@ -139,39 +171,23 @@ export class SsoService {
       throw new UnauthorizedException('SSO state mismatch');
     }
 
-    const settings = await this.settings(parsed.provider);
-    const disco = await this.discover(settings.issuer);
+    const provider = await this.resolveProvider(parsed.providerId);
+    const profile =
+      provider.type === 'github'
+        ? await this.githubProfile(provider, code)
+        : await this.oidcProfile(provider, code, parsed.verifier);
 
-    const tokenRes = await fetch(disco.token_endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: this.redirectUri(),
-        client_id: settings.clientId,
-        client_secret: settings.clientSecret,
-        code_verifier: parsed.verifier,
-      }),
-    });
-    if (!tokenRes.ok) {
-      this.logger.warn(`Token exchange failed: ${await tokenRes.text()}`);
-      throw new UnauthorizedException('SSO token exchange failed');
+    if (!profile.email) {
+      throw new UnauthorizedException('SSO response missing email');
     }
-    const tokens = (await tokenRes.json()) as { id_token?: string };
-    const claims = this.decodeIdToken(tokens.id_token);
 
-    const email = (claims.email ?? claims.preferred_username) as string;
-    if (!email) throw new UnauthorizedException('SSO response missing email');
-    const name = (claims.name as string) ?? email;
-
-    let user = await this.users.findByEmailRaw(email);
+    let user = await this.users.findByEmailRaw(profile.email);
     if (!user) {
       await this.users.create(
-        { email, displayName: name, password: '' },
-        settings.source,
+        { email: profile.email, displayName: profile.name, password: '' },
+        authSourceFor(provider.type),
       );
-      user = await this.users.findByEmailRaw(email);
+      user = await this.users.findByEmailRaw(profile.email);
     }
     if (!user) throw new UnauthorizedException('Failed to provision user');
 
@@ -181,6 +197,101 @@ export class SsoService {
     }
     const result = await this.auth.issue(user.id, user.email, user.is_admin);
     return { token: result.token, userDisabled: false };
+  }
+
+  /** OIDC code exchange → id_token claims. */
+  private async oidcProfile(
+    provider: ResolvedProvider,
+    code: string,
+    verifier: string,
+  ): Promise<{ email: string; name: string }> {
+    const disco = await this.discover(this.issuerFor(provider));
+    const tokenRes = await fetch(disco.token_endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: this.redirectUri(),
+        client_id: provider.clientId,
+        client_secret: provider.clientSecret,
+        code_verifier: verifier,
+      }),
+    });
+    if (!tokenRes.ok) {
+      this.logger.warn(`Token exchange failed: ${await tokenRes.text()}`);
+      throw new UnauthorizedException('SSO token exchange failed');
+    }
+    const tokens = (await tokenRes.json()) as { id_token?: string };
+    const claims = this.decodeIdToken(tokens.id_token);
+    const email = (claims.email ?? claims.preferred_username) as string;
+    const name = (claims.name as string) ?? email;
+    return { email, name };
+  }
+
+  /** GitHub OAuth2 code exchange → user profile (email may need a 2nd call). */
+  private async githubProfile(
+    provider: ResolvedProvider,
+    code: string,
+  ): Promise<{ email: string; name: string }> {
+    const tokenRes = await fetch(
+      'https://github.com/login/oauth/access_token',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          accept: 'application/json',
+        },
+        body: new URLSearchParams({
+          client_id: provider.clientId,
+          client_secret: provider.clientSecret,
+          code,
+          redirect_uri: this.redirectUri(),
+        }),
+      },
+    );
+    if (!tokenRes.ok) {
+      this.logger.warn(`GitHub token exchange failed: ${await tokenRes.text()}`);
+      throw new UnauthorizedException('SSO token exchange failed');
+    }
+    const token = (await tokenRes.json()) as { access_token?: string };
+    if (!token.access_token) {
+      throw new UnauthorizedException('SSO token exchange failed');
+    }
+
+    const ghHeaders = {
+      authorization: `Bearer ${token.access_token}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': 'amber-backup',
+    };
+    const userRes = await fetch('https://api.github.com/user', {
+      headers: ghHeaders,
+    });
+    if (!userRes.ok) throw new UnauthorizedException('GitHub profile fetch failed');
+    const gh = (await userRes.json()) as {
+      email?: string | null;
+      name?: string | null;
+      login?: string;
+    };
+
+    let email = gh.email ?? '';
+    if (!email) {
+      const emailsRes = await fetch('https://api.github.com/user/emails', {
+        headers: ghHeaders,
+      });
+      if (emailsRes.ok) {
+        const emails = (await emailsRes.json()) as {
+          email: string;
+          primary: boolean;
+          verified: boolean;
+        }[];
+        email =
+          emails.find((e) => e.primary && e.verified)?.email ??
+          emails.find((e) => e.verified)?.email ??
+          '';
+      }
+    }
+    return { email, name: gh.name || gh.login || email };
   }
 
   private decodeIdToken(idToken: string | undefined): Record<string, unknown> {

@@ -206,6 +206,20 @@ input, select, textarea { font-family: inherit; }
   background-repeat: no-repeat; background-position: right 11px center; background-size: 15px;
 }
 .select option { background: var(--bg-1); color: var(--text-1); }
+
+/* Dropdown menu (e.g. the SSO "Add provider" picker). */
+.dropdown { position: relative; display: inline-flex; }
+.dropdown-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 220px;
+  flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.dropdown-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 11px; border-radius: 7px; font-size: 13.5px; color: var(--text-1);
+}
+.dropdown-item:hover { background: var(--bg-3); }
 .checkbox { display: flex; align-items: center; gap: 9px; font-size: 13.5px; cursor: pointer; user-select: none; }
 
 /* Custom checkboxes — replace the browser default everywhere in the app.

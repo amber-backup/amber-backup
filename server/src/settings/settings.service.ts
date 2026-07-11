@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Db, KYSELY } from '../database/database.module';
 import { CryptoService, EncryptedPayload } from '../crypto/crypto.service';
 import { loadConfig } from '../config/configuration';
@@ -16,60 +17,86 @@ export const SETTINGS_KEYS = {
 
 const DEFAULT_OFFLINE_SECONDS = 120;
 
-interface StoredOidc {
-  enabled: boolean;
+/** Supported single sign-on provider kinds. */
+export type SsoProviderType = 'oidc' | 'entra' | 'google' | 'github';
+export const SSO_PROVIDER_TYPES: SsoProviderType[] = [
+  'oidc',
+  'entra',
+  'google',
+  'github',
+];
+
+interface StoredProvider {
+  id: string;
+  type: SsoProviderType;
+  /** Optional label override for the login button. */
+  label: string;
+  clientId: string;
+  /** OIDC only: issuer base URL. */
   issuerUrl: string;
-  clientId: string;
-  secret: EncryptedPayload | null;
-}
-interface StoredEntra {
-  enabled: boolean;
+  /** Entra only: directory (tenant) id. */
   tenantId: string;
-  clientId: string;
   secret: EncryptedPayload | null;
 }
 interface StoredSso {
-  oidc: StoredOidc;
-  entra: StoredEntra;
+  enabled: boolean;
+  providers: StoredProvider[];
 }
 
-/** Decrypted SSO config for internal use by the SSO service. */
+/** A single provider with its secret decrypted, for the SSO service. */
+export interface ResolvedProvider {
+  id: string;
+  type: SsoProviderType;
+  label: string;
+  clientId: string;
+  clientSecret: string;
+  issuerUrl: string;
+  tenantId: string;
+}
 export interface ResolvedSso {
-  oidc: { enabled: boolean; issuerUrl: string; clientId: string; clientSecret: string };
-  entra: { enabled: boolean; tenantId: string; clientId: string; clientSecret: string };
+  enabled: boolean;
+  providers: ResolvedProvider[];
 }
 
-/** Admin-facing SSO update; a blank/omitted clientSecret leaves it unchanged. */
+/** Admin-facing provider update; a blank clientSecret keeps the stored one. */
+export interface SsoProviderUpdate {
+  /** Present when editing an existing provider (preserves its secret). */
+  id?: string;
+  type: SsoProviderType;
+  label?: string;
+  clientId?: string;
+  issuerUrl?: string;
+  tenantId?: string;
+  clientSecret?: string;
+}
 export interface SsoUpdate {
-  oidc?: {
-    enabled?: boolean;
-    issuerUrl?: string;
-    clientId?: string;
-    clientSecret?: string;
-  };
-  entra?: {
-    enabled?: boolean;
-    tenantId?: string;
-    clientId?: string;
-    clientSecret?: string;
-  };
+  enabled?: boolean;
+  providers?: SsoProviderUpdate[];
+}
+
+/** Masked provider for the admin view (secret replaced by a "set" flag). */
+export interface SsoProviderView {
+  id: string;
+  type: SsoProviderType;
+  label: string;
+  clientId: string;
+  issuerUrl: string;
+  tenantId: string;
+  clientSecretSet: boolean;
 }
 
 /** Admin-facing view (secrets never leave the server — only a "set" flag). */
 export interface SystemSettingsView {
   agentOfflineTimeoutSeconds: number;
   sso: {
-    oidc: { enabled: boolean; issuerUrl: string; clientId: string; clientSecretSet: boolean };
-    entra: { enabled: boolean; tenantId: string; clientId: string; clientSecretSet: boolean };
+    enabled: boolean;
+    providers: SsoProviderView[];
   };
   /** Redirect URI to register with the identity provider. */
   ssoRedirectUri: string;
 }
 
-const EMPTY_SSO: StoredSso = {
-  oidc: { enabled: false, issuerUrl: '', clientId: '', secret: null },
-  entra: { enabled: false, tenantId: '', clientId: '', secret: null },
-};
+const EMPTY_SSO: StoredSso = { enabled: false, providers: [] };
 
 @Injectable()
 export class SettingsService {
@@ -115,49 +142,53 @@ export class SettingsService {
   // --- SSO ------------------------------------------------------------------
 
   private async readSso(): Promise<StoredSso> {
-    return (await this.read<StoredSso>(SETTINGS_KEYS.sso)) ?? EMPTY_SSO;
+    return normalizeStored(await this.read<unknown>(SETTINGS_KEYS.sso));
   }
 
   /** Decrypted SSO config for the SSO service (never sent to clients). */
   async getResolvedSso(): Promise<ResolvedSso> {
     const s = await this.readSso();
     return {
-      oidc: {
-        enabled: s.oidc.enabled,
-        issuerUrl: s.oidc.issuerUrl,
-        clientId: s.oidc.clientId,
-        clientSecret: s.oidc.secret ? this.crypto.decrypt(s.oidc.secret) : '',
-      },
-      entra: {
-        enabled: s.entra.enabled,
-        tenantId: s.entra.tenantId,
-        clientId: s.entra.clientId,
-        clientSecret: s.entra.secret ? this.crypto.decrypt(s.entra.secret) : '',
-      },
+      enabled: s.enabled,
+      providers: s.providers.map((p) => ({
+        id: p.id,
+        type: p.type,
+        label: p.label,
+        clientId: p.clientId,
+        clientSecret: p.secret ? this.crypto.decrypt(p.secret) : '',
+        issuerUrl: p.issuerUrl,
+        tenantId: p.tenantId,
+      })),
     };
   }
 
   async updateSso(update: SsoUpdate): Promise<void> {
     const cur = await this.readSso();
-    const next: StoredSso = {
-      oidc: {
-        enabled: update.oidc?.enabled ?? cur.oidc.enabled,
-        issuerUrl: update.oidc?.issuerUrl ?? cur.oidc.issuerUrl,
-        clientId: update.oidc?.clientId ?? cur.oidc.clientId,
-        secret: update.oidc?.clientSecret
-          ? this.crypto.encrypt(update.oidc.clientSecret)
-          : cur.oidc.secret,
-      },
-      entra: {
-        enabled: update.entra?.enabled ?? cur.entra.enabled,
-        tenantId: update.entra?.tenantId ?? cur.entra.tenantId,
-        clientId: update.entra?.clientId ?? cur.entra.clientId,
-        secret: update.entra?.clientSecret
-          ? this.crypto.encrypt(update.entra.clientSecret)
-          : cur.entra.secret,
-      },
-    };
-    await this.write(SETTINGS_KEYS.sso, next);
+    const byId = new Map(cur.providers.map((p) => [p.id, p]));
+
+    const providers: StoredProvider[] =
+      update.providers === undefined
+        ? cur.providers
+        : update.providers.map((p) => {
+            const existing = p.id ? byId.get(p.id) : undefined;
+            return {
+              id: existing?.id ?? randomUUID(),
+              type: p.type,
+              label: (p.label ?? existing?.label ?? '').trim(),
+              clientId: (p.clientId ?? existing?.clientId ?? '').trim(),
+              issuerUrl: (p.issuerUrl ?? existing?.issuerUrl ?? '').trim(),
+              tenantId: (p.tenantId ?? existing?.tenantId ?? '').trim(),
+              // A blank secret keeps the previously stored one (matched by id).
+              secret: p.clientSecret
+                ? this.crypto.encrypt(p.clientSecret)
+                : (existing?.secret ?? null),
+            };
+          });
+
+    await this.write(SETTINGS_KEYS.sso, {
+      enabled: update.enabled ?? cur.enabled,
+      providers,
+    } satisfies StoredSso);
   }
 
   // --- Admin view -----------------------------------------------------------
@@ -171,20 +202,73 @@ export class SettingsService {
     return {
       agentOfflineTimeoutSeconds: timeout,
       sso: {
-        oidc: {
-          enabled: sso.oidc.enabled,
-          issuerUrl: sso.oidc.issuerUrl,
-          clientId: sso.oidc.clientId,
-          clientSecretSet: !!sso.oidc.secret,
-        },
-        entra: {
-          enabled: sso.entra.enabled,
-          tenantId: sso.entra.tenantId,
-          clientId: sso.entra.clientId,
-          clientSecretSet: !!sso.entra.secret,
-        },
+        enabled: sso.enabled,
+        providers: sso.providers.map((p) => ({
+          id: p.id,
+          type: p.type,
+          label: p.label,
+          clientId: p.clientId,
+          issuerUrl: p.issuerUrl,
+          tenantId: p.tenantId,
+          clientSecretSet: !!p.secret,
+        })),
       },
       ssoRedirectUri: `${base}/api/auth/callback`,
     };
   }
+}
+
+/**
+ * Coerces a stored value into the current SSO shape, tolerating both the new
+ * `{ enabled, providers[] }` form and the legacy fixed `{ oidc, entra }` form.
+ */
+function normalizeStored(raw: unknown): StoredSso {
+  if (!raw || typeof raw !== 'object') return EMPTY_SSO;
+  const obj = raw as Record<string, unknown>;
+
+  if (Array.isArray(obj.providers)) {
+    return {
+      enabled: !!obj.enabled,
+      providers: (obj.providers as unknown[])
+        .map(coerceProvider)
+        .filter((p): p is StoredProvider => p !== null),
+    };
+  }
+
+  // Legacy migration: fixed oidc/entra blocks → provider list with stable ids.
+  const providers: StoredProvider[] = [];
+  const legacy = (key: 'oidc' | 'entra', type: SsoProviderType) => {
+    const b = obj[key] as Record<string, unknown> | undefined;
+    if (!b) return;
+    providers.push({
+      id: type,
+      type,
+      label: '',
+      clientId: String(b.clientId ?? ''),
+      issuerUrl: String(b.issuerUrl ?? ''),
+      tenantId: String(b.tenantId ?? ''),
+      secret: (b.secret as EncryptedPayload | null) ?? null,
+    });
+  };
+  legacy('oidc', 'oidc');
+  legacy('entra', 'entra');
+  const anyEnabled =
+    !!(obj.oidc as { enabled?: boolean } | undefined)?.enabled ||
+    !!(obj.entra as { enabled?: boolean } | undefined)?.enabled;
+  return { enabled: anyEnabled, providers };
+}
+
+function coerceProvider(raw: unknown): StoredProvider | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Record<string, unknown>;
+  if (!SSO_PROVIDER_TYPES.includes(p.type as SsoProviderType)) return null;
+  return {
+    id: typeof p.id === 'string' && p.id ? p.id : randomUUID(),
+    type: p.type as SsoProviderType,
+    label: String(p.label ?? ''),
+    clientId: String(p.clientId ?? ''),
+    issuerUrl: String(p.issuerUrl ?? ''),
+    tenantId: String(p.tenantId ?? ''),
+    secret: (p.secret as EncryptedPayload | null) ?? null,
+  };
 }

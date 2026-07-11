@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -9,6 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { SSO_PROVIDER_TYPES, SsoProviderType } from '../settings.service';
 
 export class UpdateAgentSettingsDto {
   @ApiProperty({ minimum: 30, maximum: 3600 })
@@ -18,43 +21,35 @@ export class UpdateAgentSettingsDto {
   offlineTimeoutSeconds!: number;
 }
 
-export class OidcSettingsDto {
-  @ApiPropertyOptional()
+export class SsoProviderDto {
+  @ApiPropertyOptional({ description: 'Set when editing an existing provider' })
   @IsOptional()
-  @IsBoolean()
-  enabled?: boolean;
+  @IsString()
+  id?: string;
+
+  @ApiProperty({ enum: SSO_PROVIDER_TYPES })
+  @IsIn(SSO_PROVIDER_TYPES)
+  type!: SsoProviderType;
+
+  @ApiPropertyOptional({ description: 'Login button label override' })
+  @IsOptional()
+  @IsString()
+  label?: string;
 
   @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
+  @ApiPropertyOptional({ description: 'OIDC issuer base URL' })
   @IsOptional()
   @IsString()
   issuerUrl?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  clientId?: string;
-
-  @ApiPropertyOptional({ description: 'Blank leaves the stored secret unchanged' })
-  @IsOptional()
-  @IsString()
-  clientSecret?: string;
-}
-
-export class EntraSettingsDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  enabled?: boolean;
-
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Entra directory (tenant) id' })
   @IsOptional()
   @IsString()
   tenantId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  clientId?: string;
 
   @ApiPropertyOptional({ description: 'Blank leaves the stored secret unchanged' })
   @IsOptional()
@@ -63,15 +58,15 @@ export class EntraSettingsDto {
 }
 
 export class UpdateSsoDto {
-  @ApiPropertyOptional({ type: OidcSettingsDto })
+  @ApiPropertyOptional()
   @IsOptional()
-  @ValidateNested()
-  @Type(() => OidcSettingsDto)
-  oidc?: OidcSettingsDto;
+  @IsBoolean()
+  enabled?: boolean;
 
-  @ApiPropertyOptional({ type: EntraSettingsDto })
+  @ApiPropertyOptional({ type: [SsoProviderDto] })
   @IsOptional()
-  @ValidateNested()
-  @Type(() => EntraSettingsDto)
-  entra?: EntraSettingsDto;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SsoProviderDto)
+  providers?: SsoProviderDto[];
 }

@@ -67,82 +67,130 @@ describe('SettingsService (SSO secret encryption)', () => {
     expect(await service.getAgentOfflineTimeout()).toBe(300);
   });
 
-  it('encrypts the OIDC client secret at rest (never stores plaintext)', async () => {
+  it('encrypts a provider client secret at rest (never stores plaintext)', async () => {
     const { db, raw } = createStore();
     const service = new SettingsService(db, crypto);
 
     await service.updateSso({
-      oidc: {
-        enabled: true,
-        issuerUrl: 'https://id.example.com',
-        clientId: 'client-abc',
-        clientSecret: 'super-secret',
-      },
+      enabled: true,
+      providers: [
+        {
+          type: 'oidc',
+          issuerUrl: 'https://id.example.com',
+          clientId: 'client-abc',
+          clientSecret: 'super-secret',
+        },
+      ],
     });
 
     const stored = JSON.parse(raw.get(SETTINGS_KEYS.sso)!);
-    expect(stored.oidc.secret).toMatchObject({
+    expect(stored.enabled).toBe(true);
+    expect(stored.providers).toHaveLength(1);
+    expect(stored.providers[0].secret).toMatchObject({
       ciphertext: expect.any(String),
       nonce: expect.any(String),
     });
+    // A stable id is assigned to the new provider.
+    expect(typeof stored.providers[0].id).toBe('string');
+    expect(stored.providers[0].id.length).toBeGreaterThan(0);
     // Plaintext must not appear anywhere in the serialized settings.
     expect(raw.get(SETTINGS_KEYS.sso)).not.toContain('super-secret');
     // And it decrypts back to the original.
-    expect(crypto.decrypt(stored.oidc.secret as EncryptedPayload)).toBe('super-secret');
+    expect(crypto.decrypt(stored.providers[0].secret as EncryptedPayload)).toBe(
+      'super-secret',
+    );
   });
 
-  it('decrypts secrets in getResolvedSso for internal use', async () => {
+  it('supports multiple providers of different types', async () => {
     const { db } = createStore();
     const service = new SettingsService(db, crypto);
     await service.updateSso({
-      entra: {
-        enabled: true,
-        tenantId: 'tenant-1',
-        clientId: 'entra-client',
-        clientSecret: 'entra-secret',
-      },
+      enabled: true,
+      providers: [
+        { type: 'entra', tenantId: 't1', clientId: 'e', clientSecret: 'es' },
+        { type: 'github', clientId: 'g', clientSecret: 'gs' },
+      ],
     });
 
     const resolved = await service.getResolvedSso();
-    expect(resolved.entra.enabled).toBe(true);
-    expect(resolved.entra.clientSecret).toBe('entra-secret');
-    expect(resolved.oidc.clientSecret).toBe('');
+    expect(resolved.enabled).toBe(true);
+    expect(resolved.providers.map((p) => p.type)).toEqual(['entra', 'github']);
+    expect(resolved.providers[0].clientSecret).toBe('es');
+    expect(resolved.providers[1].clientSecret).toBe('gs');
   });
 
-  it('leaves the stored secret unchanged when clientSecret is blank', async () => {
+  it('leaves a provider secret unchanged when clientSecret is blank', async () => {
     const { db, raw } = createStore();
     const service = new SettingsService(db, crypto);
 
     await service.updateSso({
-      oidc: { enabled: true, clientId: 'c1', clientSecret: 'first-secret' },
+      enabled: true,
+      providers: [{ type: 'oidc', clientId: 'c1', clientSecret: 'first-secret' }],
     });
-    const firstBlob = raw.get(SETTINGS_KEYS.sso);
+    const firstBlob = JSON.parse(raw.get(SETTINGS_KEYS.sso)!);
+    const id = firstBlob.providers[0].id as string;
 
-    // Update other fields but leave the secret blank.
+    // Re-save the same provider (by id) with other fields changed, secret blank.
     await service.updateSso({
-      oidc: { enabled: true, clientId: 'c2', clientSecret: '' },
+      enabled: true,
+      providers: [{ id, type: 'oidc', clientId: 'c2', clientSecret: '' }],
     });
 
     const resolved = await service.getResolvedSso();
-    expect(resolved.oidc.clientId).toBe('c2');
-    expect(resolved.oidc.clientSecret).toBe('first-secret');
+    expect(resolved.providers[0].clientId).toBe('c2');
+    expect(resolved.providers[0].clientSecret).toBe('first-secret');
     // The ciphertext for the secret is preserved (not re-encrypted to empty).
-    const before = JSON.parse(firstBlob!).oidc.secret;
-    const after = JSON.parse(raw.get(SETTINGS_KEYS.sso)!).oidc.secret;
-    expect(after).toEqual(before);
+    const after = JSON.parse(raw.get(SETTINGS_KEYS.sso)!).providers[0].secret;
+    expect(after).toEqual(firstBlob.providers[0].secret);
+  });
+
+  it('removes providers absent from the update', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.updateSso({
+      enabled: true,
+      providers: [
+        { type: 'oidc', clientId: 'a', clientSecret: 's', issuerUrl: 'https://a' },
+        { type: 'google', clientId: 'b', clientSecret: 's' },
+      ],
+    });
+    await service.updateSso({ enabled: true, providers: [] });
+    const resolved = await service.getResolvedSso();
+    expect(resolved.providers).toHaveLength(0);
   });
 
   it('never exposes secrets in the admin view — only a "set" flag', async () => {
     const { db } = createStore();
     const service = new SettingsService(db, crypto);
     await service.updateSso({
-      oidc: { enabled: true, clientId: 'c1', clientSecret: 'hidden' },
+      enabled: true,
+      providers: [{ type: 'oidc', clientId: 'c1', clientSecret: 'hidden' }],
     });
 
     const view = await service.getSystemView();
-    expect(view.sso.oidc.clientSecretSet).toBe(true);
-    expect(view.sso.entra.clientSecretSet).toBe(false);
+    expect(view.sso.enabled).toBe(true);
+    expect(view.sso.providers[0].clientSecretSet).toBe(true);
     expect(JSON.stringify(view)).not.toContain('hidden');
-    expect((view.sso.oidc as any).clientSecret).toBeUndefined();
+    expect((view.sso.providers[0] as any).secret).toBeUndefined();
+    expect((view.sso.providers[0] as any).clientSecret).toBeUndefined();
+  });
+
+  it('migrates the legacy fixed oidc/entra shape into providers', async () => {
+    const { db, raw } = createStore();
+    const service = new SettingsService(db, crypto);
+    // Seed a legacy-format value directly.
+    const legacySecret = crypto.encrypt('legacy');
+    raw.set(
+      SETTINGS_KEYS.sso,
+      JSON.stringify({
+        oidc: { enabled: true, issuerUrl: 'https://l', clientId: 'lc', secret: legacySecret },
+      }),
+    );
+
+    const resolved = await service.getResolvedSso();
+    expect(resolved.enabled).toBe(true);
+    expect(resolved.providers).toHaveLength(1);
+    expect(resolved.providers[0].type).toBe('oidc');
+    expect(resolved.providers[0].clientSecret).toBe('legacy');
   });
 });
