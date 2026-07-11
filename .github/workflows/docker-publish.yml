@@ -12,6 +12,11 @@ on:
         description: 'Git ref (tag/branch/SHA) to build'
         required: false
 
+# Force node-based actions (docker/*) onto Node 24 instead of the deprecated
+# Node 20 runtime they still declare.
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -55,7 +60,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest
+            type=ref,event=branch,enable=${{ github.ref_type != 'tag' }}
+            type=sha,enable=${{ github.ref_type != 'tag' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
