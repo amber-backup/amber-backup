@@ -1,5 +1,13 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { Db, KYSELY } from '../database/database.module';
+import { loadConfig } from '../config/configuration';
 import {
   AuditDetails,
   AuditLog,
@@ -44,12 +52,45 @@ export interface AuditPage {
 
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 25;
+const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
-export class AuditService {
+export class AuditService implements OnModuleInit {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(@Inject(KYSELY) private readonly db: Db) {}
+
+  /** Apply retention once on boot, then daily via the interval below. */
+  async onModuleInit(): Promise<void> {
+    await this.purgeExpired();
+  }
+
+  /**
+   * Deletes audit entries older than `AUDIT_RETENTION_DAYS` (default 90). A
+   * value <= 0 disables purging entirely (entries are kept forever).
+   */
+  @Interval(PURGE_INTERVAL_MS)
+  async purgeExpired(): Promise<void> {
+    const days = loadConfig().auditRetentionDays;
+    if (!Number.isFinite(days) || days <= 0) return;
+    const cutoff = new Date(Date.now() - days * 86_400_000);
+    try {
+      const res = await this.db
+        .deleteFrom('audit_log')
+        .where('created_at', '<', cutoff)
+        .executeTakeFirst();
+      const deleted = Number(res?.numDeletedRows ?? 0);
+      if (deleted > 0) {
+        this.logger.log(
+          `Purged ${deleted} audit entries older than ${days} days`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Audit retention purge failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   /**
    * Persists an audit entry. Never throws — auditing must not break the request

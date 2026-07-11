@@ -14,7 +14,7 @@ one place. Remote hosts are covered by a lightweight Go agent.
 - **Agents** — enrollment tokens + install command, poll-based task dispatch, heartbeat/offline detection, reported restic version.
 - **Notifications** — per-job success/failure alerts via Email (SMTP), generic webhook, Slack, Microsoft Teams, Discord, Telegram, Gotify and ntfy.
 - **Auth & RBAC** — local login (Argon2), session JWT, API keys with restrictable scopes, per-resource grants (view/operate/manage), OIDC + Microsoft Entra SSO with admin approval for new users.
-- **Audit log** — every state-changing action by users, admins and API keys (writes and operations like backups, restores, deletes, settings and logins) is recorded and browsable in a paginated, filterable admin table with per-entry drill-down; request secrets are redacted.
+- **Audit log** — every state-changing action by users, admins and API keys (writes and operations like backups, restores, deletes, settings and logins) is recorded and browsable in a paginated, filterable admin table with per-entry drill-down; request secrets are redacted. Entries are retained for `AUDIT_RETENTION_DAYS` (default 90; `0` keeps them forever).
 - **Security** — AES-256-GCM encryption of repo passwords and backend credentials at rest; credentials handed to agents only over the authenticated channel.
 
 ## Quick start (development)
@@ -103,7 +103,8 @@ docker build -t amber-agent ./agent            # image
 ## Configuration
 
 Core configuration is via environment variables — see `server/.env.example` for
-the full list (database, encryption key, JWT, restic paths, bootstrap admin).
+the full list (database, encryption key, JWT, restic paths, audit log retention,
+bootstrap admin).
 
 Runtime settings that admins can change without a restart live in the **Admin**
 section of the UI and are stored in the database: the agent offline timeout and

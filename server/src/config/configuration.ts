@@ -21,6 +21,8 @@ export interface AppConfig {
   restoreTmpDir: string;
   /** Directory holding the compiled agent binaries served to hosts. */
   agentBinaryDir: string;
+  /** Days to keep audit log entries; <= 0 disables purging (keep forever). */
+  auditRetentionDays: number;
   bootstrapAdminEmail: string;
   bootstrapAdminPassword: string;
 }
@@ -57,6 +59,7 @@ export function loadConfig(): AppConfig {
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
     // Bundled into the Docker image at /app/agent-bin; overridable in dev.
     agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
+    auditRetentionDays: int(env.AUDIT_RETENTION_DAYS, 90),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
     bootstrapAdminPassword: env.BOOTSTRAP_ADMIN_PASSWORD ?? '',
   };
