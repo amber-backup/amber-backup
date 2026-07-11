@@ -1,4 +1,4 @@
-import { h, clear } from './dom';
+import { h } from './dom';
 import { icon } from './icons';
 
 // --- Toasts ---
@@ -68,7 +68,10 @@ export function openModal(opts: ModalOptions): { close: () => void } {
     opts.confirmLabel ?? 'Save',
   );
 
-  const close = () => clear(root);
+  // Remove only this modal's own backdrop, not everything in the root. That
+  // lets one modal open another (e.g. "key created" from the create dialog)
+  // without the first modal's close wiping out the second.
+  const close = () => backdrop.remove();
 
   confirmBtn.addEventListener('click', async () => {
     if (!opts.onConfirm) return close();
