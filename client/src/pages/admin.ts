@@ -29,8 +29,8 @@ const SUBHEAD_STYLE =
 /** Admin-only system settings (agent self-registration, timeouts, SSO). */
 export async function renderAdmin(): Promise<Node> {
   const enrollPanel = h('div', { class: 'panel' });
-  const agentPanel = h('div', { class: 'panel' });
-  const ssoPanel = h('div', { class: 'panel' });
+  const agentPanel = h('div', { class: 'panel section-gap' });
+  const ssoPanel = h('div', { class: 'panel section-gap' });
 
   // --- Agent self-registration ---------------------------------------------
 
