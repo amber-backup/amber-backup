@@ -1,3 +1,12 @@
+# [1.4.0](https://github.com/amber-backup/amber-backup/compare/v1.3.0...v1.4.0) (2026-07-11)
+
+
+### Features
+
+* **agent:** validate restic binary before installation ([85ebe76](https://github.com/amber-backup/amber-backup/commit/85ebe760ebaf9e5cb9edcee892208eb8924b32bd))
+* **server:** add snapshot deletion and pruning support ([22d5777](https://github.com/amber-backup/amber-backup/commit/22d5777f3380b617ed594700007ab030bc076cec))
+* **ui:** add custom-styled checkboxes ([e899f9b](https://github.com/amber-backup/amber-backup/commit/e899f9bf007965efab45e5e02f9928f72d31fc4d))
+
 # [1.3.0](https://github.com/amber-backup/amber-backup/compare/v1.2.0...v1.3.0) (2026-07-11)
 
 
