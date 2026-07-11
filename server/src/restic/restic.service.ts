@@ -169,15 +169,20 @@ export class ResticService {
     snapshotId: string,
     dir?: string,
   ): Promise<ResticLsEntry[]> {
-    const args = ['ls', snapshotId, '--json'];
-    if (dir) args.push(dir);
+    // Without a positional directory, `restic ls` lists the whole tree
+    // recursively — which makes the browser render every file and folder flat.
+    // Passing a directory (defaulting to the snapshot root '/') and omitting
+    // --recursive limits the output to that directory's immediate children.
+    const target = dir && dir !== '' ? dir : '/';
+    const args = ['ls', snapshotId, target, '--json'];
     const entries: ResticLsEntry[] = [];
     const res = await this.run(ctx, args, {
       onStdoutLine: (line) => {
         try {
           const obj = JSON.parse(line);
           if (obj.struct_type === 'node' || obj.name) {
-            if (obj.path && obj.path !== dir) {
+            // restic emits a node for the listed directory itself; skip it.
+            if (obj.path && obj.path !== target) {
               entries.push({
                 name: obj.name,
                 type: obj.type,
