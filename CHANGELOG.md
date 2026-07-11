@@ -1,3 +1,12 @@
+## [1.6.1](https://github.com/amber-backup/amber-backup/compare/v1.6.0...v1.6.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ui:** enhance SSO redirect URI layout in admin page ([c93685c](https://github.com/amber-backup/amber-backup/commit/c93685c0cbb41117345680ed0814edd61441bcf5))
+* **ui:** improve token row layout with flex and alignment ([09bd45c](https://github.com/amber-backup/amber-backup/commit/09bd45c404357a114194ca6a1891c5b03e985556))
+* **ui:** resolve dropdown clipping and improve positioning ([cb380ab](https://github.com/amber-backup/amber-backup/commit/cb380ab2b9143fdd272107b15fb43fb10a247cf4))
+
 # [1.6.0](https://github.com/amber-backup/amber-backup/compare/v1.5.1...v1.6.0) (2026-07-11)
 
 
