@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/amber-backup/amber-backup/compare/v1.0.0...v1.0.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **server:** limit `restic ls` output to immediate children ([22cbd32](https://github.com/amber-backup/amber-backup/commit/22cbd32e91056dc9f32803a1633a6df7e79dcdc2))
+
 # 1.0.0 (2026-07-11)
 
 
