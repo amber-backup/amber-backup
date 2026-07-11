@@ -104,6 +104,26 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     });
   });
 
+  describe('latestAgentVersion', () => {
+    it('reads the bundled version file (drives agent self-update)', () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'agent-ver-'));
+      writeFileSync(path.join(dir, 'version'), '1.4.2\n');
+      process.env.AGENT_BINARY_DIR = dir;
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      expect(service.latestAgentVersion()).toBe('1.4.2');
+    });
+
+    it('returns null when no version file is bundled (dev)', () => {
+      process.env.AGENT_BINARY_DIR = mkdtempSync(path.join(tmpdir(), 'nover-'));
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      expect(service.latestAgentVersion()).toBeNull();
+    });
+  });
+
   describe('enroll', () => {
     function validTokenRow() {
       return {

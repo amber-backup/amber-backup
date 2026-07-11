@@ -8,6 +8,7 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 COPY go.mod ./
+COPY VERSION ./
 COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /amber-agent .
 

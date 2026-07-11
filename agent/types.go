@@ -85,6 +85,9 @@ type Task struct {
 type PollResponse struct {
 	Tasks               []Task `json:"tasks"`
 	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	// Latest agent version the server has bundled; triggers a self-update when
+	// newer than the running agent. Empty when the server can't determine it.
+	LatestAgentVersion string `json:"latestAgentVersion,omitempty"`
 }
 
 type TaskResult struct {

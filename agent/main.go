@@ -4,6 +4,8 @@
 package main
 
 import (
+	_ "embed"
+
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
@@ -19,7 +21,13 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.0"
+// Single source of truth for the agent version, shared with the server (which
+// reads the same VERSION file) so self-updates compare like for like.
+//
+//go:embed VERSION
+var versionFile string
+
+var agentVersion = strings.TrimSpace(versionFile)
 
 type agent struct {
 	baseURL string
@@ -29,6 +37,16 @@ type agent struct {
 }
 
 func main() {
+	// `amber-agent --version` is used by the self-updater to sanity-check a
+	// freshly downloaded binary before swapping it in.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println(agentVersion)
+			return
+		}
+	}
+
 	baseURL := strings.TrimRight(getenv("AMBER_URL", ""), "/")
 	token := getenv("AMBER_TOKEN", "")
 	if baseURL == "" {
@@ -124,31 +142,34 @@ func (a *agent) enroll(token string) error {
 func (a *agent) pollLoop() {
 	interval := 30 * time.Second
 	for {
-		tasks, next, err := a.poll()
+		tasks, next, latest, err := a.poll()
 		if err != nil {
 			log.Printf("poll error: %v", err)
 		} else {
 			if next > 0 {
 				interval = time.Duration(next) * time.Second
 			}
+			// Run any dispatched work first, then self-update at the end of the
+			// cycle so a pending update never drops tasks we already claimed.
 			for i := range tasks {
 				a.runTask(&tasks[i])
 			}
+			a.maybeSelfUpdate(latest) // re-execs on success and never returns
 		}
 		time.Sleep(interval)
 	}
 }
 
-func (a *agent) poll() ([]Task, int, error) {
+func (a *agent) poll() ([]Task, int, string, error) {
 	req := PollRequest{
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
 	}
 	var resp PollResponse
 	if err := a.post("/api/agents/me/poll", a.state.AgentKey, req, &resp); err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
-	return resp.Tasks, resp.PollIntervalSeconds, nil
+	return resp.Tasks, resp.PollIntervalSeconds, resp.LatestAgentVersion, nil
 }
 
 // --- Task execution ---------------------------------------------------------
@@ -321,13 +342,13 @@ func runHook(command string) error {
 func summaryToStats(msg map[string]any) map[string]any {
 	num := func(k string) any { return msg[k] }
 	return map[string]any{
-		"filesNew":             num("files_new"),
-		"filesChanged":         num("files_changed"),
-		"filesUnmodified":      num("files_unmodified"),
-		"dataAdded":            num("data_added"),
-		"totalBytesProcessed":  num("total_bytes_processed"),
-		"totalFilesProcessed":  num("total_files_processed"),
-		"totalDuration":        num("total_duration"),
-		"percentDone":          1,
+		"filesNew":            num("files_new"),
+		"filesChanged":        num("files_changed"),
+		"filesUnmodified":     num("files_unmodified"),
+		"dataAdded":           num("data_added"),
+		"totalBytesProcessed": num("total_bytes_processed"),
+		"totalFilesProcessed": num("total_files_processed"),
+		"totalDuration":       num("total_duration"),
+		"percentDone":         1,
 	}
 }

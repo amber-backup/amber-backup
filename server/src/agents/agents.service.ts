@@ -8,7 +8,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'crypto';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream, existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
 import { Db, KYSELY } from '../database/database.module';
@@ -240,24 +240,31 @@ export class AgentsService {
   installScript(): string {
     const baseUrl = loadConfig().publicBaseUrl.replace(/\/$/, '');
     return `#!/bin/sh
-# Amber Backup agent installer
+# Amber Backup agent installer. Safe to re-run: it also updates an already
+# installed agent in place (e.g. to move an old agent onto a self-updating one).
 set -e
 AMBER_URL="\${AMBER_URL:-${baseUrl}}"
-: "\${AMBER_TOKEN:?AMBER_TOKEN is required}"
 AMBER_NAME="\${AMBER_NAME:-}"
 INSTALL_DIR="\${INSTALL_DIR:-/opt/amber-agent}"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 
-echo "Installing Amber agent to $INSTALL_DIR (arch=$ARCH)"
+# A token is only needed for the first enrollment; a re-run of an already
+# enrolled agent (state.json present) reuses its stored credential.
+if [ ! -f "$INSTALL_DIR/state.json" ]; then
+  : "\${AMBER_TOKEN:?AMBER_TOKEN is required for first enrollment}"
+fi
+
+echo "Installing/updating Amber agent in $INSTALL_DIR (arch=$ARCH)"
 mkdir -p "$INSTALL_DIR"
-# -f makes curl fail (non-zero) on HTTP errors instead of writing the error body
-# into the binary — otherwise systemd would exec a text file (status 203/EXEC).
-if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/amber-agent"; then
+# Download to a temp file first: -f fails on HTTP errors (avoids writing an error
+# body as the binary), and a separate file avoids "text file busy" when the
+# currently running binary is being replaced.
+if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/amber-agent.new"; then
   echo "Failed to download agent binary for linux-$ARCH from $AMBER_URL" >&2
   exit 1
 fi
-chmod +x "$INSTALL_DIR/amber-agent"
+chmod +x "$INSTALL_DIR/amber-agent.new"
 
 cat > /etc/systemd/system/amber-agent.service <<EOF
 [Unit]
@@ -277,6 +284,9 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+# Stop the running agent (if any) so the binary can be swapped, then start fresh.
+systemctl stop amber-agent 2>/dev/null || true
+mv "$INSTALL_DIR/amber-agent.new" "$INSTALL_DIR/amber-agent"
 systemctl daemon-reload
 systemctl enable --now amber-agent
 echo "Amber agent installed and started."
@@ -300,6 +310,26 @@ echo "Amber agent installed and started."
       type: 'application/octet-stream',
       disposition: 'attachment; filename="amber-agent"',
     });
+  }
+
+  private cachedAgentVersion: string | null | undefined;
+
+  /**
+   * Version of the bundled agent binaries, read from `<agentBinaryDir>/version`
+   * (written at image build time). Null when unknown (e.g. local dev without a
+   * built agent), in which case no self-update is advertised.
+   */
+  latestAgentVersion(): string | null {
+    if (this.cachedAgentVersion !== undefined) return this.cachedAgentVersion;
+    try {
+      const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'version');
+      this.cachedAgentVersion = existsSync(file)
+        ? readFileSync(file, 'utf8').trim() || null
+        : null;
+    } catch {
+      this.cachedAgentVersion = null;
+    }
+    return this.cachedAgentVersion;
   }
 
   async list(): Promise<PublicAgent[]> {
@@ -419,7 +449,11 @@ echo "Amber agent installed and started."
   async poll(
     agent: RequestAgent,
     dto: PollDto,
-  ): Promise<{ tasks: AgentTask[]; pollIntervalSeconds: number }> {
+  ): Promise<{
+    tasks: AgentTask[];
+    pollIntervalSeconds: number;
+    latestAgentVersion?: string;
+  }> {
     const row = await this.db
       .updateTable('agents')
       .set({
@@ -440,6 +474,7 @@ echo "Amber agent installed and started."
     return {
       tasks,
       pollIntervalSeconds: row?.poll_interval_seconds ?? 30,
+      latestAgentVersion: this.latestAgentVersion() ?? undefined,
     };
   }
 

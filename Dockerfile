@@ -27,11 +27,13 @@ RUN npm run build --workspace @amber/server \
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS agent-build
 WORKDIR /agent
 COPY agent/go.mod ./
+COPY agent/VERSION ./
 COPY agent/*.go ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       go build -ldflags="-s -w" -o /out/amber-agent-linux-amd64 . \
  && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-      go build -ldflags="-s -w" -o /out/amber-agent-linux-arm64 .
+      go build -ldflags="-s -w" -o /out/amber-agent-linux-arm64 . \
+ && cp VERSION /out/version
 
 # --- Stage 4: runtime ---
 FROM node:22-alpine AS runtime
