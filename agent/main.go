@@ -86,13 +86,18 @@ func (a *agent) saveState() error {
 func (a *agent) enroll(token string) error {
 	hostname, _ := os.Hostname()
 
+	// The agent names itself: AMBER_NAME (set from the rollout command) wins,
+	// falling back to the hostname. The server may still override this for
+	// one-time tokens that pin an intended name.
+	name := getenv("AMBER_NAME", hostname)
+
 	// Generate an ed25519 keypair; the public key is shared for integrity checks.
 	pub, _, _ := ed25519.GenerateKey(nil)
 	pubPem := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub})
 
 	req := EnrollRequest{
 		Token:        token,
-		AgentName:    hostname,
+		AgentName:    name,
 		Hostname:     hostname,
 		OS:           detectOS(),
 		Pubkey:       string(pubPem),

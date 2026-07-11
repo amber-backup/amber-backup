@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -17,6 +18,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { loadConfig } from '../config/configuration';
 import {
   Agent,
+  GlobalEnrollmentValue,
   ResticOptions,
   RestoreOptions,
   RestoreDestination,
@@ -29,6 +31,9 @@ import {
   TaskResultDto,
   UpdateAgentDto,
 } from './dto/agent.dto';
+
+/** Placeholder swapped for the operator-chosen agent name in rollout commands. */
+const NAME_PLACEHOLDER = '__AGENT_NAME__';
 
 export interface AgentTask {
   type: 'backup' | 'restore';
@@ -85,15 +90,151 @@ export class AgentsService {
       .execute();
 
     const baseUrl = loadConfig().publicBaseUrl.replace(/\/$/, '');
+    const method = dto.deployMethod ?? 'binary';
     return {
       token,
       expiresAt,
-      deployMethod: dto.deployMethod ?? 'binary',
-      installCommand:
-        (dto.deployMethod ?? 'binary') === 'docker'
-          ? `docker run -d --restart unless-stopped -e AMBER_URL=${baseUrl} -e AMBER_TOKEN=${token} devpatf/amber-backup-agent:latest`
-          : `curl -sSL ${baseUrl}/api/agents/install.sh | AMBER_URL=${baseUrl} AMBER_TOKEN=${token} sh`,
+      deployMethod: method,
+      installCommand: this.installCommand(
+        method,
+        baseUrl,
+        token,
+        dto.intendedAgentName,
+      ),
     };
+  }
+
+  private installCommand(
+    method: 'binary' | 'docker' | 'docker-compose',
+    baseUrl: string,
+    token: string,
+    name?: string,
+  ): string {
+    const image = 'devpatf/amber-backup-agent:latest';
+    // The agent reports AMBER_NAME as its own name on enrollment.
+    const nameVal = name ?? '';
+    if (method === 'docker') {
+      return (
+        `docker run -d --restart unless-stopped ` +
+        `-e AMBER_URL=${baseUrl} -e AMBER_TOKEN=${token} -e AMBER_NAME="${nameVal}" ` +
+        `-v amber-agent:/var/lib/amber-agent ${image}`
+      );
+    }
+    if (method === 'docker-compose') {
+      return [
+        'services:',
+        '  amber-agent:',
+        `    image: ${image}`,
+        '    restart: unless-stopped',
+        '    environment:',
+        `      AMBER_URL: ${baseUrl}`,
+        `      AMBER_TOKEN: ${token}`,
+        `      AMBER_NAME: "${nameVal}"`,
+        '    volumes:',
+        '      - amber-agent:/var/lib/amber-agent',
+        'volumes:',
+        '  amber-agent:',
+      ].join('\n');
+    }
+    return `curl -sSL ${baseUrl}/api/agents/install.sh | AMBER_URL=${baseUrl} AMBER_TOKEN=${token} AMBER_NAME="${nameVal}" sh`;
+  }
+
+  // --- Global (self-registration) enrollment token -------------------------
+
+  private static readonly GLOBAL_KEY = 'global_enrollment';
+
+  /** Reads the stored global-enrollment config, decrypting the token. */
+  private async readGlobal(): Promise<{ enabled: boolean; token: string | null }> {
+    const row = await this.db
+      .selectFrom('app_settings')
+      .select('value')
+      .where('key', '=', AgentsService.GLOBAL_KEY)
+      .executeTakeFirst();
+    if (!row || row.value == null) return { enabled: false, token: null };
+    const v = (
+      typeof row.value === 'string' ? JSON.parse(row.value) : row.value
+    ) as GlobalEnrollmentValue;
+    const token =
+      v.ciphertext && v.nonce
+        ? this.crypto.decrypt({ ciphertext: v.ciphertext, nonce: v.nonce })
+        : null;
+    return { enabled: !!v.enabled, token };
+  }
+
+  private async writeGlobal(enabled: boolean, token: string | null): Promise<void> {
+    const enc = token ? this.crypto.encrypt(token) : null;
+    const value: GlobalEnrollmentValue = {
+      enabled,
+      ciphertext: enc?.ciphertext ?? null,
+      nonce: enc?.nonce ?? null,
+    };
+    await this.db
+      .insertInto('app_settings')
+      .values({
+        key: AgentsService.GLOBAL_KEY,
+        value: JSON.stringify(value),
+        updated_at: new Date(),
+      })
+      .onConflict((oc) =>
+        oc.column('key').doUpdateSet({
+          value: JSON.stringify(value),
+          updated_at: new Date(),
+        }),
+      )
+      .execute();
+  }
+
+  /** Admin: current global enrollment state (token shown only when enabled). */
+  async getGlobalEnrollment(): Promise<{ enabled: boolean; token: string | null }> {
+    const g = await this.readGlobal();
+    return { enabled: g.enabled, token: g.enabled ? g.token : null };
+  }
+
+  /** Admin: enable/disable self-registration, minting a token on first enable. */
+  async setGlobalEnrollment(
+    enabled: boolean,
+  ): Promise<{ enabled: boolean; token: string | null }> {
+    const g = await this.readGlobal();
+    const token = enabled ? g.token ?? this.crypto.generateToken(24) : g.token;
+    await this.writeGlobal(enabled, token);
+    return { enabled, token: enabled ? token : null };
+  }
+
+  /** Admin: rotate the global token (invalidates it for future rollouts). */
+  async rotateGlobalToken(): Promise<{ enabled: boolean; token: string }> {
+    const token = this.crypto.generateToken(24);
+    await this.writeGlobal(true, token);
+    return { enabled: true, token };
+  }
+
+  /** Per-method rollout commands using the global token and a name placeholder. */
+  async globalEnrollmentInfo(): Promise<{
+    enabled: boolean;
+    token: string | null;
+    commands: Record<string, string> | null;
+    namePlaceholder: string;
+  }> {
+    const g = await this.readGlobal();
+    if (!g.enabled || !g.token) {
+      return { enabled: false, token: null, commands: null, namePlaceholder: NAME_PLACEHOLDER };
+    }
+    const baseUrl = loadConfig().publicBaseUrl.replace(/\/$/, '');
+    const commands: Record<string, string> = {
+      binary: this.installCommand('binary', baseUrl, g.token, NAME_PLACEHOLDER),
+      docker: this.installCommand('docker', baseUrl, g.token, NAME_PLACEHOLDER),
+      'docker-compose': this.installCommand('docker-compose', baseUrl, g.token, NAME_PLACEHOLDER),
+    };
+    return { enabled: true, token: g.token, commands, namePlaceholder: NAME_PLACEHOLDER };
+  }
+
+  /** Whether the presented token is the active global enrollment token. */
+  private async matchesGlobalToken(presented: string): Promise<boolean> {
+    const g = await this.readGlobal();
+    if (!g.enabled || !g.token) return false;
+    return this.crypto.safeCompareHash(
+      this.crypto.hashToken(presented),
+      this.crypto.hashToken(g.token),
+    );
   }
 
   installScript(): string {
@@ -103,6 +244,7 @@ export class AgentsService {
 set -e
 AMBER_URL="\${AMBER_URL:-${baseUrl}}"
 : "\${AMBER_TOKEN:?AMBER_TOKEN is required}"
+AMBER_NAME="\${AMBER_NAME:-}"
 INSTALL_DIR="\${INSTALL_DIR:-/opt/amber-agent}"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
@@ -125,6 +267,7 @@ After=network-online.target
 [Service]
 Environment=AMBER_URL=$AMBER_URL
 Environment=AMBER_TOKEN=$AMBER_TOKEN
+Environment=AMBER_NAME=$AMBER_NAME
 Environment=INSTALL_DIR=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/amber-agent
 Restart=always
@@ -200,17 +343,32 @@ echo "Amber agent installed and started."
   // --- Agent: enrollment ----------------------------------------------------
 
   async enroll(dto: EnrollDto) {
-    const tokenHash = this.crypto.hashToken(dto.token);
-    const token = await this.db
-      .selectFrom('enrollment_tokens')
-      .selectAll()
-      .where('token_hash', '=', tokenHash)
-      .executeTakeFirst();
+    // A rollout token — whether the reusable global token or a one-time token —
+    // is only ever exchanged here for the agent's own long-lived credential.
+    const viaGlobal = await this.matchesGlobalToken(dto.token);
 
-    if (!token) throw new ForbiddenException('Invalid enrollment token');
-    if (token.used_at) throw new ForbiddenException('Token already used');
-    if (new Date(token.expires_at) < new Date()) {
-      throw new ForbiddenException('Enrollment token expired');
+    let oneTimeTokenId: string | null = null;
+    let name = dto.agentName?.trim();
+
+    if (!viaGlobal) {
+      const token = await this.db
+        .selectFrom('enrollment_tokens')
+        .selectAll()
+        .where('token_hash', '=', this.crypto.hashToken(dto.token))
+        .executeTakeFirst();
+
+      if (!token) throw new ForbiddenException('Invalid enrollment token');
+      if (token.used_at) throw new ForbiddenException('Token already used');
+      if (new Date(token.expires_at) < new Date()) {
+        throw new ForbiddenException('Enrollment token expired');
+      }
+      oneTimeTokenId = token.id;
+      // A one-time token may pin the agent name; otherwise the agent names itself.
+      name = token.intended_agent_name?.trim() || name;
+    }
+
+    if (!name) {
+      throw new BadRequestException('Agent name is required for enrollment');
     }
 
     // Server keypair for signing task payloads (integrity verification).
@@ -223,7 +381,7 @@ echo "Amber agent installed and started."
     const agent = await this.db
       .insertInto('agents')
       .values({
-        name: token.intended_agent_name ?? dto.agentName,
+        name,
         hostname: dto.hostname ?? null,
         os: dto.os ?? null,
         deploy_method: 'binary',
@@ -236,13 +394,18 @@ echo "Amber agent installed and started."
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    await this.db
-      .updateTable('enrollment_tokens')
-      .set({ used_at: new Date() })
-      .where('id', '=', token.id)
-      .execute();
+    // One-time tokens are consumed; the global token stays valid for the fleet.
+    if (oneTimeTokenId) {
+      await this.db
+        .updateTable('enrollment_tokens')
+        .set({ used_at: new Date() })
+        .where('id', '=', oneTimeTokenId)
+        .execute();
+    }
 
-    this.logger.log(`Agent enrolled: ${agent.name} (${agent.id})`);
+    this.logger.log(
+      `Agent enrolled: ${agent.name} (${agent.id})${viaGlobal ? ' [self-registered]' : ''}`,
+    );
     return {
       agentId: agent.id,
       agentKey,

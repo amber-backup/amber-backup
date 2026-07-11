@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -21,10 +22,19 @@ export class CreateEnrollmentTokenDto {
   @Max(10080)
   expiresInMinutes?: number;
 
-  @ApiPropertyOptional({ enum: ['binary', 'docker'], default: 'binary' })
+  @ApiPropertyOptional({
+    enum: ['binary', 'docker', 'docker-compose'],
+    default: 'binary',
+  })
   @IsOptional()
-  @IsIn(['binary', 'docker'])
-  deployMethod?: 'binary' | 'docker';
+  @IsIn(['binary', 'docker', 'docker-compose'])
+  deployMethod?: 'binary' | 'docker' | 'docker-compose';
+}
+
+export class SetGlobalEnrollmentDto {
+  @ApiProperty({ description: 'Enable or disable global self-registration' })
+  @IsBoolean()
+  enabled!: boolean;
 }
 
 export class UpdateAgentDto {

@@ -3,11 +3,12 @@ import { icon } from '../core/icons';
 import { pageHeader, actionButton } from '../core/layout';
 import { api, Agent } from '../core/api';
 import { router } from '../core/router';
-import { openModal, toast, confirmDialog, fmtRelative } from '../core/ui';
+import { openModal, toast, confirmDialog, fmtRelative, copyToClipboard } from '../core/ui';
 
 interface EnrollToken {
   token: string;
   expiresAt: string;
+  deployMethod: string;
   installCommand: string;
 }
 
@@ -76,14 +77,93 @@ function agentRow(a: Agent): HTMLElement {
   );
 }
 
-function openEnroll(): void {
-  const nameInput = h('input', { type: 'text', placeholder: 'e.g. web-01 (optional)' });
-  const methodSelect = h(
+interface GlobalEnroll {
+  enabled: boolean;
+  token: string | null;
+  commands: Record<string, string> | null;
+  namePlaceholder: string;
+}
+
+const CMD_STYLE =
+  'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;white-space:pre-wrap;word-break:break-all;color:var(--amber-light)';
+
+function methodSelect(): HTMLSelectElement {
+  return h(
     'select',
     {},
     h('option', { value: 'binary' }, 'Binary (systemd)'),
     h('option', { value: 'docker' }, 'Docker'),
-  );
+    h('option', { value: 'docker-compose' }, 'Docker Compose'),
+  ) as HTMLSelectElement;
+}
+
+function intro(method: string): string {
+  return method === 'docker-compose'
+    ? 'Save as docker-compose.yml on the target server, then run "docker compose up -d":'
+    : 'Run on the target server:';
+}
+
+async function openEnroll(): Promise<void> {
+  let global: GlobalEnroll = { enabled: false, token: null, commands: null, namePlaceholder: '' };
+  try {
+    global = await api.get<GlobalEnroll>('/agents/enrollment/global');
+  } catch {
+    /* fall back to one-time tokens */
+  }
+  if (global.enabled && global.commands) openGlobalRollout(global);
+  else openTokenRollout();
+}
+
+/** Self-registration: the global token is already active; just pick a name. */
+function openGlobalRollout(global: GlobalEnroll): void {
+  const nameInput = h('input', { type: 'text', placeholder: 'e.g. web-01' });
+  const method = methodSelect();
+  const cmdBox = h('div', { class: 'mono', style: CMD_STYLE });
+  const introEl = h('p', { style: 'font-size:13px;color:var(--text-2);margin-bottom:10px' });
+  const hint = h('div', { class: 'help', style: 'color:var(--text-2)' }, 'Enter an agent name to get the command.');
+  const copyBtn = h('button', { class: 'btn btn-ghost btn-sm' }, icon('copy'), 'Copy');
+
+  const shownCommand = (): string =>
+    (global.commands![method.value] ?? '').replaceAll(
+      global.namePlaceholder,
+      nameInput.value.trim() || '<agent-name>',
+    );
+
+  const update = (): void => {
+    const ready = !!nameInput.value.trim();
+    introEl.textContent = intro(method.value);
+    cmdBox.textContent = shownCommand();
+    copyBtn.toggleAttribute('disabled', !ready);
+    hint.style.display = ready ? 'none' : 'block';
+  };
+  nameInput.addEventListener('input', update);
+  method.addEventListener('change', update);
+  copyBtn.addEventListener('click', async () => {
+    if (!nameInput.value.trim()) return;
+    const ok = await copyToClipboard(shownCommand());
+    toast(ok ? 'Command copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+  });
+  update();
+
+  openModal({
+    title: 'Roll out agent',
+    body: h(
+      'div',
+      { style: 'display:flex;flex-direction:column;gap:16px' },
+      h('div', { class: 'field' }, h('label', {}, 'Agent name'), nameInput),
+      h('div', { class: 'field' }, h('label', {}, 'Method'), method),
+      introEl,
+      cmdBox,
+      hint,
+      h('div', {}, copyBtn),
+    ),
+  });
+}
+
+/** One-time tokens: generate a short-lived token per agent. */
+function openTokenRollout(): void {
+  const nameInput = h('input', { type: 'text', placeholder: 'e.g. web-01 (optional)' });
+  const method = methodSelect();
   const result = h('div', {});
 
   const generateBtn = h('button', { class: 'btn btn-primary' }, 'Generate token');
@@ -92,20 +172,17 @@ function openEnroll(): void {
     try {
       const res = await api.post<EnrollToken>('/agents/enrollment-tokens', {
         intendedAgentName: nameInput.value || undefined,
-        deployMethod: methodSelect.value,
+        deployMethod: method.value,
         expiresInMinutes: 60,
       });
-      const cmd = h('div', {
-        class: 'mono',
-        style: 'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;word-break:break-all;color:var(--amber-light)',
-      }, res.installCommand);
+      const cmd = h('div', { class: 'mono', style: CMD_STYLE }, res.installCommand);
       const copyBtn = h('button', { class: 'btn btn-ghost btn-sm' }, icon('copy'), 'Copy');
-      copyBtn.addEventListener('click', () => {
-        void navigator.clipboard.writeText(res.installCommand);
-        toast('Command copied', 'success');
+      copyBtn.addEventListener('click', async () => {
+        const ok = await copyToClipboard(res.installCommand);
+        toast(ok ? 'Command copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
       });
       result.replaceChildren(
-        h('p', { style: 'font-size:13px;color:var(--text-2);margin-bottom:10px' }, 'Run on the target server (valid for 60 min):'),
+        h('p', { style: 'font-size:13px;color:var(--text-2);margin-bottom:10px' }, `${intro(res.deployMethod)} (valid for 60 min):`),
         cmd,
         h('div', { style: 'margin-top:10px' }, copyBtn),
       );
@@ -122,7 +199,7 @@ function openEnroll(): void {
       'div',
       { style: 'display:flex;flex-direction:column;gap:16px' },
       h('div', { class: 'field' }, h('label', {}, 'Agent name'), nameInput),
-      h('div', { class: 'field' }, h('label', {}, 'Method'), methodSelect),
+      h('div', { class: 'field' }, h('label', {}, 'Method'), method),
       h('div', {}, generateBtn),
       result,
     ),

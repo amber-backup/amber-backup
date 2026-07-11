@@ -3,7 +3,15 @@ import { icon } from '../core/icons';
 import { pageHeader, actionButton } from '../core/layout';
 import { api } from '../core/api';
 import { auth } from '../core/auth';
-import { openModal, toast, field, confirmDialog, fmtRelative } from '../core/ui';
+import { openModal, toast, field, confirmDialog, fmtRelative, copyToClipboard } from '../core/ui';
+
+interface GlobalEnroll {
+  enabled: boolean;
+  token: string | null;
+}
+
+const MONO_STYLE =
+  'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;word-break:break-all;color:var(--amber-light)';
 
 interface ApiKey {
   id: string;
@@ -29,6 +37,72 @@ export async function renderSettings(): Promise<Node> {
       ),
     ),
   );
+
+  // Admin-only: global agent self-registration.
+  const enrollPanel = h('div', { class: 'panel section-gap' });
+  const renderEnroll = async (): Promise<void> => {
+    let g: GlobalEnroll;
+    try {
+      g = await api.get<GlobalEnroll>('/agents/enrollment/global');
+    } catch {
+      enrollPanel.replaceChildren();
+      return;
+    }
+    const toggle = h('input', { type: 'checkbox', checked: g.enabled }) as HTMLInputElement;
+    toggle.addEventListener('change', async () => {
+      try {
+        await api.patch('/agents/enrollment/global', { enabled: toggle.checked });
+        toast(toggle.checked ? 'Self-registration enabled' : 'Self-registration disabled', 'success');
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Error', 'error');
+      }
+      void renderEnroll();
+    });
+
+    const children: Node[] = [
+      h('div', { class: 'panel-head' }, h('h2', {}, 'Agent self-registration')),
+      h('div', { class: 'row' },
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title' }, 'Global enrollment token'),
+          h('div', { class: 'row-sub' }, 'When enabled, agents register themselves with this shared token — they choose their own name and exchange the token for their own credential.'),
+        ),
+        h('label', { class: 'checkbox' }, toggle, 'Enabled'),
+      ),
+    ];
+
+    if (g.enabled && g.token) {
+      const token = g.token;
+      const tokenBox = h('div', { class: 'mono', style: MONO_STYLE }, token);
+      const copyBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Copy token' }, icon('copy'));
+      copyBtn.addEventListener('click', async () => {
+        const ok = await copyToClipboard(token);
+        toast(ok ? 'Token copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+      });
+      const rotateBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Rotate token' }, icon('refresh'));
+      rotateBtn.addEventListener('click', () =>
+        confirmDialog(
+          'Rotate global token',
+          'The current token stops working for new rollouts. Agents already enrolled keep working.',
+          async () => {
+            await api.post('/agents/enrollment/global/rotate');
+            toast('Token rotated', 'success');
+            void renderEnroll();
+          },
+        ),
+      );
+      children.push(
+        h('div', { class: 'row' },
+          h('div', { class: 'row-main', style: 'min-width:0' },
+            h('div', { class: 'row-title' }, 'Token'),
+            tokenBox,
+          ),
+          h('div', { class: 'row-actions' }, copyBtn, rotateBtn),
+        ),
+      );
+    }
+    enrollPanel.replaceChildren(...children);
+  };
+  if (auth.isAdmin) void renderEnroll();
 
   const keysPanel = h('div', { class: 'panel section-gap' });
   const renderKeys = (list: ApiKey[]) => {
@@ -103,7 +177,10 @@ export async function renderSettings(): Promise<Node> {
       style: 'background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;word-break:break-all;color:var(--amber-light)',
     }, key);
     const copyBtn = h('button', { class: 'btn btn-ghost btn-sm' }, icon('copy'), 'Copy');
-    copyBtn.addEventListener('click', () => { void navigator.clipboard.writeText(key); toast('Copied', 'success'); });
+    copyBtn.addEventListener('click', async () => {
+      const ok = await copyToClipboard(key);
+      toast(ok ? 'Copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    });
     openModal({
       title: 'API key created',
       body: h('div', { style: 'display:flex;flex-direction:column;gap:12px' },
@@ -121,6 +198,7 @@ export async function renderSettings(): Promise<Node> {
       actionButton('Sign out', 'logout', async () => { await auth.logout(); location.reload(); }, 'ghost'),
     ]),
     profilePanel,
+    auth.isAdmin ? enrollPanel : null,
     keysPanel,
   );
 }

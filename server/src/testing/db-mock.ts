@@ -67,16 +67,24 @@ export interface DbMock {
   deleteFrom: jest.Mock;
 }
 
+/** A builder, or a resolver that picks one per table name (first arg of the op). */
+type BuilderOrResolver = ChainBuilder | ((table: string) => ChainBuilder);
+
+function resolve(b: BuilderOrResolver | undefined, table: unknown): ChainBuilder {
+  if (!b) return chain();
+  return typeof b === 'function' ? b(String(table)) : b;
+}
+
 export function createDbMock(builders: {
-  insertInto?: ChainBuilder;
-  selectFrom?: ChainBuilder;
-  updateTable?: ChainBuilder;
-  deleteFrom?: ChainBuilder;
+  insertInto?: BuilderOrResolver;
+  selectFrom?: BuilderOrResolver;
+  updateTable?: BuilderOrResolver;
+  deleteFrom?: BuilderOrResolver;
 }): DbMock {
-  const insertInto = jest.fn(() => builders.insertInto ?? chain());
-  const selectFrom = jest.fn(() => builders.selectFrom ?? chain());
-  const updateTable = jest.fn(() => builders.updateTable ?? chain());
-  const deleteFrom = jest.fn(() => builders.deleteFrom ?? chain());
+  const insertInto = jest.fn((t?: unknown) => resolve(builders.insertInto, t));
+  const selectFrom = jest.fn((t?: unknown) => resolve(builders.selectFrom, t));
+  const updateTable = jest.fn((t?: unknown) => resolve(builders.updateTable, t));
+  const deleteFrom = jest.fn((t?: unknown) => resolve(builders.deleteFrom, t));
   const db = { insertInto, selectFrom, updateTable, deleteFrom } as unknown as Db;
   return { db, insertInto, selectFrom, updateTable, deleteFrom };
 }

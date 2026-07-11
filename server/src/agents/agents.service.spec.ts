@@ -1,4 +1,9 @@
-import { ForbiddenException, NotFoundException, StreamableFile } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  StreamableFile,
+} from '@nestjs/common';
 import { createPublicKey } from 'crypto';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -38,6 +43,33 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       expect(stored.token_hash).toMatch(/^[0-9a-f]{64}$/);
       // The plaintext token is embedded in the install command shown to the admin.
       expect(result.installCommand).toContain(result.token);
+    });
+
+    it('emits a docker-compose file for the docker-compose method', async () => {
+      const { db } = createDbMock({ insertInto: chain({ execute: [] }) });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      const result = await service.createEnrollmentToken('admin-1', {
+        deployMethod: 'docker-compose',
+      });
+
+      expect(result.deployMethod).toBe('docker-compose');
+      expect(result.installCommand).toContain('services:');
+      expect(result.installCommand).toContain('amber-agent:');
+      expect(result.installCommand).toContain(`AMBER_TOKEN: ${result.token}`);
+      expect(result.installCommand).toContain('- amber-agent:/var/lib/amber-agent');
+    });
+
+    it('emits a docker run command for the docker method', async () => {
+      const { db } = createDbMock({ insertInto: chain({ execute: [] }) });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      const result = await service.createEnrollmentToken('admin-1', {
+        deployMethod: 'docker',
+      });
+
+      expect(result.installCommand).toMatch(/^docker run /);
+      expect(result.installCommand).toContain(`AMBER_TOKEN=${result.token}`);
     });
   });
 
@@ -82,9 +114,16 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       };
     }
 
+    // Route the app_settings lookup (global-token check) to "not configured" so
+    // enroll falls through to the one-time enrollment_tokens path.
+    const noGlobal =
+      (tokenChain: ReturnType<typeof chain>) =>
+      (table: string): ReturnType<typeof chain> =>
+        table === 'app_settings' ? chain({ executeTakeFirst: undefined }) : tokenChain;
+
     it('rejects an unknown token', async () => {
       const select = chain({ executeTakeFirst: undefined });
-      const { db } = createDbMock({ selectFrom: select });
+      const { db } = createDbMock({ selectFrom: noGlobal(select) });
       const service = new AgentsService(db, crypto, targets, notifications);
 
       await expect(
@@ -96,7 +135,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       const select = chain({
         executeTakeFirst: { ...validTokenRow(), used_at: new Date() },
       });
-      const { db } = createDbMock({ selectFrom: select });
+      const { db } = createDbMock({ selectFrom: noGlobal(select) });
       const service = new AgentsService(db, crypto, targets, notifications);
 
       await expect(
@@ -111,7 +150,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
           expires_at: new Date(Date.now() - 1000),
         },
       });
-      const { db } = createDbMock({ selectFrom: select });
+      const { db } = createDbMock({ selectFrom: noGlobal(select) });
       const service = new AgentsService(db, crypto, targets, notifications);
 
       await expect(
@@ -126,7 +165,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       });
       const update = chain({ execute: [] });
       const { db, updateTable } = createDbMock({
-        selectFrom: select,
+        selectFrom: noGlobal(select),
         insertInto: insert,
         updateTable: update,
       });
@@ -167,6 +206,107 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       // The token is burned after a successful enrollment.
       expect(updateTable).toHaveBeenCalledWith('enrollment_tokens');
       expect(update.set.mock.calls[0][0]).toHaveProperty('used_at');
+    });
+  });
+
+  describe('global (self-registration) token', () => {
+    // A stored app_settings row holding an encrypted global token.
+    const storedGlobal = (token: string, enabled = true) => {
+      const enc = crypto.encrypt(token);
+      return chain({
+        executeTakeFirst: {
+          value: JSON.stringify({
+            enabled,
+            ciphertext: enc.ciphertext,
+            nonce: enc.nonce,
+          }),
+        },
+      });
+    };
+
+    it('mints and encrypts a token on first enable', async () => {
+      const insert = chain({ execute: [] });
+      const { db } = createDbMock({
+        selectFrom: chain({ executeTakeFirst: undefined }), // nothing stored yet
+        insertInto: insert,
+      });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      const res = await service.setGlobalEnrollment(true);
+
+      expect(res.enabled).toBe(true);
+      expect(res.token).toBeTruthy();
+      const stored = insert.values.mock.calls[0][0] as { value: string };
+      const parsed = JSON.parse(stored.value);
+      expect(parsed.enabled).toBe(true);
+      expect(parsed.ciphertext).toBeTruthy();
+      // The plaintext token is never stored.
+      expect(stored.value).not.toContain(res.token as string);
+    });
+
+    it('hides the token when disabled', async () => {
+      const { db } = createDbMock({
+        selectFrom: storedGlobal('SECRET-GLOBAL', false),
+      });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      await expect(service.getGlobalEnrollment()).resolves.toEqual({
+        enabled: false,
+        token: null,
+      });
+    });
+
+    it('exposes rollout commands with a name placeholder when enabled', async () => {
+      const { db } = createDbMock({
+        selectFrom: storedGlobal('SECRET-GLOBAL'),
+      });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      const info = await service.globalEnrollmentInfo();
+      expect(info.enabled).toBe(true);
+      expect(info.token).toBe('SECRET-GLOBAL');
+      expect(info.commands!.binary).toContain('SECRET-GLOBAL');
+      expect(info.commands!.binary).toContain(info.namePlaceholder);
+      expect(info.commands!['docker-compose']).toContain(info.namePlaceholder);
+    });
+
+    it('enrolls via the global token without consuming it, using the agent-chosen name', async () => {
+      const insert = chain({
+        executeTakeFirstOrThrow: { id: 'agent-9', poll_interval_seconds: 30 },
+      });
+      const { db, updateTable } = createDbMock({
+        selectFrom: (table) =>
+          table === 'app_settings'
+            ? storedGlobal('GLOBAL-TOK')
+            : chain({ executeTakeFirst: undefined }),
+        insertInto: insert,
+      });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      const result = await service.enroll({
+        token: 'GLOBAL-TOK',
+        agentName: 'web-9',
+      } as never);
+
+      expect(result.agentId).toBe('agent-9');
+      const stored = insert.values.mock.calls[0][0] as { name: string };
+      expect(stored.name).toBe('web-9'); // agent names itself
+      // Global token is reusable: no enrollment_tokens row is consumed.
+      expect(updateTable).not.toHaveBeenCalled();
+    });
+
+    it('rejects global enrollment without an agent name', async () => {
+      const { db } = createDbMock({
+        selectFrom: (table) =>
+          table === 'app_settings'
+            ? storedGlobal('GLOBAL-TOK')
+            : chain({ executeTakeFirst: undefined }),
+      });
+      const service = new AgentsService(db, crypto, targets, notifications);
+
+      await expect(
+        service.enroll({ token: 'GLOBAL-TOK', agentName: '  ' } as never),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

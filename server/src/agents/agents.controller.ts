@@ -19,6 +19,7 @@ import { RequestUser } from '../common/auth/request-user';
 import { AgentsService } from './agents.service';
 import {
   CreateEnrollmentTokenDto,
+  SetGlobalEnrollmentDto,
   UpdateAgentDto,
 } from './dto/agent.dto';
 
@@ -57,6 +58,27 @@ export class AgentsController {
     @Body() dto: CreateEnrollmentTokenDto,
   ) {
     return this.agents.createEnrollmentToken(user.id, dto);
+  }
+
+  @RequireAdmin()
+  @Get('enrollment/global')
+  @ApiOperation({ summary: 'Global self-registration state + rollout commands' })
+  globalEnrollment() {
+    return this.agents.globalEnrollmentInfo();
+  }
+
+  @RequireAdmin()
+  @Patch('enrollment/global')
+  @ApiOperation({ summary: 'Enable/disable global self-registration' })
+  setGlobalEnrollment(@Body() dto: SetGlobalEnrollmentDto) {
+    return this.agents.setGlobalEnrollment(dto.enabled);
+  }
+
+  @RequireAdmin()
+  @Post('enrollment/global/rotate')
+  @ApiOperation({ summary: 'Rotate the global enrollment token' })
+  rotateGlobalToken() {
+    return this.agents.rotateGlobalToken();
   }
 
   @RequireAdmin()

@@ -164,6 +164,22 @@ export interface EnrollmentTokensTable {
 export type EnrollmentToken = Selectable<EnrollmentTokensTable>;
 export type NewEnrollmentToken = Insertable<EnrollmentTokensTable>;
 
+// --- app_settings -----------------------------------------------------------
+
+export interface AppSettingsTable {
+  key: string;
+  value: ColumnType<unknown, string, string>;
+  updated_at: Generated<Date>;
+}
+
+/** Stored (encrypted) value of the `global_enrollment` setting. */
+export interface GlobalEnrollmentValue {
+  enabled: boolean;
+  /** Encrypted global token; null when never generated. */
+  ciphertext: string | null;
+  nonce: string | null;
+}
+
 // --- backup_jobs ------------------------------------------------------------
 
 export interface ResticOptions {
@@ -329,6 +345,7 @@ export interface Database {
   targets: TargetsTable;
   agents: AgentsTable;
   enrollment_tokens: EnrollmentTokensTable;
+  app_settings: AppSettingsTable;
   backup_jobs: BackupJobsTable;
   job_runs: JobRunsTable;
   restore_runs: RestoreRunsTable;
