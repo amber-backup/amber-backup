@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/amber-backup/amber-backup/compare/v1.1.0...v1.2.0) (2026-07-11)
+
+
+### Features
+
+* **server:** implement agent self-registration and global tokens ([6c5435c](https://github.com/amber-backup/amber-backup/commit/6c5435c60f522381759aa732f76fa3ea6c8a0435))
+* **ui:** add duplication feature for jobs and targets ([5855765](https://github.com/amber-backup/amber-backup/commit/585576596205c6e8182adc00a9fa5df2f63db84c))
+
 # [1.1.0](https://github.com/amber-backup/amber-backup/compare/v1.0.1...v1.1.0) (2026-07-11)
 
 
