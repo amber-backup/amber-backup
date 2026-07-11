@@ -12,6 +12,7 @@ one place. Remote hosts are covered by a lightweight Go agent.
 - **Jobs** — cron-scheduled backups with full restic options and integrated retention (`forget`/`prune`).
 - **Restore** — live snapshot browsing (`snapshots` + `ls`), selective or full restore in three modes (original / alternate path / download archive), dry-run and overwrite safety.
 - **Agents** — enrollment tokens + install command, poll-based task dispatch, heartbeat/offline detection, reported restic version.
+- **Notifications** — per-job success/failure alerts via Email (SMTP), generic webhook, Slack, Microsoft Teams, Discord, Telegram, Gotify and ntfy.
 - **Auth & RBAC** — local login (Argon2), session JWT, API keys with restrictable scopes, per-resource grants (view/operate/manage), OIDC + Microsoft Entra SSO with admin approval for new users.
 - **Security** — AES-256-GCM encryption of repo passwords and backend credentials at rest; credentials handed to agents only over the authenticated channel.
 
