@@ -90,7 +90,7 @@ export async function renderAdmin(): Promise<Node> {
 
     if (g.enabled && g.token) {
       const token = g.token;
-      const tokenBox = h('div', { class: 'mono', style: MONO_STYLE }, token);
+      const tokenBox = h('div', { class: 'mono', style: `${MONO_STYLE};flex:1;min-width:0` }, token);
       const copyBtn = h('button', { class: 'btn btn-ghost btn-sm', title: 'Copy token' }, icon('copy'));
       copyBtn.addEventListener('click', async () => {
         const ok = await copyToClipboard(token);
@@ -112,9 +112,12 @@ export async function renderAdmin(): Promise<Node> {
         h('div', { class: 'row' },
           h('div', { class: 'row-main', style: 'min-width:0' },
             h('div', { class: 'row-title' }, 'Token'),
-            tokenBox,
+            h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:6px' },
+              tokenBox,
+              copyBtn,
+              rotateBtn,
+            ),
           ),
-          h('div', { class: 'row-actions' }, copyBtn, rotateBtn),
         ),
       );
     }
