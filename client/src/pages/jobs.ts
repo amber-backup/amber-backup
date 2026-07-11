@@ -75,11 +75,13 @@ function jobRow(j: Job, targets: Target[], agents: Agent[], channels: Notificati
         },
         icon('play', 15),
       ),
-      h('button', { class: 'btn btn-ghost btn-sm', onclick: () => openEditor(targets, agents, channels, j) }, icon('edit')),
+      h('button', { class: 'btn btn-ghost btn-sm', title: 'Edit', onclick: () => openEditor(targets, agents, channels, j) }, icon('edit')),
+      h('button', { class: 'btn btn-ghost btn-sm', title: 'Duplicate', onclick: () => openEditor(targets, agents, channels, j, true) }, icon('copy')),
       h(
         'button',
         {
           class: 'btn btn-ghost btn-sm',
+          title: 'Delete',
           onclick: () =>
             confirmDialog('Delete job', `"${j.name}" will be removed.`, async () => {
               await api.del(`/jobs/${j.id}`);
@@ -133,12 +135,14 @@ function describeCron(expr: string): string | null {
   return null;
 }
 
-function openEditor(targets: Target[], agents: Agent[], channels: NotificationChannel[], job?: Job): void {
-  const isEdit = !!job;
+function openEditor(targets: Target[], agents: Agent[], channels: NotificationChannel[], job?: Job, duplicate = false): void {
+  // Duplicate: prefill from an existing job but create a new one (POST).
+  const isEdit = !!job && !duplicate;
+  const isDuplicate = !!job && duplicate;
   const opts = (job?.restic_options ?? {}) as Record<string, any>;
   const ret = (opts.retention ?? {}) as Record<string, any>;
 
-  const nameInput = h('input', { type: 'text', value: job?.name ?? '' });
+  const nameInput = h('input', { type: 'text', value: isDuplicate ? `Copy of ${job!.name}` : (job?.name ?? '') });
 
   const tagsInput = h('input', { type: 'text', value: (opts.tags ?? []).join(', '), placeholder: 'daily, important' });
   const enabledCheck = h('input', { type: 'checkbox', checked: job ? job.enabled : true }) as HTMLInputElement;
@@ -240,7 +244,7 @@ function openEditor(targets: Target[], agents: Agent[], channels: NotificationCh
   );
 
   openModal({
-    title: isEdit ? 'Edit job' : 'New job',
+    title: isEdit ? 'Edit job' : isDuplicate ? 'Duplicate job' : 'New job',
     body,
     wide: true,
     confirmLabel: isEdit ? 'Save' : 'Create',

@@ -73,11 +73,13 @@ function targetRow(t: Target, backends: BackendDef[]): HTMLElement {
         },
         'Test',
       ),
-      h('button', { class: 'btn btn-ghost btn-sm', onclick: () => openEditor(backends, t) }, icon('edit')),
+      h('button', { class: 'btn btn-ghost btn-sm', title: 'Edit', onclick: () => openEditor(backends, t) }, icon('edit')),
+      h('button', { class: 'btn btn-ghost btn-sm', title: 'Duplicate', onclick: () => openEditor(backends, t, true) }, icon('copy')),
       h(
         'button',
         {
           class: 'btn btn-ghost btn-sm',
+          title: 'Delete',
           onclick: () =>
             confirmDialog(
               'Delete target',
@@ -116,9 +118,17 @@ function fieldInput(f: BackendField, existing?: Record<string, unknown>): HTMLEl
   });
 }
 
-function openEditor(backends: BackendDef[], target?: Target): void {
-  const isEdit = !!target;
-  const nameInput = h('input', { type: 'text', value: target?.name ?? '', placeholder: 'My backup target' });
+function openEditor(backends: BackendDef[], target?: Target, duplicate = false): void {
+  // Duplicate: prefill from an existing target but create a new one (POST).
+  // Secret config fields aren't returned by the API, so they start empty and
+  // must be re-entered — as does the repository password.
+  const isEdit = !!target && !duplicate;
+  const isDuplicate = !!target && duplicate;
+  const nameInput = h('input', {
+    type: 'text',
+    value: isDuplicate ? `Copy of ${target!.name}` : (target?.name ?? ''),
+    placeholder: 'My backup target',
+  });
   const passwordInput = h('input', {
     type: 'password',
     placeholder: isEdit ? '(leave unchanged)' : 'Repository password',
@@ -179,7 +189,7 @@ function openEditor(backends: BackendDef[], target?: Target): void {
   );
 
   openModal({
-    title: isEdit ? 'Edit target' : 'New target',
+    title: isEdit ? 'Edit target' : isDuplicate ? 'Duplicate target' : 'New target',
     body,
     confirmLabel: isEdit ? 'Save' : 'Create',
     onConfirm: async () => {
