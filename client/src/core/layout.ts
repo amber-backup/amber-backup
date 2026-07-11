@@ -1,5 +1,5 @@
 import { h } from './dom';
-import { icon, BRAND_MARK, ICONS } from './icons';
+import { icon, BRAND_MARK_SRC, ICONS } from './icons';
 import { auth } from './auth';
 import { router } from './router';
 
@@ -22,10 +22,16 @@ const NAV: NavEntry[] = [
 ];
 
 /** Builds the persistent app shell; page content mounts into #outlet. */
-export function renderShell(): HTMLElement {
-  const brandSvg = document.createElement('div');
-  brandSvg.innerHTML = BRAND_MARK;
+const brandMark = (): HTMLElement =>
+  h('img', {
+    class: 'brand-mark',
+    src: BRAND_MARK_SRC,
+    width: 28,
+    height: 28,
+    alt: '',
+  });
 
+export function renderShell(): HTMLElement {
   const navItems = NAV.filter((n) => !n.adminOnly || auth.isAdmin).map((n) =>
     h(
       'a',
@@ -41,7 +47,7 @@ export function renderShell(): HTMLElement {
     h(
       'div',
       { class: 'brand' },
-      brandSvg.firstElementChild!,
+      brandMark(),
       h('div', { class: 'brand-name', html: 'Amber<span>Backup</span>' }),
     ),
     ...navItems,
@@ -85,8 +91,6 @@ export function renderShell(): HTMLElement {
   const closeNav = () => shell.classList.remove('nav-open');
 
   // Mobile-only top bar with a hamburger that toggles the sidebar drawer.
-  const mobileBrand = document.createElement('div');
-  mobileBrand.innerHTML = BRAND_MARK;
   const mobileTopbar = h(
     'header',
     { class: 'mobile-topbar' },
@@ -102,7 +106,7 @@ export function renderShell(): HTMLElement {
     h(
       'div',
       { class: 'brand' },
-      mobileBrand.firstElementChild!,
+      brandMark(),
       h('div', { class: 'brand-name', html: 'Amber<span>Backup</span>' }),
     ),
   );

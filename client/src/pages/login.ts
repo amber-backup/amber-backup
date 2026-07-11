@@ -1,5 +1,5 @@
 import { h } from '../core/dom';
-import { BRAND_MARK } from '../core/icons';
+import { BRAND_MARK_SRC } from '../core/icons';
 import { auth } from '../core/auth';
 import { api } from '../core/api';
 import { field } from '../core/ui';
@@ -40,7 +40,7 @@ export function renderLogin(): HTMLElement {
   const form = h(
     'div',
     { class: 'login-card' },
-    h('div', { class: 'login-brand', html: BRAND_MARK + '<div class="brand-name">Amber<span>Backup</span></div>' }),
+    h('div', { class: 'login-brand', html: `<img class="brand-mark" src="${BRAND_MARK_SRC}" width="28" height="28" alt=""><div class="brand-name">Amber<span>Backup</span></div>` }),
     errorBox,
     field('Email', email),
     field('Password', password),

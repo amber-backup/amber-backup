@@ -41,4 +41,7 @@ export function icon(name: string, size?: number): SVGElement {
   return svg(markup);
 }
 
-export const BRAND_MARK = `<svg class="brand-mark" width="28" height="28" viewBox="0 0 220 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="drop" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F4B740"/><stop offset="1" stop-color="#D98A1F"/></linearGradient><clipPath id="dropclip"><path d="M110 20 C110 20 172 120 172 176 A62 62 0 1 1 48 176 C48 120 110 20 110 20 Z"/></clipPath></defs><g clip-path="url(#dropclip)"><path d="M110 20 C110 20 172 120 172 176 A62 62 0 1 1 48 176 C48 120 110 20 110 20 Z" fill="url(#drop)"/><path d="M48 178 A62 62 0 0 0 172 178" fill="none" stroke="#FFF" stroke-width="4" opacity="0.32"/><path d="M58 156 A52 52 0 0 0 162 156" fill="none" stroke="#FFF" stroke-width="4" opacity="0.32"/><path d="M70 134 A42 42 0 0 0 150 134" fill="none" stroke="#FFF" stroke-width="4" opacity="0.32"/></g></svg>`;
+/** Public URL of the brand mark. Loaded via <img> so each instance renders in
+ *  its own document — inline <defs> ids can't collide across the sidebar and
+ *  mobile-topbar copies. Lives in client/public/logo.svg. */
+export const BRAND_MARK_SRC = '/logo.svg';
