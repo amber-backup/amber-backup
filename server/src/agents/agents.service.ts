@@ -249,6 +249,14 @@ INSTALL_DIR="\${INSTALL_DIR:-/opt/amber-agent}"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 
+# Binary agents run the host's restic (the Docker image bundles its own). Abort
+# early if it is missing so we don't install an agent that can't back anything up.
+RESTIC_BIN="\${RESTIC_BINARY:-restic}"
+if ! command -v "$RESTIC_BIN" >/dev/null 2>&1; then
+  echo "Error: restic not found (\\"$RESTIC_BIN\\"). Install restic first (https://restic.net/#installation) or set RESTIC_BINARY to its full path, then re-run this installer." >&2
+  exit 1
+fi
+
 # A token is only needed for the first enrollment; a re-run of an already
 # enrolled agent (state.json present) reuses its stored credential.
 if [ ! -f "$INSTALL_DIR/state.json" ]; then
