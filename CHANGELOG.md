@@ -1,3 +1,11 @@
+# [1.1.0](https://github.com/amber-backup/amber-backup/compare/v1.0.1...v1.1.0) (2026-07-11)
+
+
+### Features
+
+* **server:** add binary streaming for agent architectures ([4a226d9](https://github.com/amber-backup/amber-backup/commit/4a226d9cf6086ae12c1c4dcefc5b39cf5fbfe538))
+* **ui:** replace inline SVG with external logo file ([a159ef5](https://github.com/amber-backup/amber-backup/commit/a159ef56da6300ba904675497cf61db376f2b8ca))
+
 ## [1.0.1](https://github.com/amber-backup/amber-backup/compare/v1.0.0...v1.0.1) (2026-07-11)
 
 
