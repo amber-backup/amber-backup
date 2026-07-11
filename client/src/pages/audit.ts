@@ -129,9 +129,10 @@ export async function renderAuditLog(): Promise<Node> {
   };
 
   const search = h('input', {
+    class: 'input',
     type: 'search',
     placeholder: 'Search action, actor, path…',
-    style: 'max-width:280px',
+    style: 'max-width:280px;flex:1',
   }) as HTMLInputElement;
   search.addEventListener('input', () => {
     clearTimeout(searchTimer);
@@ -144,7 +145,7 @@ export async function renderAuditLog(): Promise<Node> {
 
   const outcome = h(
     'select',
-    { style: 'max-width:160px' },
+    { class: 'select', style: 'max-width:160px' },
     h('option', { value: '' }, 'All outcomes'),
     h('option', { value: 'success' }, 'Success'),
     h('option', { value: 'failure' }, 'Failure'),
