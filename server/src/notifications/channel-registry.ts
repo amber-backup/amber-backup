@@ -259,6 +259,44 @@ export const CHANNELS: ChannelDefinition[] = [
       });
     },
   },
+  {
+    type: 'ntfy',
+    label: 'ntfy',
+    fields: [
+      {
+        name: 'serverUrl',
+        label: 'Server URL',
+        type: 'text',
+        placeholder: 'https://ntfy.sh',
+        help: 'Base URL of the ntfy server. Defaults to https://ntfy.sh.',
+      },
+      { name: 'topic', label: 'Topic', type: 'text', required: true, placeholder: 'amber-backups' },
+      {
+        name: 'accessToken',
+        label: 'Access token',
+        type: 'password',
+        secret: true,
+        help: 'Optional. Required for protected topics (sent as a Bearer token).',
+      },
+    ],
+    send: async (config, secrets, message) => {
+      const base = (str(config.serverUrl) || 'https://ntfy.sh').replace(/\/$/, '');
+      const headers: Record<string, string> = {};
+      if (secrets.accessToken) headers.Authorization = `Bearer ${secrets.accessToken}`;
+      await postJson(
+        `${base}/`,
+        {
+          topic: str(config.topic),
+          title: message.title,
+          message: `${message.body}\n\n${message.url}`,
+          priority: message.status === 'success' ? 3 : 5,
+          tags: [message.status === 'success' ? 'white_check_mark' : 'rotating_light'],
+          click: message.url,
+        },
+        headers,
+      );
+    },
+  },
 ];
 
 export function getChannel(type: string): ChannelDefinition {
