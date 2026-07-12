@@ -1,3 +1,10 @@
+## [1.12.2](https://github.com/amber-backup/amber-backup/compare/v1.12.1...v1.12.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ui:** adjust login button styling for consistency ([261dcc8](https://github.com/amber-backup/amber-backup/commit/261dcc86767514433c4b1d0ea8ea2c42d2a75572))
+
 ## [1.12.1](https://github.com/amber-backup/amber-backup/compare/v1.12.0...v1.12.1) (2026-07-12)
 
 
