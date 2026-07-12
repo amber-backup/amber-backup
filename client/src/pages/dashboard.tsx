@@ -261,10 +261,18 @@ function StatCard({
 
 function RunRow({ run: r }: { run: Run }) {
   const bytes = (r.stats?.dataAdded as number) ?? null;
-  const pct = Math.round(((r.stats?.percentDone as number) ?? 0) * 100);
 
   const bytesDone = r.stats?.bytesDone as number | undefined;
   const totalBytes = r.stats?.totalBytes as number | undefined;
+
+  // Derive the percentage from the bytes done/total when available — this tracks
+  // the data actually written and doesn't depend on restic's (rounded, and early
+  // sometimes 0) percent_done. Fall back to percent_done, then 0.
+  const frac =
+    totalBytes && totalBytes > 0 && bytesDone != null
+      ? bytesDone / totalBytes
+      : ((r.stats?.percentDone as number) ?? 0);
+  const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
 
   let meta: React.ReactNode;
   if (r.status === 'running') {
