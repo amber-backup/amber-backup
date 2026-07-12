@@ -151,6 +151,7 @@ export function Login() {
           <>
             <Field label="Authentication code">
               <input
+                id="totp"
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
@@ -168,7 +169,7 @@ export function Login() {
             </div>
             <button
               className="btn btn-primary"
-              style={{ width: '100%' }}
+              style={{ width: '100%', justifyContent: 'center', marginBottom: '15px' }}
               disabled={busy}
               onClick={() => void doTotp()}
             >
