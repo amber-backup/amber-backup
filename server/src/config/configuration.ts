@@ -9,6 +9,8 @@ import 'dotenv/config';
 export interface AppConfig {
   nodeEnv: string;
   port: number;
+  /** Emit one access-log line per HTTP request (method, path, status, timing). */
+  httpLogging: boolean;
   publicBaseUrl: string;
   databaseUrl: string;
   masterEncryptionKey: string;
@@ -42,6 +44,7 @@ export function loadConfig(): AppConfig {
   return {
     nodeEnv: env.NODE_ENV ?? 'development',
     port: int(env.PORT, 3000),
+    httpLogging: bool(env.HTTP_LOGGING, true),
     publicBaseUrl: env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
     databaseUrl:
       env.DATABASE_URL ?? 'postgres://amber:amber@localhost:5432/amber',

@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { loadConfig, validateConfig } from './config/configuration';
+import { httpLogger } from './common/middleware/http-logger.middleware';
 import { runMigrations } from './database/migrator';
 
 async function bootstrap(): Promise<void> {
@@ -20,6 +21,9 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api', { exclude: ['/'] });
   app.use(cookieParser());
+  // Access log for every HTTP request (before guards/routing so 401/403 and 404
+  // are logged too). Disable with HTTP_LOGGING=false.
+  if (config.httpLogging) app.use(httpLogger);
   app.enableCors({ origin: true, credentials: true });
 
   app.useGlobalPipes(
