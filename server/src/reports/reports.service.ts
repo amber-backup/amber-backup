@@ -218,19 +218,36 @@ export class ReportsService {
         : [];
     for (const j of jobNameRows) if (!names.has(j.id)) names.set(j.id, j.name);
 
+    const statusTitle: Record<string, string> = {
+      success: 'Success',
+      failed: 'Failed',
+    };
     let totalSuccess = 0;
     let totalFailed = 0;
     const lines: string[] = [];
+    const tableRows: string[][] = [];
+    const statusTotals = new Map<string, number>();
     for (const jobId of jobIds) {
       const byStatus = counts.get(jobId) ?? new Map<string, number>();
       const parts: string[] = [];
+      const row: string[] = [names.get(jobId) ?? jobId];
       for (const status of statuses) {
         const n = byStatus.get(status) ?? 0;
         if (status === 'success') totalSuccess += n;
         if (status === 'failed') totalFailed += n;
+        statusTotals.set(status, (statusTotals.get(status) ?? 0) + n);
         parts.push(`${n} ${status}`);
+        row.push(String(n));
       }
       lines.push(`${names.get(jobId) ?? jobId}: ${parts.join(', ')}`);
+      tableRows.push(row);
+    }
+    // Append a totals row when more than one job is summarized.
+    if (tableRows.length > 1) {
+      tableRows.push([
+        'Total',
+        ...statuses.map((s) => String(statusTotals.get(s) ?? 0)),
+      ]);
     }
 
     const status: NotificationMessage['status'] =
@@ -253,6 +270,19 @@ export class ReportsService {
       body,
       jobName: name,
       url: `${loadConfig().publicBaseUrl.replace(/\/$/, '')}/#/reports`,
+      meta: [
+        { label: 'Window', value: windowLabel },
+        {
+          label: 'Totals',
+          value: `${totalSuccess} success, ${totalFailed} failed`,
+        },
+      ],
+      table: tableRows.length
+        ? {
+            head: ['Job', ...statuses.map((s) => statusTitle[s] ?? s)],
+            rows: tableRows,
+          }
+        : undefined,
     };
   }
 }

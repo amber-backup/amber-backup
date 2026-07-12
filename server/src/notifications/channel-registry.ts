@@ -28,12 +28,22 @@ export interface NotificationMessage {
   status: 'success' | 'failed';
   /** Short one-line title, e.g. "✅ Backup succeeded: Nightly home". */
   title: string;
-  /** Plain-text body with details. */
+  /** Plain-text body with details. Used by all channels as the base rendering. */
   body: string;
   /** Job name for providers that separate subject/body. */
   jobName: string;
   /** Link back to the Amber dashboard. */
   url: string;
+  /**
+   * Optional key/value detail rows. Rich channels (email) render these as a
+   * structured list; plain channels rely on `body`.
+   */
+  meta?: { label: string; value: string }[];
+  /**
+   * Optional tabular data (e.g. a report's per-job breakdown), rendered as an
+   * HTML table by rich channels. Plain channels rely on `body`.
+   */
+  table?: { head: string[]; rows: string[][] };
 }
 
 export interface ChannelDefinition {
@@ -71,6 +81,108 @@ async function postJson(
 
 const COLOR_OK = '4FB98A';
 const COLOR_FAIL = 'E8756E';
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Renders a NotificationMessage as a branded, email-client-safe HTML document:
+ * table-based layout, inline styles, no external assets. Uses structured
+ * `meta`/`table` when present and falls back to the plain-text `body`.
+ */
+export function renderEmailHtml(message: NotificationMessage): string {
+  const ok = message.status === 'success';
+  const accent = `#${ok ? COLOR_OK : COLOR_FAIL}`;
+  const badge = ok ? 'Success' : 'Attention';
+
+  const metaRows = (message.meta ?? [])
+    .map(
+      (m) =>
+        `<tr>` +
+        `<td style="padding:6px 0;font-size:13px;color:#71717a;width:34%;vertical-align:top;">${escapeHtml(
+          m.label,
+        )}</td>` +
+        `<td style="padding:6px 0;font-size:13px;color:#18181b;font-weight:600;">${escapeHtml(
+          m.value,
+        )}</td>` +
+        `</tr>`,
+    )
+    .join('');
+  const metaBlock = metaRows
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 4px;">${metaRows}</table>`
+    : '';
+
+  let tableBlock = '';
+  if (message.table && message.table.rows.length) {
+    const head = message.table.head
+      .map(
+        (c, i) =>
+          `<th style="padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#71717a;text-align:${
+            i === 0 ? 'left' : 'center'
+          };background:#fafafa;border-bottom:1px solid #e4e4e7;">${escapeHtml(c)}</th>`,
+      )
+      .join('');
+    const rows = message.table.rows
+      .map(
+        (r) =>
+          `<tr>` +
+          r
+            .map(
+              (cell, i) =>
+                `<td style="padding:9px 12px;font-size:13px;color:#27272a;border-top:1px solid #f0f0f0;text-align:${
+                  i === 0 ? 'left' : 'center'
+                };${i === 0 ? 'font-weight:600;' : ''}">${escapeHtml(cell)}</td>`,
+            )
+            .join('') +
+          `</tr>`,
+      )
+      .join('');
+    tableBlock =
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 4px;border:1px solid #e4e4e7;border-radius:8px;border-collapse:collapse;overflow:hidden;">` +
+      `<thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // When there's no structured data, render the plain-text body verbatim.
+  const bodyBlock =
+    !metaBlock && !tableBlock
+      ? `<div style="margin-top:12px;font-size:14px;line-height:1.7;color:#3f3f46;white-space:pre-wrap;">${escapeHtml(
+          message.body,
+        )}</div>`
+      : '';
+
+  return (
+    `<!doctype html><html><body style="margin:0;padding:0;background:#f4f4f5;">` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:24px 12px;">` +
+    `<tr><td align="center">` +
+    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e4e4e7;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">` +
+    `<tr><td style="background:#1c1915;padding:18px 28px;">` +
+    `<span style="font-size:18px;font-weight:700;color:#e89a1c;letter-spacing:.2px;">Amber<span style="color:#f3ede1;">Backup</span></span>` +
+    `</td></tr>` +
+    `<tr><td style="height:4px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>` +
+    `<tr><td style="padding:28px;">` +
+    `<span style="display:inline-block;background:${accent};color:#ffffff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px;">${badge}</span>` +
+    `<h1 style="margin:16px 0 4px;font-size:20px;line-height:1.3;color:#18181b;">${escapeHtml(
+      message.title,
+    )}</h1>` +
+    metaBlock +
+    tableBlock +
+    bodyBlock +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:26px;">` +
+    `<tr><td style="border-radius:8px;background:#e89a1c;">` +
+    `<a href="${escapeHtml(
+      message.url,
+    )}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#1c1915;text-decoration:none;">Open Amber Backup &rarr;</a>` +
+    `</td></tr></table>` +
+    `</td></tr>` +
+    `<tr><td style="padding:16px 28px;border-top:1px solid #eeeeee;font-size:12px;color:#a1a1aa;">Sent by Amber Backup</td></tr>` +
+    `</table></td></tr></table></body></html>`
+  );
+}
 
 export const CHANNELS: ChannelDefinition[] = [
   {
@@ -111,6 +223,7 @@ export const CHANNELS: ChannelDefinition[] = [
         to: str(config.to),
         subject: message.title,
         text: `${message.body}\n\n${message.url}`,
+        html: renderEmailHtml(message),
       });
     },
   },

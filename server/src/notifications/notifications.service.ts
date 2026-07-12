@@ -260,22 +260,28 @@ export class NotificationsService {
     finishedAt: Date | null,
   ): NotificationMessage {
     const ok = status === 'success';
-    const lines = [`Job: ${jobName}`, `Status: ${ok ? 'success' : 'failed'}`];
+    const meta: { label: string; value: string }[] = [
+      { label: 'Job', value: jobName },
+      { label: 'Status', value: ok ? 'Success' : 'Failed' },
+    ];
     if (startedAt && finishedAt) {
       const secs = Math.max(
         0,
         Math.round((new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000),
       );
-      lines.push(`Duration: ${secs}s`);
+      meta.push({ label: 'Duration', value: `${secs}s` });
     }
-    if (ok && snapshotId) lines.push(`Snapshot: ${snapshotId.slice(0, 8)}`);
-    if (!ok && error) lines.push(`Error: ${error}`);
+    if (ok && snapshotId) {
+      meta.push({ label: 'Snapshot', value: snapshotId.slice(0, 8) });
+    }
+    if (!ok && error) meta.push({ label: 'Error', value: error });
     return {
       status,
       title: `${ok ? '✅' : '❌'} Backup ${ok ? 'succeeded' : 'failed'}: ${jobName}`,
-      body: lines.join('\n'),
+      body: meta.map((m) => `${m.label}: ${m.value}`).join('\n'),
       jobName,
       url: `${loadConfig().publicBaseUrl.replace(/\/$/, '')}/#/jobs`,
+      meta,
     };
   }
 
