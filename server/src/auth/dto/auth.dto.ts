@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Length,
@@ -57,6 +58,23 @@ export class DisableTotpDto {
   @IsString()
   @MinLength(1)
   password!: string;
+}
+
+export class PasskeyRegisterDto {
+  @ApiProperty({ type: Object, description: 'RegistrationResponseJSON from the browser' })
+  @IsObject()
+  response!: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'Device label, e.g. "MacBook Touch ID"' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+}
+
+export class PasskeyLoginDto {
+  @ApiProperty({ type: Object, description: 'AuthenticationResponseJSON from the browser' })
+  @IsObject()
+  response!: Record<string, unknown>;
 }
 
 export class CreateUserDto {

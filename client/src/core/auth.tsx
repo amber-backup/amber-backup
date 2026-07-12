@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, type User } from './api';
+import { authenticatePasskey } from './passkeys';
 
 /** Login either signs in, or reports that a TOTP second factor is required. */
 export type LoginResult =
@@ -12,6 +13,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
   loginTotp: (challengeToken: string, code: string) => Promise<void>;
+  loginPasskey: () => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<User | null>;
 }
@@ -50,6 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const loginPasskey = useCallback(async (): Promise<void> => {
+    setUser(await authenticatePasskey());
+  }, []);
+
   const logout = useCallback(async (): Promise<void> => {
     await api.post('/auth/logout');
     setUser(null);
@@ -60,8 +66,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isAdmin: user?.is_admin ?? false, loading, login, loginTotp, logout, refresh }),
-    [user, loading, login, loginTotp, logout, refresh],
+    () => ({
+      user,
+      isAdmin: user?.is_admin ?? false,
+      loading,
+      login,
+      loginTotp,
+      loginPasskey,
+      logout,
+      refresh,
+    }),
+    [user, loading, login, loginTotp, loginPasskey, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

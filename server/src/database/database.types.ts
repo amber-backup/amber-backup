@@ -390,6 +390,29 @@ export type Report = Selectable<ReportsTable>;
 export type NewReport = Insertable<ReportsTable>;
 export type ReportUpdate = Updateable<ReportsTable>;
 
+// --- webauthn_credentials ---------------------------------------------------
+
+export interface WebauthnCredentialsTable {
+  id: Generated<string>;
+  user_id: string;
+  /** Base64URL credential id returned by the authenticator (unique). */
+  credential_id: string;
+  /** Base64 of the COSE public key bytes. */
+  public_key: string;
+  /** Signature counter; pg returns bigint as a string. */
+  counter: ColumnType<string, number | undefined, number>;
+  transports: JSONColumnType<string[]>;
+  device_type: string | null;
+  backed_up: ColumnType<boolean, boolean | undefined, boolean>;
+  /** User-facing device label. */
+  name: string;
+  created_at: CreatedAt;
+  last_used_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+export type WebauthnCredential = Selectable<WebauthnCredentialsTable>;
+export type NewWebauthnCredential = Insertable<WebauthnCredentialsTable>;
+export type WebauthnCredentialUpdate = Updateable<WebauthnCredentialsTable>;
+
 // --- audit_log --------------------------------------------------------------
 
 export type AuditOutcome = 'success' | 'failure';
@@ -443,5 +466,6 @@ export interface Database {
   restore_runs: RestoreRunsTable;
   notification_channels: NotificationChannelsTable;
   reports: ReportsTable;
+  webauthn_credentials: WebauthnCredentialsTable;
   audit_log: AuditLogTable;
 }

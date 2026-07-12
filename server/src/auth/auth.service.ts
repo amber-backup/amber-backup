@@ -78,6 +78,15 @@ export class AuthService {
     return this.issue(user.id, user.email, user.is_admin);
   }
 
+  /** Mints a session for a user proven by an external factor (e.g. a passkey). */
+  async issueForUser(userId: string): Promise<AuthResult> {
+    const user = await this.users.findByIdRaw(userId);
+    if (!user || user.disabled) {
+      throw new UnauthorizedException('Account is not available');
+    }
+    return this.issue(user.id, user.email, user.is_admin);
+  }
+
   /** Issues a session JWT for an already-authenticated user (also used by SSO). */
   async issue(
     id: string,

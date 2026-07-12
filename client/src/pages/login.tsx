@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BRAND_MARK_SRC } from '../core/icons';
 import { api } from '../core/api';
 import { useAuth } from '../core/auth';
+import { passkeysSupported } from '../core/passkeys';
 import { Field } from '../ui/primitives';
 
 interface SsoProvider {
@@ -11,7 +12,7 @@ interface SsoProvider {
 }
 
 export function Login() {
-  const { login, loginTotp } = useAuth();
+  const { login, loginTotp, loginPasskey } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -61,6 +62,23 @@ export function Login() {
     }
   };
 
+  const doPasskey = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await loginPasskey();
+      navigate('/', { replace: true });
+    } catch (e) {
+      // A user dismissing the native passkey prompt isn't a real error.
+      if (e && typeof e === 'object' && 'name' in e && (e as { name: string }).name === 'NotAllowedError') {
+        setBusy(false);
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Passkey sign-in failed');
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="login-wrap">
       <div className="login-card">
@@ -102,6 +120,17 @@ export function Login() {
             >
               Sign in
             </button>
+
+            {passkeysSupported() && (
+              <button
+                className="btn btn-ghost"
+                style={{ width: '100%', justifyContent: 'center' }}
+                disabled={busy}
+                onClick={() => void doPasskey()}
+              >
+                Sign in with a passkey
+              </button>
+            )}
 
             {providers.length > 0 && (
               <div className="sso-list">

@@ -6,6 +6,7 @@ import { AuthGuard } from '../common/guards/auth.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { TotpService } from './totp.service';
+import { PasskeysService } from './passkeys.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { ApiKeysController } from './api-keys.controller';
@@ -25,6 +26,7 @@ import { SettingsModule } from '../settings/settings.module';
   providers: [
     AuthService,
     TotpService,
+    PasskeysService,
     UsersService,
     ApiKeysService,
     SsoService,

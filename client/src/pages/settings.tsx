@@ -4,6 +4,7 @@ import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
 import { copyToClipboard } from '../core/clipboard';
 import { useAuth } from '../core/auth';
+import { passkeysSupported, registerPasskey, type Passkey } from '../core/passkeys';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
@@ -94,6 +95,8 @@ export function Settings() {
           </div>
         </div>
       )}
+
+      {passkeysSupported() && <PasskeysPanel />}
 
       <div className="panel section-gap">
         <div className="panel-head">
@@ -462,6 +465,107 @@ function RecoveryCodesModal({ codes, onClose }: { codes: string[]; onClose: () =
         </div>
       </div>
     </ModalFrame>
+  );
+}
+
+function PasskeysPanel() {
+  const { open, confirmDialog } = useModal();
+  const toast = useToast();
+  const { data: passkeys, loading, reload } = useAsync(() =>
+    api.get<Passkey[]>('/auth/passkeys'),
+  );
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>Passkeys</h2>
+        <span
+          className="link"
+          onClick={() => open((close) => <AddPasskeyModal onClose={close} onAdded={reload} />)}
+        >
+          + Add passkey
+        </span>
+      </div>
+      {loading || !passkeys ? (
+        <Loading label="Loading…" />
+      ) : passkeys.length === 0 ? (
+        <Empty>
+          No passkeys yet. Add one to sign in without a password using Face ID, Touch ID, Windows
+          Hello or a security key.
+        </Empty>
+      ) : (
+        passkeys.map((p) => (
+          <div className="row" key={p.id}>
+            <span className="stat-icon" style={{ background: 'var(--bg-3)', color: 'var(--text-2)' }}>
+              <Icon name="key" size={16} />
+            </span>
+            <div className="row-main">
+              <div className="row-title">{p.name}</div>
+              <div className="row-sub">
+                {`Added ${fmtRelative(p.created_at)} · last used ${fmtRelative(p.last_used_at)}`}
+              </div>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() =>
+                confirmDialog(
+                  'Remove passkey',
+                  `"${p.name}" will no longer be able to sign in.`,
+                  async () => {
+                    await api.del(`/auth/passkeys/${p.id}`);
+                    toast('Passkey removed', 'success');
+                    reload();
+                  },
+                  true,
+                )
+              }
+            >
+              <Icon name="trash" />
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function AddPasskeyModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState('');
+
+  const submit = async () => {
+    try {
+      await registerPasskey(name.trim() || 'Passkey');
+      onAdded();
+      toast('Passkey added', 'success');
+    } catch (e) {
+      // Dismissing the native prompt just cancels — keep the dialog open quietly.
+      if (e && typeof e === 'object' && 'name' in e && (e as { name: string }).name === 'NotAllowedError') {
+        return false;
+      }
+      toast(e instanceof Error ? e.message : 'Could not add passkey', 'error');
+      return false;
+    }
+  };
+
+  return (
+    <FormModal title="Add a passkey" confirmLabel="Create passkey" onClose={onClose} onSubmit={submit}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="row-sub">
+          Name this passkey so you can recognize it later, then follow your device’s prompt (Face
+          ID, Touch ID, Windows Hello, or a security key).
+        </div>
+        <Field label="Name">
+          <input
+            type="text"
+            placeholder="e.g. MacBook Touch ID"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+        </Field>
+      </div>
+    </FormModal>
   );
 }
 

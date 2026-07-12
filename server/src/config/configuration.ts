@@ -12,6 +12,10 @@ export interface AppConfig {
   /** Emit one access-log line per HTTP request (method, path, status, timing). */
   httpLogging: boolean;
   publicBaseUrl: string;
+  /** WebAuthn Relying Party ID (the registrable domain, no scheme/port). */
+  webauthnRpId: string;
+  /** Origins accepted for WebAuthn ceremonies (scheme + host + port). */
+  webauthnOrigins: string[];
   databaseUrl: string;
   masterEncryptionKey: string;
   jwtSecret: string;
@@ -39,13 +43,38 @@ function int(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Parses a URL, returning undefined instead of throwing on malformed input. */
+function tryUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export function loadConfig(): AppConfig {
   const env = process.env;
+  const publicBaseUrl = env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
+  const baseUrl = tryUrl(publicBaseUrl);
+  // WebAuthn's RP ID is the effective domain; origins must match the browser's
+  // exact origin. Both default off the public URL but can be overridden (e.g. to
+  // also accept the Vite dev origin at :5173).
+  const webauthnRpId = env.WEBAUTHN_RP_ID ?? baseUrl?.hostname ?? 'localhost';
+  const webauthnOrigins = (
+    env.WEBAUTHN_ORIGINS ??
+    baseUrl?.origin ??
+    'http://localhost:3000'
+  )
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   return {
     nodeEnv: env.NODE_ENV ?? 'development',
     port: int(env.PORT, 3000),
     httpLogging: bool(env.HTTP_LOGGING, true),
-    publicBaseUrl: env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
+    publicBaseUrl,
+    webauthnRpId,
+    webauthnOrigins,
     databaseUrl:
       env.DATABASE_URL ?? 'postgres://amber:amber@localhost:5432/amber',
     masterEncryptionKey: env.MASTER_ENCRYPTION_KEY ?? '',
