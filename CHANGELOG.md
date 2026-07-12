@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/amber-backup/amber-backup/compare/v1.10.0...v1.11.0) (2026-07-12)
+
+
+### Features
+
+* **progress:** fix agent progress update validation ([73ada3c](https://github.com/amber-backup/amber-backup/commit/73ada3c18cd8c4631b0cda4194a9edb512143968))
+
 # [1.10.0](https://github.com/amber-backup/amber-backup/compare/v1.9.0...v1.10.0) (2026-07-12)
 
 
