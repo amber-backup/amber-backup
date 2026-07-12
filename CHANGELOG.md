@@ -1,3 +1,10 @@
+## [1.12.3](https://github.com/amber-backup/amber-backup/compare/v1.12.2...v1.12.3) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ui:** improve TOTP input and login button styling ([aa1c1cf](https://github.com/amber-backup/amber-backup/commit/aa1c1cfeec22616e72d53c2356502cd0e2e46d1d))
+
 ## [1.12.2](https://github.com/amber-backup/amber-backup/compare/v1.12.1...v1.12.2) (2026-07-12)
 
 
