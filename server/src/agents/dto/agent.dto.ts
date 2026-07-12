@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -96,7 +97,12 @@ export class PollDto {
 }
 
 export class TaskProgressDto {
+  // Needs a class-validator decorator: with the global ValidationPipe's
+  // `whitelist` + `forbidNonWhitelisted`, an undecorated property is treated as
+  // non-whitelisted and the request is rejected with 400 — which silently broke
+  // all agent progress updates.
   @ApiProperty({ type: Object })
+  @IsObject()
   stats!: Record<string, unknown>;
 }
 
