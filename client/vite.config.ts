@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 import { readFileSync } from 'node:fs';
 
@@ -10,6 +11,7 @@ const rootPkg = JSON.parse(
 
 // The SPA is served by the NestJS server in production; in dev it proxies /api.
 export default defineConfig({
+  plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(rootPkg.version),
   },

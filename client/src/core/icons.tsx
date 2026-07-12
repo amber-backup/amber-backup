@@ -1,5 +1,3 @@
-import { svg } from './dom';
-
 // Feather-style stroke icons matching the design concept.
 const I = (paths: string, size = 18) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -36,10 +34,12 @@ export const ICONS: Record<string, string> = {
   send: I('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>', 16),
 };
 
-export function icon(name: string, size?: number): SVGElement {
+/** Renders a stroke icon. Uses display:contents so the inner <svg> is the flex
+ *  item directly — CSS rules like `.btn svg` and gaps behave as before. */
+export function Icon({ name, size }: { name: string; size?: number }) {
   let markup = ICONS[name] ?? ICONS.file;
   if (size) markup = markup.replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`);
-  return svg(markup);
+  return <span style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: markup }} />;
 }
 
 /** Public URL of the brand mark. Loaded via <img> so each instance renders in

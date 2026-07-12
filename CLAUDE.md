@@ -116,23 +116,36 @@ Key cross-cutting flows to understand before editing:
   every request body needs a `class-validator` DTO (see each feature's `dto/`).
   Unlisted properties are rejected, not stripped silently.
 
-### Client (framework-less SPA)
+### Client (React SPA)
 
-No React/Vue. UI is built with a tiny hyperscript helper `h(tag, attrs, …children)`
-in `core/dom.ts`. Structure:
+React 19 + Vite, kept intentionally light on dependencies — the only runtime
+deps are `react`, `react-dom`, and `react-router-dom`. No data/state library:
+data loading is a small `useAsync` hook; toasts and modals are React contexts.
+Structure:
 
-- `main.ts` — boots, refreshes auth, registers hash routes, renders the shell.
-- `core/router.ts` — hash-based router (`#/path`, `:param` segments).
+- `main.tsx` — mounts `<App/>` into `#root` and imports `styles.css`.
+- `App.tsx` — provider stack (`AuthProvider` → `ToastProvider` → `ModalProvider`)
+  around a `HashRouter`. Routes use hash URLs (`#/path`), so the Nest static host
+  needs no SPA-fallback config. A `Gate` shows `<Login/>` until auth resolves.
 - `core/api.ts` — typed `fetch` wrapper; all calls hit `/api`, cookie auth
-  (`credentials: 'include'`), throws `ApiError` on non-OK.
-- `core/auth.ts`, `core/layout.ts`, `core/ui.ts`, `core/icons.ts` — session
-  state, app shell, shared UI widgets, icons.
-- `pages/*.ts` — one `render<Page>()` per screen, registered as a route in
-  `main.ts`.
+  (`credentials: 'include'`), throws `ApiError` on non-OK. Also holds domain types.
+- `core/auth.tsx` — `AuthProvider` + `useAuth()` (user, isAdmin, login/logout).
+- `core/icons.tsx`, `core/format.ts`, `core/clipboard.ts` — icons, formatting,
+  clipboard helpers.
+- `hooks/useAsync.ts` — `{ data, loading, error, reload }` loader used by pages.
+- `ui/` — `toast.tsx` (`useToast`), `modal.tsx` (`useModal`, `FormModal`,
+  `ModalFrame`, `confirmDialog`; each modal has its own backdrop so they can
+  stack), and `primitives.tsx` (`PageHeader`, `Field`, `ActionButton`,
+  `BusyButton`, `Loading`, `Empty`).
+- `layout/Shell.tsx` — sidebar + mobile drawer, `<Outlet/>` for pages.
+- `pages/*.tsx` — one exported component per screen.
 
-Adding a page = new `pages/x.ts` exporting a render function + a route entry in
-`main.ts`. The SPA is served by the Nest server in production (`static.module.ts`);
-in dev Vite proxies `/api`.
+Adding a page = new `pages/X.tsx` exporting a component + a `<Route>` in `App.tsx`
+(+ a `NAV` entry in `layout/Shell.tsx`). Pages load via `useAsync` and refresh
+lists by calling its `reload()` after a mutation (editor dialogs take an
+`onSaved` callback). The SPA is served by the Nest server in production
+(`static.module.ts`); in dev Vite proxies `/api`. The `styles.css` design system
+(amber dark theme, all class names) is unchanged from the original.
 
 ### Agent (Go)
 
