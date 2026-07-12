@@ -1,3 +1,18 @@
+# [1.7.0](https://github.com/amber-backup/amber-backup/compare/v1.6.1...v1.7.0) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ui:** restrict modal close to its own backdrop ([3a38960](https://github.com/amber-backup/amber-backup/commit/3a389603b26f10a3a17cc610c21652a5e0eddb26))
+
+
+### Features
+
+* **agents:** improve agent liveness tracking and task handling ([7efd672](https://github.com/amber-backup/amber-backup/commit/7efd6724ea4533b385984010d68ba19b3e90d7a7))
+* **cli:** implement initial Amber Backup CLI with core features ([519841f](https://github.com/amber-backup/amber-backup/commit/519841f22ef0a45603d243404842a84215cabb21))
+* **notifications:** improve message structure for channels ([be6f012](https://github.com/amber-backup/amber-backup/commit/be6f0127589f210b43e6383e6b61be32bfd212f0))
+* **reports:** add report management with scheduling ([95c28eb](https://github.com/amber-backup/amber-backup/commit/95c28ebc61b87e9fa3551b38d3594b90913826de))
+
 ## [1.6.1](https://github.com/amber-backup/amber-backup/compare/v1.6.0...v1.6.1) (2026-07-11)
 
 
