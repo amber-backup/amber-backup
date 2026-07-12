@@ -114,7 +114,7 @@ export function Login() {
             </Field>
             <button
               className="btn btn-primary"
-              style={{ width: '100%' }}
+              style={{ width: '100%', justifyContent: 'center', marginBottom: '15px' }}
               disabled={busy}
               onClick={() => void doLogin()}
             >
