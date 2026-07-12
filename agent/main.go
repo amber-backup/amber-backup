@@ -269,9 +269,16 @@ func (a *agent) runBackup(t *Task) {
 	code, err := a.runner.run(t, backupArgs(t), func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
-			if time.Since(lastProgress) > 2*time.Second {
+			if time.Since(lastProgress) > time.Second {
 				lastProgress = time.Now()
-				a.postProgress(t.TaskID, map[string]any{"percentDone": msg["percent_done"]})
+				// Forward live progress (percentage + bytes/files done vs total).
+				a.postProgress(t.TaskID, map[string]any{
+					"percentDone": msg["percent_done"],
+					"bytesDone":   msg["bytes_done"],
+					"totalBytes":  msg["total_bytes"],
+					"filesDone":   msg["files_done"],
+					"totalFiles":  msg["total_files"],
+				})
 			}
 		case "summary":
 			result.SnapshotID, _ = msg["snapshot_id"].(string)

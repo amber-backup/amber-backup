@@ -120,7 +120,7 @@ export class JobRunnerService implements OnApplicationShutdown {
         {
           onProgress: (stats) => {
             const now = Date.now();
-            if (now - lastWrite > 2000) {
+            if (now - lastWrite > 1000) {
               lastWrite = now;
               void this.writeStats(jobRunId, stats);
             }

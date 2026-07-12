@@ -14,7 +14,8 @@ interface DashboardData {
 }
 
 const RUNS_PAGE = 50;
-const REFRESH_MS = 4000;
+// Poll fairly briskly so running backups show near-live progress (bytes/percent).
+const REFRESH_MS = 2000;
 
 export function Dashboard() {
   const { data, loading } = useAsync(() =>
@@ -262,12 +263,22 @@ function RunRow({ run: r }: { run: Run }) {
   const bytes = (r.stats?.dataAdded as number) ?? null;
   const pct = Math.round(((r.stats?.percentDone as number) ?? 0) * 100);
 
+  const bytesDone = r.stats?.bytesDone as number | undefined;
+  const totalBytes = r.stats?.totalBytes as number | undefined;
+
   let meta: React.ReactNode;
   if (r.status === 'running') {
     meta = (
-      <div style={{ width: 110 }}>
+      <div style={{ width: 150 }}>
         <div className="progress-track">
           <div className="fill" style={{ width: `${pct}%` }} />
+        </div>
+        <div
+          className="muted"
+          style={{ fontSize: 11, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8 }}
+        >
+          <span>{totalBytes != null ? `${fmtBytes(bytesDone ?? 0)} / ${fmtBytes(totalBytes)}` : ''}</span>
+          <span>{pct}%</span>
         </div>
       </div>
     );

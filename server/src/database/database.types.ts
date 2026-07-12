@@ -258,6 +258,11 @@ export interface RunStats {
   totalFilesProcessed?: number;
   totalDuration?: number;
   percentDone?: number;
+  // Live progress from restic --json "status" lines while a backup is running.
+  bytesDone?: number;
+  totalBytes?: number;
+  filesDone?: number;
+  totalFiles?: number;
 }
 
 export interface JobRunsTable {

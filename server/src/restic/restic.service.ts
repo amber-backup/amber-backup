@@ -230,7 +230,16 @@ export class ResticService {
         try {
           const msg = JSON.parse(line);
           if (msg.message_type === 'status') {
-            stats = { ...stats, percentDone: msg.percent_done };
+            // Forward live progress (percentage + bytes/files done vs total) so
+            // the UI can show it while the backup runs.
+            stats = {
+              ...stats,
+              percentDone: msg.percent_done,
+              bytesDone: msg.bytes_done,
+              totalBytes: msg.total_bytes,
+              filesDone: msg.files_done,
+              totalFiles: msg.total_files,
+            };
             hooks.onProgress?.(stats);
           } else if (msg.message_type === 'summary') {
             stats = {
