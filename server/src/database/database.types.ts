@@ -335,6 +335,39 @@ export type NotificationChannel = Selectable<NotificationChannelsTable>;
 export type NewNotificationChannel = Insertable<NotificationChannelsTable>;
 export type NotificationChannelUpdate = Updateable<NotificationChannelsTable>;
 
+// --- reports ----------------------------------------------------------------
+
+/** Relative time window a report aggregates over (resolved to a cutoff date). */
+export type ReportWindow = '24h' | '7d' | '30d' | '90d' | '6mo' | '12mo';
+
+/** Which runs a report summarizes: jobs, outcomes, and the look-back window. */
+export interface ReportDataset {
+  /** Jobs to include; empty means the report has nothing to report. */
+  jobIds: string[];
+  /** Run outcomes to count, e.g. ['success', 'failed']. */
+  statuses: RunStatus[];
+  window: ReportWindow;
+}
+
+export interface ReportsTable {
+  id: Generated<string>;
+  name: string;
+  /** User-facing labels for grouping/filtering reports. */
+  tags: JSONColumnType<string[]>;
+  dataset: JSONColumnType<ReportDataset>;
+  cron_expr: string;
+  /** Notification channels the rendered report is delivered to. */
+  channel_ids: JSONColumnType<string[]>;
+  enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  last_run_at: ColumnType<Date | null, Date | null, Date | null>;
+  owner_id: string;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+export type Report = Selectable<ReportsTable>;
+export type NewReport = Insertable<ReportsTable>;
+export type ReportUpdate = Updateable<ReportsTable>;
+
 // --- audit_log --------------------------------------------------------------
 
 export type AuditOutcome = 'success' | 'failure';
@@ -387,5 +420,6 @@ export interface Database {
   job_runs: JobRunsTable;
   restore_runs: RestoreRunsTable;
   notification_channels: NotificationChannelsTable;
+  reports: ReportsTable;
   audit_log: AuditLogTable;
 }

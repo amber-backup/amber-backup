@@ -11,6 +11,7 @@ import { RunsModule } from './runs/runs.module';
 import { RestoreModule } from './restore/restore.module';
 import { AgentsModule } from './agents/agents.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuditModule } from './audit/audit.module';
 import { StaticModule } from './static.module';
@@ -29,6 +30,7 @@ import { StaticModule } from './static.module';
     RestoreModule,
     AgentsModule,
     NotificationsModule,
+    ReportsModule,
     SettingsModule,
     AuditModule,
     StaticModule,

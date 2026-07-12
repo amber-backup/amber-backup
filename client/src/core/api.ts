@@ -113,6 +113,24 @@ export interface ChannelDef {
   fields: BackendField[];
 }
 
+export interface ReportDataset {
+  jobIds: string[];
+  statuses: ('success' | 'failed')[];
+  window: '24h' | '7d' | '30d' | '90d' | '6mo' | '12mo';
+}
+
+export interface Report {
+  id: string;
+  name: string;
+  tags: string[];
+  dataset: ReportDataset;
+  cron_expr: string;
+  channel_ids: string[];
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run?: string | null;
+}
+
 export interface Run {
   id: string;
   job_id: string;

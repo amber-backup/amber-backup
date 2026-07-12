@@ -195,6 +195,36 @@ export class NotificationsService {
     );
   }
 
+  /**
+   * Delivers a pre-rendered message to a set of channels by id. Best-effort:
+   * per-channel failures are logged and never propagate. Disabled or unknown
+   * channels are skipped. Used by features (e.g. reports) that build their own
+   * message rather than deriving one from a job run.
+   */
+  async sendToChannels(
+    channelIds: string[],
+    message: NotificationMessage,
+  ): Promise<void> {
+    if (channelIds.length === 0) return;
+    const channels = await this.db
+      .selectFrom('notification_channels')
+      .selectAll()
+      .where('id', 'in', channelIds)
+      .where('enabled', '=', true)
+      .execute();
+    await Promise.all(
+      channels.map((c) =>
+        this.deliver(c, message).catch((err) =>
+          this.logger.warn(
+            `Notification via "${c.name}" (${c.type}) failed: ${
+              err instanceof Error ? err.message : err
+            }`,
+          ),
+        ),
+      ),
+    );
+  }
+
   // --- internals ------------------------------------------------------------
 
   private async deliver(
