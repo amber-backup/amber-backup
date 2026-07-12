@@ -1,3 +1,16 @@
+# [1.12.0](https://github.com/amber-backup/amber-backup/compare/v1.11.0...v1.12.0) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ui:** add responsive grid and improve layout ([e860f97](https://github.com/amber-backup/amber-backup/commit/e860f97d2e2d73f1d16a45b14a3cba235a7de231))
+
+
+### Features
+
+* **auth:** add passkey-based authentication support ([4faa04d](https://github.com/amber-backup/amber-backup/commit/4faa04d310e94b3ec3c7983d36504e39c2b8b4d1))
+* **auth:** implement TOTP-based 2FA support ([6cd7a95](https://github.com/amber-backup/amber-backup/commit/6cd7a9501fec669c295be1d0a94a1271d035f89a))
+
 # [1.11.0](https://github.com/amber-backup/amber-backup/compare/v1.10.0...v1.11.0) (2026-07-12)
 
 
