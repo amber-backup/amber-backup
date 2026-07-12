@@ -7,6 +7,7 @@ import (
 	_ "embed"
 
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"encoding/pem"
@@ -238,15 +239,30 @@ func (a *agent) runBackup(t *Task) {
 	result := TaskResult{Status: "success"}
 	var lastProgress time.Time
 
-	if t.Options != nil && t.Options.PreHook != "" {
-		if err := runHook(t.Options.PreHook); err != nil {
-			a.failTask(t, "pre-hook: "+err.Error(), logBuf.String())
+	// handleFailure runs the on-failure script (best-effort) and reports the run
+	// as failed. Used for pre-script, init and backup failures alike.
+	handleFailure := func(msg string) {
+		if t.Options != nil && t.Options.PostFailureScript != "" {
+			appendLog("[post-failure-script] " + t.Options.PostFailureScript)
+			if err := runScriptLogged(t.Options.PostFailureScript,
+				scriptEnv(t, "post-failure", "failed", "", msg), appendLog); err != nil {
+				appendLog("[post-failure-script] " + err.Error())
+			}
+		}
+		a.failTask(t, msg, logBuf.String())
+	}
+
+	// Pre-backup script gates the run: a non-zero exit aborts the backup.
+	if t.Options != nil && t.Options.PreScript != "" {
+		appendLog("[pre-script] " + t.Options.PreScript)
+		if err := runScriptLogged(t.Options.PreScript, scriptEnv(t, "pre", "", "", ""), appendLog); err != nil {
+			handleFailure("pre-script: " + err.Error())
 			return
 		}
 	}
 
 	if err := a.runner.ensureInitialized(t); err != nil {
-		a.failTask(t, err.Error(), logBuf.String())
+		handleFailure(err.Error())
 		return
 	}
 
@@ -264,7 +280,7 @@ func (a *agent) runBackup(t *Task) {
 	}, appendLog)
 
 	if err != nil || (code != 0 && code != 3) {
-		a.failTask(t, fmt.Sprintf("backup exited %d: %v", code, err), logBuf.String())
+		handleFailure(fmt.Sprintf("backup exited %d: %v", code, err))
 		return
 	}
 
@@ -276,9 +292,12 @@ func (a *agent) runBackup(t *Task) {
 		}
 	}
 
-	if t.Options != nil && t.Options.PostHook != "" {
-		if err := runHook(t.Options.PostHook); err != nil {
-			appendLog("post-hook: " + err.Error())
+	// On-success script runs after a successful backup; failure only logged.
+	if t.Options != nil && t.Options.PostSuccessScript != "" {
+		appendLog("[post-success-script] " + t.Options.PostSuccessScript)
+		if err := runScriptLogged(t.Options.PostSuccessScript,
+			scriptEnv(t, "post-success", "success", result.SnapshotID, ""), appendLog); err != nil {
+			appendLog("[post-success-script] " + err.Error())
 		}
 	}
 
@@ -380,9 +399,46 @@ func detectOS() string {
 	return "linux"
 }
 
-func runHook(command string) error {
-	cmd := exec.Command("sh", "-c", command)
-	return cmd.Run()
+// runScript executes a job script by path, directly (no shell, no arguments),
+// with a timeout, returning its combined output. The AMBER_* context is appended
+// to the agent's own environment.
+func runScript(path string, env []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// runScriptLogged runs a script and appends any output to the run log.
+func runScriptLogged(path string, env []string, appendLog func(string)) error {
+	out, err := runScript(path, env)
+	if out != "" {
+		appendLog(out)
+	}
+	return err
+}
+
+// scriptEnv builds the AMBER_* environment handed to a job script.
+func scriptEnv(t *Task, hook, status, snapshotID, errMsg string) []string {
+	env := []string{
+		"AMBER_HOOK=" + hook,
+		"AMBER_JOB_ID=" + t.JobID,
+		"AMBER_JOB_NAME=" + t.JobName,
+		"AMBER_RUN_ID=" + t.TaskID,
+		"AMBER_PATHS=" + strings.Join(t.Paths, "\n"),
+	}
+	if status != "" {
+		env = append(env, "AMBER_STATUS="+status)
+	}
+	if snapshotID != "" {
+		env = append(env, "AMBER_SNAPSHOT_ID="+snapshotID)
+	}
+	if errMsg != "" {
+		env = append(env, "AMBER_ERROR="+errMsg)
+	}
+	return env
 }
 
 func summaryToStats(msg map[string]any) map[string]any {

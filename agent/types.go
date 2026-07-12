@@ -52,8 +52,11 @@ type ResticOptions struct {
 	Compression       string     `json:"compression,omitempty"`
 	ReadConcurrency   int        `json:"readConcurrency,omitempty"`
 	Retention         *Retention `json:"retention,omitempty"`
-	PreHook           string     `json:"preHook,omitempty"`
-	PostHook          string     `json:"postHook,omitempty"`
+	// Custom scripts run by path (no shell). PreScript gates the backup; the
+	// post scripts run on success/failure and are best-effort.
+	PreScript         string `json:"preScript,omitempty"`
+	PostSuccessScript string `json:"postSuccessScript,omitempty"`
+	PostFailureScript string `json:"postFailureScript,omitempty"`
 }
 
 type RestoreOptions struct {
@@ -73,6 +76,8 @@ type Task struct {
 	Env             map[string]string `json:"env"`
 	CredentialFiles []CredentialFile  `json:"credentialFiles"`
 	// backup
+	JobID   string         `json:"jobId,omitempty"`
+	JobName string         `json:"jobName,omitempty"`
 	Paths   []string       `json:"paths,omitempty"`
 	Options *ResticOptions `json:"options,omitempty"`
 	// restore

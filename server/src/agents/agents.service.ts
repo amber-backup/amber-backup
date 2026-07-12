@@ -44,6 +44,8 @@ export interface AgentTask {
   env: Record<string, string>;
   credentialFiles: { envVar: string; filename: string; content: string }[];
   // backup
+  jobId?: string;
+  jobName?: string;
   paths?: string[];
   options?: ResticOptions;
   // restore
@@ -493,6 +495,8 @@ echo "Amber agent installed and started."
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
       .select([
         'job_runs.id as run_id',
+        'backup_jobs.id as job_id',
+        'backup_jobs.name as job_name',
         'backup_jobs.target_id',
         'backup_jobs.restic_options',
         'backup_jobs.paths',
@@ -517,6 +521,8 @@ echo "Amber agent installed and started."
       tasks.push({
         type: 'backup',
         taskId: run.run_id,
+        jobId: run.job_id,
+        jobName: run.job_name,
         repository: resolved.repository,
         password: resolved.password,
         env: resolved.env,

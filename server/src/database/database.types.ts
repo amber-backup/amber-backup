@@ -203,8 +203,19 @@ export interface ResticOptions {
     keepTags?: string[];
     prune?: boolean;
   };
-  preHook?: string;
-  postHook?: string;
+  /**
+   * Custom scripts run on the host that executes the job (the server for local
+   * jobs, the Go agent for remote jobs). Each value is a path executed directly
+   * (no shell, no arguments). `preScript` runs before the backup and gates it —
+   * a non-zero exit aborts the run and marks it failed. `postSuccessScript` runs
+   * after a successful backup, `postFailureScript` after a failed one (including
+   * a failed pre-script); their exit code is logged but does not change the run
+   * outcome. Scripts receive AMBER_* environment variables (job name/id, run id,
+   * paths, and for the post scripts AMBER_STATUS / AMBER_SNAPSHOT_ID / AMBER_ERROR).
+   */
+  preScript?: string;
+  postSuccessScript?: string;
+  postFailureScript?: string;
   timeLimitSeconds?: number;
 }
 

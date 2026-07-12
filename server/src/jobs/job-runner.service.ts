@@ -4,7 +4,7 @@ import {
   Logger,
   OnApplicationShutdown,
 } from '@nestjs/common';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Db, KYSELY } from '../database/database.module';
 import { ResticService } from '../restic/restic.service';
@@ -12,7 +12,10 @@ import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ResticOptions, RunStats } from '../database/database.types';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/** How long a single pre/post script may run before it is killed. */
+const SCRIPT_TIMEOUT_MS = 300_000;
 
 /**
  * Executes local backup runs end-to-end: backup → forget/prune (§7) with live
@@ -96,9 +99,15 @@ export class JobRunnerService implements OnApplicationShutdown {
         credentialFiles: resolved.credentialFiles,
       };
 
-      if (options.preHook) {
-        appendLog(`[pre-hook] ${options.preHook}`);
-        await this.runHook(options.preHook);
+      // Pre-backup script gates the run: a non-zero exit throws and aborts the
+      // backup (the catch below records the failure and runs the failure script).
+      if (options.preScript) {
+        appendLog(`[pre-script] ${options.preScript}`);
+        await this.runScript(
+          options.preScript,
+          this.scriptEnv(job, jobRunId, source.paths, { AMBER_HOOK: 'pre' }),
+          appendLog,
+        );
       }
 
       await this.restic.ensureInitialized(resticCtx);
@@ -131,9 +140,24 @@ export class JobRunnerService implements OnApplicationShutdown {
         appendLog(`[forget] removed ${fr.removed} snapshot(s)`);
       }
 
-      if (options.postHook) {
-        appendLog(`[post-hook] ${options.postHook}`);
-        await this.runHook(options.postHook);
+      // On-success script runs after a successful backup+forget. It is not
+      // allowed to fail the run — the data is already safe — so its error is
+      // only logged.
+      if (options.postSuccessScript) {
+        appendLog(`[post-success-script] ${options.postSuccessScript}`);
+        try {
+          await this.runScript(
+            options.postSuccessScript,
+            this.scriptEnv(job, jobRunId, source.paths, {
+              AMBER_HOOK: 'post-success',
+              AMBER_STATUS: 'success',
+              AMBER_SNAPSHOT_ID: backup.snapshotId ?? '',
+            }),
+            appendLog,
+          );
+        } catch (e) {
+          appendLog(`[post-success-script] ${e instanceof Error ? e.message : e}`);
+        }
       }
 
       await this.db
@@ -148,11 +172,27 @@ export class JobRunnerService implements OnApplicationShutdown {
         })
         .where('id', '=', jobRunId)
         .execute();
-
-      void job;
     } catch (err) {
       const aborted = abort.signal.aborted;
       appendLog(String(err));
+      // On-failure script runs after any real failure (including a failed
+      // pre-script), but not when the user cancelled the run. Best-effort.
+      if (!aborted && options.postFailureScript) {
+        appendLog(`[post-failure-script] ${options.postFailureScript}`);
+        try {
+          await this.runScript(
+            options.postFailureScript,
+            this.scriptEnv(job, jobRunId, source.paths, {
+              AMBER_HOOK: 'post-failure',
+              AMBER_STATUS: 'failed',
+              AMBER_ERROR: err instanceof Error ? err.message : String(err),
+            }),
+            appendLog,
+          );
+        } catch (e) {
+          appendLog(`[post-failure-script] ${e instanceof Error ? e.message : e}`);
+        }
+      }
       await this.db
         .updateTable('job_runs')
         .set({
@@ -187,11 +227,45 @@ export class JobRunnerService implements OnApplicationShutdown {
       .catch(() => undefined);
   }
 
-  private async runHook(command: string): Promise<void> {
+  /** Environment handed to a job script: process env plus AMBER_* context. */
+  private scriptEnv(
+    job: { id: string; name: string },
+    runId: string,
+    paths: string[],
+    extra: Record<string, string>,
+  ): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      AMBER_JOB_ID: job.id,
+      AMBER_JOB_NAME: job.name,
+      AMBER_RUN_ID: runId,
+      AMBER_PATHS: paths.join('\n'),
+      ...extra,
+    };
+  }
+
+  /**
+   * Runs a job script by path, directly (no shell, no arguments), capturing its
+   * output into the run log. Throws on a non-zero exit or timeout so callers can
+   * decide whether that gates the run.
+   */
+  private async runScript(
+    scriptPath: string,
+    env: NodeJS.ProcessEnv,
+    appendLog: (line: string) => void,
+  ): Promise<void> {
     try {
-      await execAsync(command, { timeout: 300_000 });
+      const { stdout, stderr } = await execFileAsync(scriptPath, [], {
+        timeout: SCRIPT_TIMEOUT_MS,
+        env,
+      });
+      if (stdout.trim()) appendLog(stdout.trim());
+      if (stderr.trim()) appendLog(stderr.trim());
     } catch (e) {
-      throw new Error(`Hook failed: ${e instanceof Error ? e.message : e}`);
+      const err = e as { stdout?: string; stderr?: string; message?: string };
+      if (err.stdout?.trim()) appendLog(err.stdout.trim());
+      if (err.stderr?.trim()) appendLog(err.stderr.trim());
+      throw new Error(`Script failed: ${err.message ?? String(e)}`);
     }
   }
 

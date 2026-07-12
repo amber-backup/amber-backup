@@ -262,6 +262,11 @@ function JobEditor({
   const [keepMonthly, setKeepMonthly] = useState<string>(ret.keepMonthly != null ? String(ret.keepMonthly) : '');
   const [prune, setPrune] = useState(!!ret.prune);
 
+  // Custom scripts run on the executing host (server or agent) around the backup.
+  const [preScript, setPreScript] = useState<string>(opts.preScript ?? '');
+  const [postSuccessScript, setPostSuccessScript] = useState<string>(opts.postSuccessScript ?? '');
+  const [postFailureScript, setPostFailureScript] = useState<string>(opts.postFailureScript ?? '');
+
   // Notifications: which channels to alert, and on which outcomes. Sensible
   // defaults for a new job — alert on failure only.
   const [onFailure, setOnFailure] = useState(job ? !!notify.onFailure : true);
@@ -291,6 +296,9 @@ function JobEditor({
       exclude: excludes.split('\n').map((t) => t.trim()).filter(Boolean),
     };
     if (Object.keys(retention).length) resticOptions.retention = retention;
+    if (preScript.trim()) resticOptions.preScript = preScript.trim();
+    if (postSuccessScript.trim()) resticOptions.postSuccessScript = postSuccessScript.trim();
+    if (postFailureScript.trim()) resticOptions.postFailureScript = postFailureScript.trim();
 
     const pathList = paths.split('\n').map((p) => p.trim()).filter(Boolean);
 
@@ -436,6 +444,36 @@ function JobEditor({
             <input type="checkbox" checked={prune} onChange={(e) => setPrune(e.target.checked)} />
             Prune after forget (reclaim storage)
           </label>
+        </Section>
+
+        <Section title="Scripts" sub="run custom scripts around the backup">
+          <Field
+            label="Pre-backup script"
+            help="Path on the executing host (server or agent), run directly. A non-zero exit aborts the backup."
+          >
+            <input
+              type="text"
+              value={preScript}
+              placeholder="/opt/amber/pre-backup.sh"
+              onChange={(e) => setPreScript(e.target.value)}
+            />
+          </Field>
+          <Field label="On-success script" help="Runs after a successful backup. Receives AMBER_SNAPSHOT_ID.">
+            <input
+              type="text"
+              value={postSuccessScript}
+              placeholder="/opt/amber/on-success.sh"
+              onChange={(e) => setPostSuccessScript(e.target.value)}
+            />
+          </Field>
+          <Field label="On-failure script" help="Runs after a failed backup or pre-script. Receives AMBER_ERROR.">
+            <input
+              type="text"
+              value={postFailureScript}
+              placeholder="/opt/amber/on-failure.sh"
+              onChange={(e) => setPostFailureScript(e.target.value)}
+            />
+          </Field>
         </Section>
 
         <Section title="Notifications" sub="alert on job result">
