@@ -1246,6 +1246,7 @@ input[type="checkbox"]:disabled {
 
     .mobile-topbar {
         display: flex;
+        height: 60px;
         align-items: center;
         gap: 12px;
         position: sticky;
