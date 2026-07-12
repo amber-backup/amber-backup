@@ -1,3 +1,11 @@
+# [1.9.0](https://github.com/amber-backup/amber-backup/compare/v1.8.0...v1.9.0) (2026-07-12)
+
+
+### Features
+
+* **job-scripts:** add pre, success, and failure script support ([80143f7](https://github.com/amber-backup/amber-backup/commit/80143f7337ff04a86fcfa2782056d04d9df6b639))
+* **progress:** enhance live backup progress tracking ([c1a8998](https://github.com/amber-backup/amber-backup/commit/c1a8998b97da85bc830a2cd749de94b9002d2e5b))
+
 # [1.8.0](https://github.com/amber-backup/amber-backup/compare/v1.7.0...v1.8.0) (2026-07-12)
 
 
