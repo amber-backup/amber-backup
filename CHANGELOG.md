@@ -1,3 +1,11 @@
+# [1.10.0](https://github.com/amber-backup/amber-backup/compare/v1.9.0...v1.10.0) (2026-07-12)
+
+
+### Features
+
+* **logging:** add HTTP request logging middleware ([2b71fb0](https://github.com/amber-backup/amber-backup/commit/2b71fb0939d82ee3f90328cf197a175516bba763))
+* **progress:** improve progress percentage calculation ([9a707d9](https://github.com/amber-backup/amber-backup/commit/9a707d96ffebcfac9fdd95845c0080e57cbc2ca5))
+
 # [1.9.0](https://github.com/amber-backup/amber-backup/compare/v1.8.0...v1.9.0) (2026-07-12)
 
 
