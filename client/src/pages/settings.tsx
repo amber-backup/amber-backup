@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
@@ -20,7 +20,7 @@ interface ApiKey {
 }
 
 export function Settings() {
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, logout, refresh } = useAuth();
   const { open } = useModal();
   const { data: keys, loading, reload } = useAsync(() => api.get<ApiKey[]>('/api-keys'));
 
@@ -52,6 +52,48 @@ export function Settings() {
           </div>
         </div>
       </div>
+
+      {isLocal && (
+        <div className="panel section-gap">
+          <div className="panel-head">
+            <h2>Two-factor authentication</h2>
+            {user?.totp_enabled ? (
+              <span
+                className="link"
+                onClick={() => open((close) => <DisableTwoFactorModal onClose={close} onDone={refresh} />)}
+              >
+                Disable
+              </span>
+            ) : (
+              <span
+                className="link"
+                onClick={() => open((close) => <EnableTwoFactorModal onClose={close} onDone={refresh} />)}
+              >
+                Enable
+              </span>
+            )}
+          </div>
+          <div className="row">
+            <span
+              className="stat-icon"
+              style={{
+                background: user?.totp_enabled ? 'var(--amber-glow)' : 'var(--bg-3)',
+                color: user?.totp_enabled ? 'var(--amber)' : 'var(--text-2)',
+              }}
+            >
+              <Icon name="shield" size={16} />
+            </span>
+            <div className="row-main">
+              <div className="row-title">{user?.totp_enabled ? 'Enabled' : 'Disabled'}</div>
+              <div className="row-sub">
+                {user?.totp_enabled
+                  ? 'A code from your authenticator app is required at sign-in.'
+                  : 'Protect sign-in with a time-based code from an authenticator app.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="panel section-gap">
         <div className="panel-head">
@@ -259,6 +301,201 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             placeholder="Repeat new password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
+          />
+        </Field>
+      </div>
+    </FormModal>
+  );
+}
+
+interface TotpSetup {
+  secret: string;
+  otpauthUri: string;
+  qrDataUrl: string;
+}
+
+function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const { open } = useModal();
+  const [setup, setSetup] = useState<TotpSetup | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
+  // Ask the server for a fresh (pending) secret + QR when the dialog opens.
+  useEffect(() => {
+    let active = true;
+    api
+      .post<TotpSetup>('/auth/2fa/setup')
+      .then((s) => active && setSetup(s))
+      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to start setup'));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const submit = async () => {
+    if (!setup) return false;
+    if (!/^\d{6}$/.test(code.trim())) {
+      toast('Enter the 6-digit code from your app', 'error');
+      return false;
+    }
+    try {
+      const res = await api.post<{ recoveryCodes: string[] }>('/auth/2fa/enable', {
+        code: code.trim(),
+      });
+      onDone();
+      toast('Two-factor authentication enabled', 'success');
+      open((close) => <RecoveryCodesModal codes={res.recoveryCodes} onClose={close} />);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Invalid code', 'error');
+      return false;
+    }
+  };
+
+  return (
+    <FormModal
+      title="Enable two-factor authentication"
+      confirmLabel="Verify & enable"
+      onClose={onClose}
+      onSubmit={submit}
+    >
+      {error ? (
+        <div className="warn-box">{error}</div>
+      ) : !setup ? (
+        <Loading label="Preparing…" />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="row-sub">
+            Scan this QR code with an authenticator app (Google Authenticator, 1Password,
+            Authy…), then enter the 6-digit code it shows.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <img
+              src={setup.qrDataUrl}
+              width={200}
+              height={200}
+              alt="TOTP QR code"
+              style={{ borderRadius: 8, background: '#fff', padding: 8 }}
+            />
+          </div>
+          <div>
+            <div className="row-sub" style={{ marginBottom: 6 }}>
+              Or enter this key manually:
+            </div>
+            <div
+              className="mono"
+              style={{
+                background: 'var(--bg-0)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                fontSize: 12,
+                wordBreak: 'break-all',
+                color: 'var(--amber-light)',
+              }}
+            >
+              {setup.secret}
+            </div>
+          </div>
+          <Field label="Authentication code">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="123456"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            />
+          </Field>
+        </div>
+      )}
+    </FormModal>
+  );
+}
+
+function RecoveryCodesModal({ codes, onClose }: { codes: string[]; onClose: () => void }) {
+  const toast = useToast();
+  const copy = async () => {
+    const ok = await copyToClipboard(codes.join('\n'));
+    toast(ok ? 'Copied' : 'Copy failed — select manually', ok ? 'success' : 'error');
+  };
+
+  return (
+    <ModalFrame
+      title="Recovery codes"
+      onClose={onClose}
+      footer={
+        <button className="btn btn-primary" onClick={onClose}>
+          Done
+        </button>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="warn-box">
+          Store these somewhere safe. Each code works once and lets you sign in if you lose your
+          authenticator. They are shown only now.
+        </div>
+        <div
+          className="mono"
+          style={{
+            background: 'var(--bg-0)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            fontSize: 13,
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '6px 20px',
+            color: 'var(--amber-light)',
+          }}
+        >
+          {codes.map((c) => (
+            <div key={c}>{c}</div>
+          ))}
+        </div>
+        <div>
+          <button className="btn btn-ghost btn-sm" onClick={copy}>
+            <Icon name="copy" />
+            Copy all
+          </button>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function DisableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [password, setPassword] = useState('');
+
+  const submit = async () => {
+    try {
+      await api.post('/auth/2fa/disable', { password });
+      onDone();
+      toast('Two-factor authentication disabled', 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to disable', 'error');
+      return false;
+    }
+  };
+
+  return (
+    <FormModal
+      title="Disable two-factor authentication"
+      confirmLabel="Disable"
+      onClose={onClose}
+      onSubmit={submit}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="warn-box">
+          This removes the second factor from your account. Confirm your password to continue.
+        </div>
+        <Field label="Password">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
       </div>

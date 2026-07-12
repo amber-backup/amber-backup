@@ -5,6 +5,7 @@ import { loadConfig } from '../config/configuration';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { TotpService } from './totp.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { ApiKeysController } from './api-keys.controller';
@@ -23,6 +24,7 @@ import { SettingsModule } from '../settings/settings.module';
   controllers: [AuthController, UsersController, ApiKeysController],
   providers: [
     AuthService,
+    TotpService,
     UsersService,
     ApiKeysService,
     SsoService,

@@ -14,10 +14,22 @@ import { AuthSource, User } from '../database/database.types';
 import { loadConfig } from '../config/configuration';
 import { CreateGrantDto, CreateUserDto, UpdateUserDto } from './dto/auth.dto';
 
-export type PublicUser = Omit<User, 'password_hash'>;
+export type PublicUser = Omit<
+  User,
+  | 'password_hash'
+  | 'totp_secret_ciphertext'
+  | 'totp_secret_nonce'
+  | 'totp_recovery_codes'
+>;
 
 function toPublic(user: User): PublicUser {
-  const { password_hash: _omit, ...rest } = user;
+  const {
+    password_hash: _pw,
+    totp_secret_ciphertext: _tc,
+    totp_secret_nonce: _tn,
+    totp_recovery_codes: _rc,
+    ...rest
+  } = user;
   return rest;
 }
 
@@ -74,6 +86,15 @@ export class UsersService implements OnModuleInit {
       .selectFrom('users')
       .selectAll()
       .where('email', '=', email.toLowerCase())
+      .executeTakeFirst();
+  }
+
+  /** Full user row (including secret columns) — for internal auth checks only. */
+  async findByIdRaw(id: string): Promise<User | undefined> {
+    return this.db
+      .selectFrom('users')
+      .selectAll()
+      .where('id', '=', id)
       .executeTakeFirst();
   }
 

@@ -6,6 +6,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Length,
   MinLength,
 } from 'class-validator';
 
@@ -30,6 +31,32 @@ export class ChangePasswordDto {
   @IsString()
   @MinLength(8)
   newPassword!: string;
+}
+
+export class LoginTotpDto {
+  @ApiProperty({ description: 'Challenge token from the password step' })
+  @IsString()
+  @MinLength(1)
+  challengeToken!: string;
+
+  @ApiProperty({ description: '6-digit TOTP code or a recovery code' })
+  @IsString()
+  @MinLength(6)
+  code!: string;
+}
+
+export class EnableTotpDto {
+  @ApiProperty({ description: '6-digit code from the authenticator app' })
+  @IsString()
+  @Length(6, 6)
+  code!: string;
+}
+
+export class DisableTotpDto {
+  @ApiProperty({ description: 'Current account password' })
+  @IsString()
+  @MinLength(1)
+  password!: string;
 }
 
 export class CreateUserDto {

@@ -51,6 +51,12 @@ export interface UsersTable {
   password_hash: string | null;
   is_admin: ColumnType<boolean, boolean | undefined, boolean>;
   disabled: ColumnType<boolean, boolean | undefined, boolean>;
+  /** Envelope-encrypted TOTP secret (Base32); null when 2FA is not configured. */
+  totp_secret_ciphertext: string | null;
+  totp_secret_nonce: string | null;
+  totp_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  /** argon2 hashes of unused recovery codes; consumed on use. */
+  totp_recovery_codes: JSONColumnType<string[] | null, string | null, string | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }

@@ -11,13 +11,16 @@ interface SsoProvider {
 }
 
 export function Login() {
-  const { login } = useAuth();
+  const { login, loginTotp } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<SsoProvider[]>([]);
+  const [step, setStep] = useState<'credentials' | 'totp'>('credentials');
+  const [challengeToken, setChallengeToken] = useState('');
+  const [code, setCode] = useState('');
 
   useEffect(() => {
     void api
@@ -30,10 +33,30 @@ export function Login() {
     setError(null);
     setBusy(true);
     try {
-      await login(email, password);
+      const res = await login(email, password);
+      if ('totpRequired' in res) {
+        // Password accepted; a second factor is needed before a session is issued.
+        setChallengeToken(res.challengeToken);
+        setStep('totp');
+        setCode('');
+        setBusy(false);
+        return;
+      }
       navigate('/', { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed');
+      setBusy(false);
+    }
+  };
+
+  const doTotp = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await loginTotp(challengeToken, code.trim());
+      navigate('/', { replace: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Verification failed');
       setBusy(false);
     }
   };
@@ -50,47 +73,91 @@ export function Login() {
 
         {error && <div className="login-error">{error}</div>}
 
-        <Field label="Email">
-          <input
-            type="email"
-            placeholder="admin@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </Field>
-        <Field label="Password">
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void doLogin();
-            }}
-          />
-        </Field>
-        <button
-          className="btn btn-primary"
-          style={{ width: '100%' }}
-          disabled={busy}
-          onClick={() => void doLogin()}
-        >
-          Sign in
-        </button>
+        {step === 'credentials' ? (
+          <>
+            <Field label="Email">
+              <input
+                type="email"
+                placeholder="admin@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void doLogin();
+                }}
+              />
+            </Field>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%' }}
+              disabled={busy}
+              onClick={() => void doLogin()}
+            >
+              Sign in
+            </button>
 
-        {providers.length > 0 && (
-          <div className="sso-list">
-            {providers.map((p) => (
-              <a
-                key={p.id}
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: 'center' }}
-                href={`/api/auth/oidc/${p.id}`}
-              >
-                {`Sign in with ${p.label}`}
-              </a>
-            ))}
-          </div>
+            {providers.length > 0 && (
+              <div className="sso-list">
+                {providers.map((p) => (
+                  <a
+                    key={p.id}
+                    className="btn btn-ghost"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    href={`/api/auth/oidc/${p.id}`}
+                  >
+                    {`Sign in with ${p.label}`}
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <Field label="Authentication code">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void doTotp();
+                }}
+              />
+            </Field>
+            <div className="help" style={{ marginTop: -4, marginBottom: 4 }}>
+              Enter the 6-digit code from your authenticator app, or a recovery code.
+            </div>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%' }}
+              disabled={busy}
+              onClick={() => void doTotp()}
+            >
+              Verify
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ width: '100%', justifyContent: 'center' }}
+              disabled={busy}
+              onClick={() => {
+                setStep('credentials');
+                setError(null);
+                setCode('');
+              }}
+            >
+              Back
+            </button>
+          </>
         )}
       </div>
     </div>

@@ -19,7 +19,14 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';
 import { UsersService } from './users.service';
-import { ChangePasswordDto, LoginDto } from './dto/auth.dto';
+import { TotpService } from './totp.service';
+import {
+  ChangePasswordDto,
+  DisableTotpDto,
+  EnableTotpDto,
+  LoginDto,
+  LoginTotpDto,
+} from './dto/auth.dto';
 
 /** Best-effort client IP for audit entries. */
 function clientIp(req: Request): string | null {
@@ -47,6 +54,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly sso: SsoService,
     private readonly users: UsersService,
+    private readonly totp: TotpService,
     private readonly audit: AuditService,
   ) {}
 
@@ -62,6 +70,11 @@ export class AuthController {
     const userAgent = (req.headers['user-agent'] as string) ?? null;
     try {
       const result = await this.auth.login(dto.email, dto.password);
+      // Password verified but a second factor is required: hand back a
+      // short-lived challenge token and set no session cookie yet.
+      if (result.status === '2fa_required') {
+        return { totpRequired: true, challengeToken: result.challengeToken };
+      }
       res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
       void this.audit.record({
         actorId: result.user.id,
@@ -94,6 +107,72 @@ export class AuthController {
       });
       throw err;
     }
+  }
+
+  @Public()
+  @Post('login/totp')
+  @ApiOperation({ summary: 'Complete a 2FA login with a TOTP or recovery code' })
+  async loginTotp(
+    @Body() dto: LoginTotpDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ip = clientIp(req);
+    const userAgent = (req.headers['user-agent'] as string) ?? null;
+    try {
+      const result = await this.auth.loginTotp(dto.challengeToken, dto.code);
+      res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
+      void this.audit.record({
+        actorId: result.user.id,
+        actorEmail: result.user.email,
+        actorType: 'session',
+        actorIsAdmin: result.user.is_admin,
+        action: 'Log in',
+        method: 'POST',
+        path: '/api/auth/login/totp',
+        resourceType: 'auth',
+        statusCode: 200,
+        outcome: 'success',
+        ip,
+        userAgent,
+      });
+      return { user: result.user, token: result.token };
+    } catch (err) {
+      void this.audit.record({
+        actorType: 'session',
+        action: 'Failed 2FA login',
+        method: 'POST',
+        path: '/api/auth/login/totp',
+        resourceType: 'auth',
+        statusCode: (err as { status?: number } | null)?.status ?? 401,
+        outcome: 'failure',
+        ip,
+        userAgent,
+      });
+      throw err;
+    }
+  }
+
+  @Post('2fa/setup')
+  @ApiOperation({ summary: 'Begin TOTP enrollment (returns QR + secret)' })
+  setupTotp(@CurrentUser() user: RequestUser) {
+    return this.totp.setup(user.id);
+  }
+
+  @Post('2fa/enable')
+  @ApiOperation({ summary: 'Confirm a TOTP code and enable 2FA' })
+  enableTotp(@CurrentUser() user: RequestUser, @Body() dto: EnableTotpDto) {
+    return this.totp.enable(user.id, dto.code);
+  }
+
+  @Post('2fa/disable')
+  @ApiOperation({ summary: 'Disable 2FA (requires the account password)' })
+  async disableTotp(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: DisableTotpDto,
+  ) {
+    await this.totp.disable(user.id, dto.password);
+    return { ok: true };
   }
 
   @Post('logout')

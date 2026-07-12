@@ -53,6 +53,7 @@ export interface User {
   auth_source: string;
   is_admin: boolean;
   disabled: boolean;
+  totp_enabled: boolean;
 }
 
 export interface Target {
