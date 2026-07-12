@@ -31,9 +31,6 @@ interface AuditPage {
   pageSize: number;
 }
 
-const GRID = 'grid-template-columns:158px 1.1fr 1.3fr 1fr 78px';
-const GRID_COLS = GRID.slice(GRID.indexOf(':') + 1);
-
 /** Admin-only audit log: paginated table, click a row for full details. */
 export function AuditLog() {
   const [page, setPage] = useState(1);
@@ -102,11 +99,11 @@ export function AuditLog() {
             <Empty>Failed to load the audit log.</Empty>
           ) : (
             <>
-              <div className="table-head" style={{ gridTemplateColumns: GRID_COLS }}>
+              <div className="table-head audit-grid">
                 <span>Time</span>
-                <span>Actor</span>
+                <span className="audit-hide-mobile">Actor</span>
                 <span>Action</span>
-                <span>Resource</span>
+                <span className="audit-hide-mobile">Resource</span>
                 <span>Status</span>
               </div>
               {data.items.length === 0 ? (
@@ -182,14 +179,8 @@ function AuditRow({
 }) {
   return (
     <div
-      className="row"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: GRID_COLS,
-        gap: 14,
-        cursor: 'pointer',
-        alignItems: 'center',
-      }}
+      className="row audit-grid"
+      style={{ cursor: 'pointer' }}
       title="Click for details"
       onClick={() => onOpen(e)}
     >
@@ -197,7 +188,7 @@ function AuditRow({
         <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{fmtRelative(e.created_at)}</div>
         <div className="row-sub">{fmtDateTime(e.created_at)}</div>
       </div>
-      <div style={{ minWidth: 0 }}>
+      <div className="audit-hide-mobile" style={{ minWidth: 0 }}>
         <div className="row-title">{e.actor_email ?? '—'}</div>
         <div className="row-sub">{actorKind(e)}</div>
       </div>
@@ -205,7 +196,7 @@ function AuditRow({
         {e.action}
       </div>
       <div
-        className="mono"
+        className="mono audit-hide-mobile"
         style={{
           fontSize: 12,
           color: 'var(--text-3)',

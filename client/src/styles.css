@@ -270,6 +270,9 @@ input, select, textarea {
     max-width: 1680px;
     margin: 0 auto;
     width: 100%;
+    /* Let the grid column shrink to the viewport so wide page content can't
+       stretch the layout (and the header) past the screen edge. */
+    min-width: 0;
 }
 
 .topbar {
@@ -278,6 +281,13 @@ input, select, textarea {
     justify-content: space-between;
     margin-bottom: 26px;
     gap: 16px;
+}
+
+.page-title {
+    /* Take the free space and allow shrinking so a long title/subtitle wraps in
+       place instead of pushing .topbar-actions onto a second row (tall bar). */
+    flex: 1;
+    min-width: 0;
 }
 
 .page-title h1 {
@@ -710,6 +720,26 @@ input, select, textarea {
     letter-spacing: 0.6px;
     text-transform: uppercase;
     color: var(--text-3);
+}
+
+/* Audit log grid: five columns on desktop, condensed to three on mobile. */
+.audit-grid {
+    display: grid;
+    gap: 14px;
+    align-items: center;
+    grid-template-columns: 158px 1.1fr 1.3fr 1fr 78px;
+}
+
+@media (max-width: 640px) {
+    .audit-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 58px;
+        gap: 10px;
+    }
+
+    /* Hide the Actor and Resource columns so the table fits the viewport. */
+    .audit-hide-mobile {
+        display: none;
+    }
 }
 
 /* ---------- Forms / modal ---------- */
