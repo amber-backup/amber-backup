@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,6 +36,14 @@ type agent struct {
 	http    *http.Client
 	state   State
 	runner  *resticRunner
+
+	// Task execution is decoupled from the poll loop so long-running backups
+	// don't stall the heartbeat (which would make the server mark us offline).
+	// The poll loop hands claimed tasks to a worker goroutine and keeps polling.
+	tasks    chan Task
+	inflight map[string]bool // task ids queued or running (dedupe)
+	mu       sync.Mutex      // guards inflight
+	active   int32           // atomic: number of queued+running tasks
 }
 
 func main() {
@@ -54,9 +64,11 @@ func main() {
 	}
 
 	a := &agent{
-		baseURL: baseURL,
-		http:    &http.Client{Timeout: 60 * time.Second},
-		runner:  newResticRunner(),
+		baseURL:  baseURL,
+		http:     &http.Client{Timeout: 60 * time.Second},
+		runner:   newResticRunner(),
+		tasks:    make(chan Task, 64),
+		inflight: make(map[string]bool),
 	}
 
 	if err := a.loadState(); err != nil {
@@ -69,6 +81,7 @@ func main() {
 	}
 
 	log.Printf("Amber agent %s started (agent %s)", agentVersion, a.state.AgentID)
+	go a.worker()
 	a.pollLoop()
 }
 
@@ -149,14 +162,47 @@ func (a *agent) pollLoop() {
 			if next > 0 {
 				interval = time.Duration(next) * time.Second
 			}
-			// Run any dispatched work first, then self-update at the end of the
-			// cycle so a pending update never drops tasks we already claimed.
+			// Hand claimed tasks to the worker without blocking, so polling
+			// continues as a heartbeat while a backup runs.
 			for i := range tasks {
-				a.runTask(&tasks[i])
+				a.enqueue(tasks[i])
 			}
-			a.maybeSelfUpdate(latest) // re-execs on success and never returns
+			// Only self-update while idle: maybeSelfUpdate re-execs the process,
+			// which would abort an in-flight backup/restore.
+			if atomic.LoadInt32(&a.active) == 0 {
+				a.maybeSelfUpdate(latest) // re-execs on success and never returns
+			}
 		}
 		time.Sleep(interval)
+	}
+}
+
+// enqueue hands a claimed task to the worker. It never blocks the poll loop:
+// duplicates (same task seen across polls) are dropped, and the channel send
+// happens in its own goroutine so a busy worker can't stall the heartbeat.
+func (a *agent) enqueue(t Task) {
+	a.mu.Lock()
+	if a.inflight[t.TaskID] {
+		a.mu.Unlock()
+		return
+	}
+	a.inflight[t.TaskID] = true
+	a.mu.Unlock()
+
+	atomic.AddInt32(&a.active, 1)
+	go func() { a.tasks <- t }()
+}
+
+// worker executes tasks one at a time. Serializing restic invocations keeps the
+// host load predictable and matches the previous single-task behavior; the poll
+// loop meanwhile keeps sending heartbeats.
+func (a *agent) worker() {
+	for t := range a.tasks {
+		a.runTask(&t)
+		a.mu.Lock()
+		delete(a.inflight, t.TaskID)
+		a.mu.Unlock()
+		atomic.AddInt32(&a.active, -1)
 	}
 }
 

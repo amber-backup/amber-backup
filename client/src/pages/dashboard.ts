@@ -21,7 +21,6 @@ export async function renderDashboard(): Promise<Node> {
     api.get<Agent[]>('/agents').catch(() => [] as Agent[]),
   ]);
 
-  const onlineAgents = agents.filter((a) => a.status === 'online').length;
   const nextJobs = jobs
     .filter((j) => j.enabled && j.next_run)
     .sort((a, b) => +new Date(a.next_run!) - +new Date(b.next_run!));
@@ -46,26 +45,32 @@ export async function renderDashboard(): Promise<Node> {
       h('div', { class: `stat-trend ${trendClass}` }, trend),
     );
 
-  const stats = h(
-    'div',
-    { class: 'stats' },
-    statCard('Successful backups', String(dash.successTotal), 'total', 'neutral', 'check'),
-    statCard(
-      'Failed (7 d)',
-      String(dash.failedLastWeek),
-      dash.failedLastWeek > 0 ? 'needs attention' : 'all good',
-      dash.failedLastWeek > 0 ? 'down' : 'up',
-      'job',
-    ),
-    statCard('Running backups', String(dash.running), 'active', 'neutral', 'play'),
-    statCard(
-      'Agents online',
-      h('span', {}, String(onlineAgents), h('small', {}, ` / ${agents.length}`)),
-      agents.length - onlineAgents > 0 ? `${agents.length - onlineAgents} offline` : 'all online',
-      agents.length - onlineAgents > 0 ? 'warn' : 'up',
-      'agent',
-    ),
-  );
+  // Rebuilt on each live refresh so the tiles track running jobs and agent state.
+  const buildStats = (d: Dashboard, ag: Agent[]): HTMLElement[] => {
+    const online = ag.filter((a) => a.status === 'online').length;
+    const offline = ag.length - online;
+    return [
+      statCard('Successful backups', String(d.successTotal), 'total', 'neutral', 'check'),
+      statCard(
+        'Failed (7 d)',
+        String(d.failedLastWeek),
+        d.failedLastWeek > 0 ? 'needs attention' : 'all good',
+        d.failedLastWeek > 0 ? 'down' : 'up',
+        'job',
+      ),
+      statCard('Running backups', String(d.running), 'active', 'neutral', 'play'),
+      statCard(
+        'Agents online',
+        h('span', {}, String(online), h('small', {}, ` / ${ag.length}`)),
+        offline > 0 ? `${offline} offline` : 'all online',
+        offline > 0 ? 'warn' : 'up',
+        'agent',
+      ),
+    ];
+  };
+
+  let latestAgents = agents;
+  const stats = h('div', { class: 'stats' }, ...buildStats(dash, latestAgents));
 
   // --- Recent runs (paginated, infinite scroll) ---
   const runsList = h('div', {});
@@ -86,6 +91,9 @@ export async function renderDashboard(): Promise<Node> {
   let offset = 0;
   let loading = false;
   let done = false;
+  // Run ids already in the DOM — shared by pagination and the live refresh so a
+  // run that the poller prepended is never appended again by a later page.
+  const seen = new Set<string>();
   const loadMoreRuns = async (): Promise<void> => {
     if (loading || done) return;
     loading = true;
@@ -94,7 +102,11 @@ export async function renderDashboard(): Promise<Node> {
     try {
       const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offset}`);
       spinner.remove();
-      page.forEach((r) => runsList.append(runRow(r)));
+      page.forEach((r) => {
+        if (seen.has(r.id)) return;
+        seen.add(r.id);
+        runsList.append(runRow(r));
+      });
       offset += page.length;
       if (page.length < RUNS_PAGE) done = true;
       if (offset === 0) runsList.append(h('div', { class: 'empty' }, 'No backup runs yet.'));
@@ -125,6 +137,47 @@ export async function renderDashboard(): Promise<Node> {
   io.observe(sentinel);
 
   await loadMoreRuns();
+
+  // --- Live refresh -------------------------------------------------------
+  // The dashboard is otherwise static; poll while it is mounted so running
+  // jobs' progress bars advance and the stat tiles / agent state stay current.
+  const applyRuns = (recent: Run[]): void => {
+    // Update rows already shown (progress advances; running → success/failed).
+    for (const r of recent) {
+      const existing = runsList.querySelector(`[data-run-id="${r.id}"]`);
+      if (existing) existing.replaceWith(runRow(r));
+    }
+    // Prepend runs that started since load (oldest-first so newest ends on top).
+    const fresh = recent.filter((r) => !seen.has(r.id));
+    for (let i = fresh.length - 1; i >= 0; i--) {
+      runsList.querySelector('.empty')?.remove();
+      runsList.prepend(runRow(fresh[i]));
+      seen.add(fresh[i].id);
+    }
+  };
+
+  const REFRESH_MS = 4000;
+  const timer = setInterval(() => {
+    // Stop once the page is navigated away (its nodes leave the document).
+    if (!runsScroll.isConnected) {
+      clearInterval(timer);
+      return;
+    }
+    if (document.visibilityState !== 'visible') return;
+    void (async () => {
+      try {
+        const [d, ag] = await Promise.all([
+          api.get<Dashboard>('/runs/dashboard'),
+          api.get<Agent[]>('/agents').catch(() => null),
+        ]);
+        if (ag) latestAgents = ag;
+        stats.replaceChildren(...buildStats(d, latestAgents));
+        applyRuns(d.recent);
+      } catch {
+        /* transient error — try again on the next tick */
+      }
+    })();
+  }, REFRESH_MS);
 
   // --- Upcoming schedules ---
   const schedRows =
@@ -217,7 +270,7 @@ function runRow(r: Run): HTMLElement {
 
   return h(
     'div',
-    { class: 'row' },
+    { class: 'row', 'data-run-id': r.id },
     h('span', { class: `status-dot ${r.status}` }),
     h(
       'div',

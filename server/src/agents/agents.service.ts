@@ -674,6 +674,9 @@ echo "Amber agent installed and started."
     taskId: string,
     dto: TaskResultDto,
   ): Promise<{ ok: boolean }> {
+    // A result post proves the agent is alive, even for a long task that ran
+    // past the offline timeout without polling.
+    await this.touchAgent(agentId);
     // Route to the correct run table.
     const jobRun = await this.db
       .selectFrom('job_runs')
@@ -694,6 +697,8 @@ echo "Amber agent installed and started."
     taskId: string,
     stats: Record<string, unknown>,
   ): Promise<{ ok: boolean }> {
+    // Progress during a long task keeps the agent marked online without a poll.
+    await this.touchAgent(agentId);
     const jobRun = await this.db
       .selectFrom('job_runs')
       .select('id')
@@ -703,6 +708,21 @@ echo "Amber agent installed and started."
     if (jobRun) await this.backupProgress(agentId, taskId, stats);
     else await this.restoreProgress(agentId, taskId, stats);
     return { ok: true };
+  }
+
+  /**
+   * Refreshes an agent's liveness (last_seen_at + online status) on any
+   * authenticated agent traffic. This complements poll()-based heartbeats so a
+   * task that outlives the offline timeout keeps the agent online — and an agent
+   * that was already swept offline is restored to online the moment it posts.
+   */
+  private async touchAgent(agentId: string): Promise<void> {
+    await this.db
+      .updateTable('agents')
+      .set({ last_seen_at: new Date(), status: 'online', updated_at: new Date() })
+      .where('id', '=', agentId)
+      .execute()
+      .catch((e) => this.logger.warn(`touchAgent(${agentId}) failed: ${e}`));
   }
 
   // --- Offline detection ----------------------------------------------------
