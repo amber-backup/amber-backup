@@ -1,0 +1,17 @@
+{
+  "name": "Amber Backup",
+  "short_name": "Amber",
+  "description": "Central dashboard for managing Restic backups across local and remote hosts.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14120E",
+  "theme_color": "#E89A1C",
+  "orientation": "any",
+  "icons": [
+    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -147,6 +147,13 @@ lists by calling its `reload()` after a mutation (editor dialogs take an
 (`static.module.ts`); in dev Vite proxies `/api`. The `styles.css` design system
 (amber dark theme, all class names) is unchanged from the original.
 
+Installable as a **PWA**: `public/manifest.webmanifest` + a hand-rolled
+`public/sw.js` (no Workbox) registered from `main.tsx` in production only. The
+service worker precaches the app shell, serves `/assets/*` cache-first
+(stale-while-revalidate), does navigations network-first for offline fallback,
+and never touches `/api`. Icons in `public/pwa-*.png` are generated from
+`favicon.svg`; bump `CACHE_VERSION` in `sw.js` when its strategy changes.
+
 ### Agent (Go)
 
 Single small module in `agent/`: `main.go` (enroll + poll loop), `restic.go`
