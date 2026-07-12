@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/amber-backup/amber-backup/compare/v1.7.0...v1.8.0) (2026-07-12)
+
+
+### Features
+
+* **pwa:** add PWA support with service worker and manifest ([187f61e](https://github.com/amber-backup/amber-backup/commit/187f61ef30d17f86bbeaef7cb937cfa11b602b12))
+
 # [1.7.0](https://github.com/amber-backup/amber-backup/compare/v1.6.1...v1.7.0) (2026-07-12)
 
 
