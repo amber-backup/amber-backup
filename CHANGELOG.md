@@ -1,3 +1,10 @@
+## [1.12.1](https://github.com/amber-backup/amber-backup/compare/v1.12.0...v1.12.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ui:** set height for mobile top bar ([a32bf5d](https://github.com/amber-backup/amber-backup/commit/a32bf5d09193e3f818f3e706025273357fb9036a))
+
 # [1.12.0](https://github.com/amber-backup/amber-backup/compare/v1.11.0...v1.12.0) (2026-07-12)
 
 
