@@ -1,3 +1,10 @@
+## [1.13.3](https://github.com/amber-backup/amber-backup/compare/v1.13.2...v1.13.3) (2026-07-13)
+
+
+### Bug Fixes
+
+* **jobs:** enforce local repo restrictions for agents ([73cf6e2](https://github.com/amber-backup/amber-backup/commit/73cf6e2873aec98655470885fbd3f9f709a10875))
+
 ## [1.13.2](https://github.com/amber-backup/amber-backup/compare/v1.13.1...v1.13.2) (2026-07-13)
 
 
