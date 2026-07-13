@@ -41,7 +41,9 @@ FROM node:22-alpine AS runtime
 ARG RESTIC_VERSION=0.17.3
 # Populated by buildx (amd64 / arm64) so the bundled restic matches the target.
 ARG TARGETARCH
-RUN apk add --no-cache bzip2 ca-certificates tar \
+# openssh-client provides ssh-keygen (SFTP target key generation) and ssh
+# (restic's sftp backend shells out to it for server-executed SFTP jobs).
+RUN apk add --no-cache bzip2 ca-certificates tar openssh-client \
   && wget -qO /tmp/restic.bz2 \
      "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
   && bunzip2 /tmp/restic.bz2 \

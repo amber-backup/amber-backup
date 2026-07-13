@@ -17,7 +17,9 @@ FROM alpine:3.20
 ARG RESTIC_VERSION=0.17.3
 # Populated by buildx (amd64 / arm64) so the bundled restic matches the target.
 ARG TARGETARCH
-RUN apk add --no-cache bzip2 ca-certificates \
+# openssh-client provides ssh, which restic's sftp backend shells out to for
+# SFTP jobs dispatched to this agent.
+RUN apk add --no-cache bzip2 ca-certificates openssh-client \
   && wget -qO /tmp/restic.bz2 \
      "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
   && bunzip2 /tmp/restic.bz2 \
