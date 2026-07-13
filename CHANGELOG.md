@@ -1,3 +1,11 @@
+## [1.13.2](https://github.com/amber-backup/amber-backup/compare/v1.13.1...v1.13.2) (2026-07-13)
+
+
+### Bug Fixes
+
+* **targets:** update backend filtering logic for connections ([8df27a9](https://github.com/amber-backup/amber-backup/commit/8df27a9a55145242e19adcb7048a37175151454f))
+* **ui:** add toast for modal confirm error handling ([3689d94](https://github.com/amber-backup/amber-backup/commit/3689d948189384f26a88123230a32a4a6cbda6ad))
+
 ## [1.13.1](https://github.com/amber-backup/amber-backup/compare/v1.13.0...v1.13.1) (2026-07-13)
 
 
