@@ -56,6 +56,21 @@ export class JobsService {
     return t.backend_type;
   }
 
+  /**
+   * A local filesystem repository (no connection) is, for now, only supported
+   * when the job runs on the server itself — not when dispatched to an agent.
+   */
+  private assertRepoAllowed(
+    location: 'local' | 'agent',
+    targetId: string | null | undefined,
+  ): void {
+    if (!targetId && location === 'agent') {
+      throw new BadRequestException(
+        'A local filesystem repository is only supported when the job runs on the server',
+      );
+    }
+  }
+
   /** Filters the repo form to job-scoped fields and validates required ones. */
   private buildRepoConfig(
     backendType: string,
@@ -119,6 +134,7 @@ export class JobsService {
     // The repository lives on a shared connection (target) or locally on the
     // executing host (target_id = null). The user must be able to use the
     // connection; the repo-specific fields (bucket/prefix/path) travel per job.
+    this.assertRepoAllowed(dto.location, dto.targetId);
     const backendType = await this.resolveBackendType(user, dto.targetId);
     const repoConfig = this.buildRepoConfig(backendType, dto.repoConfig ?? {});
 
@@ -181,6 +197,13 @@ export class JobsService {
     await this.acl.assert(user, 'job', id, 'manage');
     if (dto.cronExpr) this.validateCron(dto.cronExpr);
     const job = await this.getRow(id);
+
+    // Guard against a local repo on an agent job, considering the effective
+    // values after this update (either field may be changing here).
+    const effectiveLocation = dto.location ?? job.location;
+    const effectiveTargetId =
+      dto.targetId !== undefined ? dto.targetId : job.target_id;
+    this.assertRepoAllowed(effectiveLocation, effectiveTargetId);
 
     const patch: Record<string, unknown> = { updated_at: new Date() };
     if (dto.name !== undefined) patch.name = dto.name;

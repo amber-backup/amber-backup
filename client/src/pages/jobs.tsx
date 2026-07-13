@@ -308,6 +308,14 @@ function JobEditor({
     setTargetId(id);
     setRepoValues({});
   };
+  // A local filesystem repository is, for now, only allowed when the job runs on
+  // the server (not on an agent).
+  const localRepoAllowed = where === 'local';
+  const changeWhere = (w: string) => {
+    setWhere(w);
+    // Leaving the server for an agent invalidates a local repo — reset it.
+    if (w !== 'local' && targetId === LOCAL_REPO) changeTarget(targets[0]?.id ?? '');
+  };
 
   // Schedule: a preset dropdown fills the cron field, and a live description
   // makes the raw expression legible.
@@ -449,7 +457,7 @@ function JobEditor({
 
         <Section title="Source" sub="what to back up">
           <Field label="Run on" help="The server itself, or a remote agent">
-            <select value={where} onChange={(e) => setWhere(e.target.value)}>
+            <select value={where} onChange={(e) => changeWhere(e.target.value)}>
               <option value="local">Server (this host)</option>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>{`${a.name} (${a.status})`}</option>
@@ -465,9 +473,16 @@ function JobEditor({
         </Section>
 
         <Section title="Repository" sub="where to store it">
-          <Field label="Target" help="A shared connection, or the local filesystem">
+          <Field
+            label="Target"
+            help={
+              localRepoAllowed
+                ? 'A shared connection, or the local filesystem'
+                : 'A shared connection (local filesystem is only available for server-run jobs)'
+            }
+          >
             <select value={targetId} onChange={(e) => changeTarget(e.target.value)}>
-              <option value={LOCAL_REPO}>Local filesystem</option>
+              {localRepoAllowed && <option value={LOCAL_REPO}>Local filesystem</option>}
               {targets.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
