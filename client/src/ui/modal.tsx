@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../core/icons';
+import { useToast } from './toast';
 
 // --- Modal chrome ---------------------------------------------------------
 
@@ -115,6 +116,7 @@ const ModalContext = createContext<ModalContextValue | null>(null);
 export function ModalProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ModalEntry[]>([]);
   const nextId = useRef(0);
+  const toast = useToast();
 
   const close = useCallback((id: number) => {
     setEntries((cur) => cur.filter((e) => e.id !== id));
@@ -131,18 +133,28 @@ export function ModalProvider({ children }: { children: ReactNode }) {
 
   const confirmDialog = useCallback<ModalContextValue['confirmDialog']>(
     (title, message, onConfirm, danger = false) => {
+      // Surface a failing confirm action (e.g. a 409 from the API) as a toast
+      // and keep the dialog open, instead of letting the error vanish silently.
+      const submit = async () => {
+        try {
+          await onConfirm();
+        } catch (err) {
+          toast(err instanceof Error ? err.message : 'Action failed', 'error');
+          return false;
+        }
+      };
       open((closeThis) => (
         <FormModal
           title={title}
           confirmLabel={danger ? 'Delete' : 'Confirm'}
           onClose={closeThis}
-          onSubmit={onConfirm}
+          onSubmit={submit}
         >
           {danger ? <div className="warn-box">{message}</div> : <p>{message}</p>}
         </FormModal>
       ));
     },
-    [open],
+    [open, toast],
   );
 
   const root = document.getElementById('modal-root');
