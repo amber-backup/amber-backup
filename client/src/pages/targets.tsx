@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { api, type Target, type BackendDef, type BackendField } from '../core/api';
+import { api, type Target, type BackendDef } from '../core/api';
 import { Icon } from '../core/icons';
-import { copyToClipboard } from '../core/clipboard';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty } from '../ui/primitives';
+import { BackendFields, PublicKeyBox } from '../ui/backend-fields';
 
 export function Targets() {
   const { data, loading, reload } = useAsync(() =>
@@ -65,20 +65,6 @@ function TargetRow({
         <div className="row-sub">{backend?.label ?? t.backend_type}</div>
       </div>
       <div className="row-actions">
-        <BusyButton
-          className="btn btn-ghost btn-sm"
-          busyLabel="Testing…"
-          onClick={async () => {
-            try {
-              const res = await api.post<{ ok: boolean; message: string }>(`/targets/${t.id}/test`);
-              toast(res.message, res.ok ? 'success' : 'error');
-            } catch (err) {
-              toast(err instanceof Error ? err.message : 'Test failed', 'error');
-            }
-          }}
-        >
-          Test
-        </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
           title="Edit"
@@ -116,72 +102,6 @@ function TargetRow({
   );
 }
 
-function BackendFieldInput({
-  field: f,
-  value,
-  onChange,
-}: {
-  field: BackendField;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  if (f.type === 'textarea') {
-    return <textarea name={f.name} placeholder={f.placeholder ?? ''} value={value} onChange={(e) => onChange(e.target.value)} />;
-  }
-  if (f.type === 'select' && f.options) {
-    return (
-      <select name={f.name} value={value} onChange={(e) => onChange(e.target.value)}>
-        {f.options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  return (
-    <input
-      name={f.name}
-      type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
-      placeholder={f.placeholder ?? ''}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
-}
-
-function PublicKeyBox({ publicKey }: { publicKey: string }) {
-  const toast = useToast();
-  return (
-    <div>
-      <p className="row-sub" style={{ marginBottom: 8 }}>
-        Add this public key to the SFTP server (append it to the backup user's{' '}
-        <code>~/.ssh/authorized_keys</code>). Then use “Test” to verify the
-        connection.
-      </p>
-      <textarea
-        readOnly
-        value={publicKey}
-        rows={3}
-        style={{ fontFamily: 'monospace', fontSize: 12, width: '100%' }}
-        onFocus={(e) => e.currentTarget.select()}
-      />
-      <div style={{ marginTop: 8 }}>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={async () => {
-            const ok = await copyToClipboard(publicKey);
-            toast(ok ? 'Public key copied' : 'Copy failed', ok ? 'success' : 'error');
-          }}
-        >
-          <Icon name="copy" /> Copy public key
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function TargetEditor({
   backends,
   target,
@@ -196,15 +116,20 @@ function TargetEditor({
   onSaved: () => void;
 }) {
   const toast = useToast();
+  // A target is now just the shared connection (access + credentials). The
+  // repository-specific fields (bucket/path) and the repo password live per job.
   // Duplicate: prefill from an existing target but create a new one (POST).
   // Secret config fields aren't returned by the API, so they start empty and
-  // must be re-entered — as does the repository password.
+  // must be re-entered.
   const isEdit = !!target && !duplicate;
   const isDuplicate = !!target && duplicate;
 
+  // Only real connections are selectable — the local filesystem backend is a
+  // per-job repository option, not a connection, and is filtered out here.
+  const connections = backends.filter((b) => b.type !== 'local');
+
   const [name, setName] = useState(isDuplicate ? `Copy of ${target!.name}` : target?.name ?? '');
-  const [type, setType] = useState(target?.backend_type ?? backends[0].type);
-  const [password, setPassword] = useState('');
+  const [type, setType] = useState(target?.backend_type ?? connections[0].type);
   // Public key surfaced right after creating an SFTP target so the user can
   // install it on the server before testing.
   const [createdKey, setCreatedKey] = useState<string | null>(null);
@@ -217,43 +142,29 @@ function TargetEditor({
     return out;
   });
 
-  const backend = backends.find((b) => b.type === type)!;
+  const backend = connections.find((b) => b.type === type)!;
+  // Connection editor shows only target-scoped fields; job-scoped repo fields
+  // (bucket/prefix/path) are entered per job.
+  const connectionFields = backend.fields.filter((f) => f.scope !== 'job');
   const setValue = (n: string, v: string) => setValues((cur) => ({ ...cur, [n]: v }));
 
   const collect = (): Record<string, unknown> => {
     const config: Record<string, unknown> = {};
-    for (const f of backend.fields) {
+    for (const f of connectionFields) {
       const v = values[f.name];
       if (v != null && v !== '') config[f.name] = v;
     }
     return config;
   };
 
-  const test = async () => {
-    try {
-      const res = await api.post<{ ok: boolean; message: string }>('/targets/test', {
-        name: name || 'test',
-        backendType: type,
-        repoPassword: password || 'test',
-        config: collect(),
-      });
-      toast(res.message, res.ok ? 'success' : 'error');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Test failed', 'error');
-    }
-  };
-
   const submit = async () => {
     try {
       if (isEdit) {
-        const payload: Record<string, unknown> = { name, config: collect() };
-        if (password) payload.repoPassword = password;
-        await api.patch(`/targets/${target!.id}`, payload);
+        await api.patch(`/targets/${target!.id}`, { name, config: collect() });
       } else {
         const created = await api.post<Target>('/targets', {
           name,
           backendType: type,
-          repoPassword: password,
           config: collect(),
         });
         toast('Target saved', 'success');
@@ -299,38 +210,21 @@ function TargetEditor({
       </Field>
       <Field label="Backend">
         <select name="__type" disabled={isEdit} value={type} onChange={(e) => setType(e.target.value)}>
-          {backends.map((b) => (
+          {connections.map((b) => (
             <option key={b.type} value={b.type}>
               {b.label}
             </option>
           ))}
         </select>
       </Field>
-      <Field label={isEdit ? 'Change repository password' : 'Repository password'}>
-        <input
-          type="password"
-          placeholder={isEdit ? '(leave unchanged)' : 'Repository password'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </Field>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {backend.fields.map((f) => (
-          <Field key={f.name} label={f.label + (f.required ? ' *' : '')} help={f.help}>
-            <BackendFieldInput field={f} value={values[f.name] ?? ''} onChange={(v) => setValue(f.name, v)} />
-          </Field>
-        ))}
+        <BackendFields fields={connectionFields} values={values} onChange={setValue} />
       </div>
       {existingPublicKey && (
         <Field label="SFTP public key">
           <PublicKeyBox publicKey={existingPublicKey} />
         </Field>
       )}
-      <div>
-        <BusyButton className="btn btn-ghost" onClick={test}>
-          Test connection
-        </BusyButton>
-      </div>
     </FormModal>
   );
 }

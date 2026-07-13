@@ -1,11 +1,22 @@
 import { useState, type ReactNode } from 'react';
-import { api, type Job, type Target, type Agent, type NotificationChannel } from '../core/api';
+import {
+  api,
+  type Job,
+  type Target,
+  type Agent,
+  type NotificationChannel,
+  type BackendDef,
+} from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { BackendFields } from '../ui/backend-fields';
+
+/** Sentinel target value for a local-filesystem repository (no connection). */
+const LOCAL_REPO = '__local__';
 
 export function Jobs() {
   const { data, loading, reload } = useAsync(() =>
@@ -15,16 +26,24 @@ export function Jobs() {
       api.get<Agent[]>('/agents').catch(() => [] as Agent[]),
       // Channels are admin-only; non-admins simply get an empty list.
       api.get<NotificationChannel[]>('/notification-channels').catch(() => [] as NotificationChannel[]),
+      api.get<BackendDef[]>('/targets/backends'),
     ]),
   );
   const { open } = useModal();
 
   if (loading || !data) return <Loading label="Loading…" />;
-  const [jobs, targets, agents, channels] = data;
+  const [jobs, targets, agents, channels, backends] = data;
 
   const newJob = () =>
     open((close) => (
-      <JobEditor targets={targets} agents={agents} channels={channels} onClose={close} onSaved={reload} />
+      <JobEditor
+        targets={targets}
+        agents={agents}
+        channels={channels}
+        backends={backends}
+        onClose={close}
+        onSaved={reload}
+      />
     ));
 
   return (
@@ -48,6 +67,7 @@ export function Jobs() {
               targets={targets}
               agents={agents}
               channels={channels}
+              backends={backends}
               reload={reload}
             />
           ))
@@ -62,12 +82,14 @@ function JobRow({
   targets,
   agents,
   channels,
+  backends,
   reload,
 }: {
   job: Job;
   targets: Target[];
   agents: Agent[];
   channels: NotificationChannel[];
+  backends: BackendDef[];
   reload: () => void;
 }) {
   const toast = useToast();
@@ -76,13 +98,17 @@ function JobRow({
   const tgt = targets.find((t) => t.id === j.target_id);
   const agent = agents.find((a) => a.id === j.agent_id);
   const where = j.location === 'agent' ? `Agent: ${agent?.name ?? 'unknown'}` : 'Local';
+  // A null target is a local-filesystem repository; show its path instead.
+  const repoName = j.target_id
+    ? (tgt?.name ?? '?')
+    : `Local: ${(j.repo_config?.path as string | undefined) ?? '?'}`;
 
   return (
     <div className="row">
       <span className={`status-dot ${j.enabled ? 'online' : 'offline'}`} />
       <div className="row-main">
         <div className="row-title">{j.name}</div>
-        <div className="row-sub">{`${where} · ${j.paths.join(', ')} → ${tgt?.name ?? '?'} · ${j.cron_expr}`}</div>
+        <div className="row-sub">{`${where} · ${j.paths.join(', ')} → ${repoName} · ${j.cron_expr}`}</div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         {j.enabled && j.next_run ? (
@@ -117,6 +143,7 @@ function JobRow({
                 targets={targets}
                 agents={agents}
                 channels={channels}
+                backends={backends}
                 job={j}
                 onClose={close}
                 onSaved={reload}
@@ -135,6 +162,7 @@ function JobRow({
                 targets={targets}
                 agents={agents}
                 channels={channels}
+                backends={backends}
                 job={j}
                 duplicate
                 onClose={close}
@@ -217,6 +245,7 @@ function JobEditor({
   targets,
   agents,
   channels,
+  backends,
   job,
   duplicate = false,
   onClose,
@@ -225,6 +254,7 @@ function JobEditor({
   targets: Target[];
   agents: Agent[];
   channels: NotificationChannel[];
+  backends: BackendDef[];
   job?: Job;
   duplicate?: boolean;
   onClose: () => void;
@@ -248,7 +278,36 @@ function JobEditor({
   const [paths, setPaths] = useState<string>((job?.paths ?? []).join('\n'));
   const [excludes, setExcludes] = useState<string>((opts.exclude ?? []).join('\n'));
 
-  const [targetId, setTargetId] = useState<string>(job?.target_id ?? targets[0]?.id ?? '');
+  // Repository: a connection (target) plus the repo-specific fields
+  // (bucket/prefix/path), or the local filesystem (LOCAL_REPO ⇒ target_id null).
+  const initialTarget =
+    job !== undefined
+      ? (job.target_id ?? LOCAL_REPO)
+      : (targets[0]?.id ?? LOCAL_REPO);
+  const [targetId, setTargetId] = useState<string>(initialTarget);
+  const [repoValues, setRepoValues] = useState<Record<string, string>>(() => {
+    const cfg = job?.repo_config ?? {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cfg)) out[k] = v != null ? String(v) : '';
+    return out;
+  });
+  const [repoPassword, setRepoPassword] = useState('');
+
+  // The backend type driving the repo fields: 'local' for the local option,
+  // otherwise the selected connection's backend.
+  const repoBackendType =
+    targetId === LOCAL_REPO
+      ? 'local'
+      : targets.find((t) => t.id === targetId)?.backend_type;
+  const repoBackend = backends.find((b) => b.type === repoBackendType);
+  const repoFields = repoBackend?.fields.filter((f) => f.scope === 'job') ?? [];
+  const setRepoValue = (n: string, v: string) =>
+    setRepoValues((cur) => ({ ...cur, [n]: v }));
+  // Switching the connection changes which repo fields apply — start fresh.
+  const changeTarget = (id: string) => {
+    setTargetId(id);
+    setRepoValues({});
+  };
 
   // Schedule: a preset dropdown fills the cron field, and a live description
   // makes the raw expression legible.
@@ -306,6 +365,14 @@ function JobEditor({
     const location = where === 'local' ? 'local' : 'agent';
     const agentId = where === 'local' ? undefined : where;
 
+    // Repository: connection (or local) + the job-scoped repo fields.
+    const targetIdPayload = targetId === LOCAL_REPO ? null : targetId;
+    const repoConfig: Record<string, unknown> = {};
+    for (const f of repoFields) {
+      const v = repoValues[f.name];
+      if (v != null && v !== '') repoConfig[f.name] = v;
+    }
+
     const notifyPayload = {
       channelIds: channels.filter((c) => selected.has(c.id)).map((c) => c.id),
       onSuccess,
@@ -314,22 +381,29 @@ function JobEditor({
 
     try {
       if (isEdit) {
-        await api.patch(`/jobs/${job!.id}`, {
+        const patch: Record<string, unknown> = {
           name,
           location,
           agentId,
           paths: pathList,
+          targetId: targetIdPayload,
+          repoConfig,
           cronExpr: cron,
           resticOptions,
           notify: notifyPayload,
           enabled,
-        });
+        };
+        // Secrets are never returned: only send a new repo password if set.
+        if (repoPassword) patch.repoPassword = repoPassword;
+        await api.patch(`/jobs/${job!.id}`, patch);
       } else {
         const payload: Record<string, unknown> = {
           name,
           location,
           paths: pathList,
-          targetId,
+          targetId: targetIdPayload,
+          repoConfig,
+          repoPassword,
           cronExpr: cron,
           resticOptions,
           notify: notifyPayload,
@@ -390,15 +464,25 @@ function JobEditor({
           </Field>
         </Section>
 
-        <Section title="Destination" sub="where to store it">
-          <Field label="Target">
-            <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+        <Section title="Repository" sub="where to store it">
+          <Field label="Target" help="A shared connection, or the local filesystem">
+            <select value={targetId} onChange={(e) => changeTarget(e.target.value)}>
+              <option value={LOCAL_REPO}>Local filesystem</option>
               {targets.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
               ))}
             </select>
+          </Field>
+          <BackendFields fields={repoFields} values={repoValues} onChange={setRepoValue} />
+          <Field label={isEdit ? 'Change repository password' : 'Repository password'}>
+            <input
+              type="password"
+              placeholder={isEdit ? '(leave unchanged)' : 'Repository password'}
+              value={repoPassword}
+              onChange={(e) => setRepoPassword(e.target.value)}
+            />
           </Field>
         </Section>
 

@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -8,7 +9,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { SecretsService } from '../crypto/secrets.service';
 import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
-import { Target } from '../database/database.types';
+import { BackupJob, RestoreRun, Target } from '../database/database.types';
 import {
   CredentialFile,
   getBackend,
@@ -27,10 +28,20 @@ export interface ResolvedTarget {
   extraArgs?: string[];
 }
 
-export type PublicTarget = Omit<
-  Target,
-  'password_secret_id' | 'credential_secret_id'
->;
+/** Inputs for an ad-hoc repository resolution (pre-save connection/repo test). */
+export interface AdHocRepoInput {
+  /** Saved connection to use; omit for a pre-save target or a local repo. */
+  targetId?: string | null;
+  /** Backend type for a pre-save target (ignored when `targetId` is set). */
+  backendType?: string;
+  /** Flat connection form values for a pre-save target. */
+  targetConfig?: Record<string, unknown>;
+  /** Repository-specific values (bucket, prefix, path). */
+  repoConfig?: Record<string, unknown>;
+  repoPassword: string;
+}
+
+export type PublicTarget = Omit<Target, 'credential_secret_id'>;
 
 @Injectable()
 export class TargetsService {
@@ -42,10 +53,16 @@ export class TargetsService {
   ) {}
 
   private toPublic(t: Target): PublicTarget {
-    const { password_secret_id, credential_secret_id, ...rest } = t;
-    void password_secret_id;
+    const { credential_secret_id, ...rest } = t;
     void credential_secret_id;
     return rest;
+  }
+
+  private parseConfig(c: unknown): Record<string, unknown> {
+    if (c == null) return {};
+    return typeof c === 'string'
+      ? (JSON.parse(c) as Record<string, unknown>)
+      : (c as Record<string, unknown>);
   }
 
   async list(user: RequestUser): Promise<PublicTarget[]> {
@@ -75,24 +92,29 @@ export class TargetsService {
 
   async create(user: RequestUser, dto: CreateTargetDto): Promise<PublicTarget> {
     getBackend(dto.backendType); // validate type
-    const { config, credentials } = splitConfig(dto.backendType, dto.config);
+    const { config, credentials } = splitConfig(
+      dto.backendType,
+      dto.config,
+      'target',
+    );
 
     // SFTP authenticates with a server-generated key pair: keep the private key
     // in the encrypted credential secret and expose the public key (non-secret)
-    // via the target config so the user can install it on the SSH server.
+    // via the target config so the user can install it on the SSH server. The
+    // key now belongs to the connection (host/user live on the target), so it is
+    // generated once here and reused by every repository on this connection.
     if (dto.backendType === 'sftp' && !credentials.privateKey) {
       const pair = await this.sshKeys.generate(`amber-backup:${dto.name}`);
       credentials.privateKey = pair.privateKey;
       config.publicKey = pair.publicKey;
     }
 
-    const passwordSecretId = await this.secrets.create(
-      'repo_password',
-      dto.repoPassword,
-    );
     const credentialSecretId =
       Object.keys(credentials).length > 0
-        ? await this.secrets.create('backend_credential', JSON.stringify(credentials))
+        ? await this.secrets.create(
+            'backend_credential',
+            JSON.stringify(credentials),
+          )
         : null;
 
     const row = await this.db
@@ -101,7 +123,6 @@ export class TargetsService {
         name: dto.name,
         backend_type: dto.backendType,
         config: JSON.stringify(config),
-        password_secret_id: passwordSecretId,
         credential_secret_id: credentialSecretId,
         owner_id: user.id,
       })
@@ -134,19 +155,17 @@ export class TargetsService {
     const patch: Record<string, unknown> = { updated_at: new Date() };
 
     if (dto.name !== undefined) patch.name = dto.name;
-    if (dto.repoPassword !== undefined) {
-      await this.secrets.update(target.password_secret_id, dto.repoPassword);
-    }
     if (dto.config !== undefined) {
-      const { config, credentials } = splitConfig(target.backend_type, dto.config);
+      const { config, credentials } = splitConfig(
+        target.backend_type,
+        dto.config,
+        'target',
+      );
       // The SFTP public key lives in config but isn't an editable form field —
       // carry it (and thereby its key pair) across an edit. The private key in
       // the credential secret is untouched because SFTP has no secret fields.
       if (target.backend_type === 'sftp') {
-        const existing =
-          typeof target.config === 'string'
-            ? JSON.parse(target.config)
-            : (target.config as Record<string, unknown>);
+        const existing = this.parseConfig(target.config);
         if (existing?.publicKey) config.publicKey = existing.publicKey;
       }
       patch.config = JSON.stringify(config);
@@ -177,34 +196,135 @@ export class TargetsService {
   async remove(user: RequestUser, id: string): Promise<void> {
     await this.acl.assert(user, 'target', id, 'manage');
     const target = await this.getRow(id);
+
+    // A connection is shared: refuse to delete it while jobs still use it (the
+    // DB FK also enforces this via ON DELETE RESTRICT — this is the friendly
+    // error).
+    const inUse = await this.db
+      .selectFrom('backup_jobs')
+      .select('id')
+      .where('target_id', '=', id)
+      .limit(1)
+      .executeTakeFirst();
+    if (inUse) {
+      throw new ConflictException(
+        'This connection is still used by one or more backup jobs',
+      );
+    }
+
     await this.db.deleteFrom('targets').where('id', '=', id).execute();
-    await this.secrets.remove(target.password_secret_id);
     if (target.credential_secret_id) {
       await this.secrets.remove(target.credential_secret_id);
     }
   }
 
-  /** Resolves a target to a repository + secrets. Internal use (executor/agent). */
-  async resolve(id: string): Promise<ResolvedTarget> {
-    const target = await this.getRow(id);
-    const password = await this.secrets.reveal(target.password_secret_id);
-    const credentials: Record<string, string> = target.credential_secret_id
-      ? JSON.parse(await this.secrets.reveal(target.credential_secret_id))
-      : {};
-    const backend = getBackend(target.backend_type);
-    const config =
-      typeof target.config === 'string'
-        ? JSON.parse(target.config)
-        : target.config;
-    const resolved = backend.build(config, credentials);
+  /** Assembles a ResolvedTarget from already-decrypted parts. */
+  private assemble(
+    backendType: string,
+    config: Record<string, unknown>,
+    credentials: Record<string, string>,
+    repoConfig: Record<string, unknown>,
+    password: string,
+    targetId: string,
+  ): ResolvedTarget {
+    const b = getBackend(backendType).build(config, credentials, repoConfig);
     return {
-      targetId: id,
-      repository: resolved.repository,
+      targetId,
+      repository: b.repository,
       password,
-      env: resolved.env,
-      credentialFiles: resolved.credentialFiles,
-      extraArgs: resolved.extraArgs,
+      env: b.env,
+      credentialFiles: b.credentialFiles,
+      extraArgs: b.extraArgs,
     };
+  }
+
+  /**
+   * Core resolver: combines a (nullable) connection with a repository's config
+   * and password secret. `targetId === null` is a local filesystem repository.
+   */
+  private async resolveRepo(
+    targetId: string | null,
+    repoConfig: Record<string, unknown>,
+    repoPasswordSecretId: string,
+  ): Promise<ResolvedTarget> {
+    const password = await this.secrets.reveal(repoPasswordSecretId);
+    if (targetId == null) {
+      return this.assemble('local', {}, {}, repoConfig, password, 'local');
+    }
+    const t = await this.getRow(targetId);
+    const credentials: Record<string, string> = t.credential_secret_id
+      ? JSON.parse(await this.secrets.reveal(t.credential_secret_id))
+      : {};
+    return this.assemble(
+      t.backend_type,
+      this.parseConfig(t.config),
+      credentials,
+      repoConfig,
+      password,
+      targetId,
+    );
+  }
+
+  /** Resolves the repository a backup job writes to. */
+  async resolveForJob(
+    job: Pick<BackupJob, 'target_id' | 'repo_config' | 'repo_password_secret_id'>,
+  ): Promise<ResolvedTarget> {
+    return this.resolveRepo(
+      job.target_id,
+      this.parseConfig(job.repo_config),
+      job.repo_password_secret_id,
+    );
+  }
+
+  /** Resolves the repository a restore run reads from. */
+  async resolveForRestore(
+    run: Pick<
+      RestoreRun,
+      'target_id' | 'repo_config' | 'repo_password_secret_id'
+    >,
+  ): Promise<ResolvedTarget> {
+    return this.resolveRepo(
+      run.target_id,
+      this.parseConfig(run.repo_config),
+      run.repo_password_secret_id,
+    );
+  }
+
+  /**
+   * Resolves a repository from an unsaved form payload (pre-save connection/repo
+   * test). Handles a saved connection (`targetId`), a pre-save connection
+   * (`backendType` + `targetConfig`), or a local repo (neither).
+   */
+  async resolveRepoAdHoc(input: AdHocRepoInput): Promise<ResolvedTarget> {
+    const repoConfig = input.repoConfig ?? {};
+    if (input.targetId) {
+      const t = await this.getRow(input.targetId);
+      const credentials: Record<string, string> = t.credential_secret_id
+        ? JSON.parse(await this.secrets.reveal(t.credential_secret_id))
+        : {};
+      return this.assemble(
+        t.backend_type,
+        this.parseConfig(t.config),
+        credentials,
+        repoConfig,
+        input.repoPassword,
+        t.id,
+      );
+    }
+    const backendType = input.backendType ?? 'local';
+    const { config, credentials } = splitConfig(
+      backendType,
+      input.targetConfig ?? {},
+      'target',
+    );
+    return this.assemble(
+      backendType,
+      config,
+      credentials,
+      repoConfig,
+      input.repoPassword,
+      'adhoc',
+    );
   }
 
   /** Ensures the user may operate a target (used by backup/restore flows). */
@@ -212,20 +332,5 @@ export class TargetsService {
     if (!(await this.acl.can(user, 'target', id, 'operate'))) {
       throw new ForbiddenException('Missing operate access on target');
     }
-  }
-
-  /** Builds a resolved repository from an unsaved form payload (pre-save test). */
-  resolveAdHoc(dto: CreateTargetDto): ResolvedTarget {
-    const { config, credentials } = splitConfig(dto.backendType, dto.config);
-    const backend = getBackend(dto.backendType);
-    const resolved = backend.build(config, credentials);
-    return {
-      targetId: 'adhoc',
-      repository: resolved.repository,
-      password: dto.repoPassword,
-      env: resolved.env,
-      credentialFiles: resolved.credentialFiles,
-      extraArgs: resolved.extraArgs,
-    };
   }
 }

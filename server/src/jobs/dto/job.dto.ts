@@ -34,9 +34,25 @@ export class CreateJobDto {
   @IsString({ each: true })
   paths!: string[];
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    description: 'Shared connection the repository lives on; omit for a local repo',
+  })
+  @IsOptional()
   @IsUUID()
-  targetId!: string;
+  targetId?: string | null;
+
+  @ApiPropertyOptional({
+    type: Object,
+    description: 'Repository-specific fields (bucket, prefix, path)',
+  })
+  @IsOptional()
+  @IsObject()
+  repoConfig?: Record<string, unknown>;
+
+  @ApiProperty({ description: 'Restic repository password' })
+  @IsString()
+  @MinLength(1)
+  repoPassword!: string;
 
   @ApiProperty({ example: '0 */6 * * *' })
   @IsString()
@@ -56,6 +72,33 @@ export class CreateJobDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+}
+
+export class TestRepoDto {
+  @ApiPropertyOptional({ description: 'Saved connection to test against' })
+  @IsOptional()
+  @IsUUID()
+  targetId?: string;
+
+  @ApiPropertyOptional({ description: 'Backend type for a pre-save connection' })
+  @IsOptional()
+  @IsString()
+  backendType?: string;
+
+  @ApiPropertyOptional({ type: Object, description: 'Pre-save connection fields' })
+  @IsOptional()
+  @IsObject()
+  targetConfig?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ type: Object, description: 'Repository fields' })
+  @IsOptional()
+  @IsObject()
+  repoConfig?: Record<string, unknown>;
+
+  @ApiProperty({ description: 'Restic repository password' })
+  @IsString()
+  @MinLength(1)
+  repoPassword!: string;
 }
 
 export class UpdateJobDto {
@@ -79,6 +122,22 @@ export class UpdateJobDto {
   @IsArray()
   @IsString({ each: true })
   paths?: string[];
+
+  @ApiPropertyOptional({ description: 'Connection id, or null for a local repo' })
+  @IsOptional()
+  @IsUUID()
+  targetId?: string | null;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  repoConfig?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'New restic repository password' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  repoPassword?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

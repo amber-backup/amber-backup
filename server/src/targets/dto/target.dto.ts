@@ -11,13 +11,9 @@ export class CreateTargetDto {
   @IsString()
   backendType!: string;
 
-  @ApiProperty({ description: 'Restic repository password' })
-  @IsString()
-  @MinLength(1)
-  repoPassword!: string;
-
   @ApiProperty({
-    description: 'Flat backend field values (secret + non-secret combined)',
+    description:
+      'Flat connection field values (target-scoped, secret + non-secret)',
     type: Object,
   })
   @IsObject()
@@ -29,11 +25,6 @@ export class UpdateTargetDto {
   @IsOptional()
   @IsString()
   name?: string;
-
-  @ApiPropertyOptional({ description: 'New repository password' })
-  @IsOptional()
-  @IsString()
-  repoPassword?: string;
 
   @ApiPropertyOptional({ type: Object })
   @IsOptional()

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type Target, type Snapshot, type LsEntry, type RestoreRun } from '../core/api';
+import { api, type Job, type Snapshot, type LsEntry, type RestoreRun } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtRelative, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
@@ -8,11 +8,11 @@ import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, Field, Loading, Spinner } from '../ui/primitives';
 
 export function Restore() {
-  const { data: targets, loading } = useAsync(() => api.get<Target[]>('/targets'));
-  const [targetId, setTargetId] = useState('');
+  const { data: jobs, loading } = useAsync(() => api.get<Job[]>('/jobs'));
+  const [jobId, setJobId] = useState('');
   const history = useAsync(() => api.get<RestoreRun[]>('/restores?limit=15').catch(() => [] as RestoreRun[]));
 
-  if (loading || !targets) return <Loading label="Loading…" />;
+  if (loading || !jobs) return <Loading label="Loading…" />;
 
   return (
     <div>
@@ -21,33 +21,33 @@ export function Restore() {
         subtitle="Browse snapshots and restore selectively or in full"
         actions={
           <div className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <select style={{ maxWidth: 280 }} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-              <option value="">— Select target —</option>
-              {targets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+            <select style={{ maxWidth: 280 }} value={jobId} onChange={(e) => setJobId(e.target.value)}>
+              <option value="">— Select job —</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.name}
                 </option>
               ))}
             </select>
           </div>
         }
       />
-      <SnapshotsPanel targetId={targetId} reloadHistory={history.reload} />
+      <SnapshotsPanel jobId={jobId} reloadHistory={history.reload} />
       <HistoryPanel runs={history.data} />
     </div>
   );
 }
 
-function SnapshotsPanel({ targetId, reloadHistory }: { targetId: string; reloadHistory: () => void }) {
+function SnapshotsPanel({ jobId, reloadHistory }: { jobId: string; reloadHistory: () => void }) {
   const { data: snaps, loading, error, reload } = useAsync<Snapshot[] | null>(
-    () => (targetId ? api.get<Snapshot[]>(`/targets/${targetId}/snapshots`) : Promise.resolve(null)),
-    [targetId],
+    () => (jobId ? api.get<Snapshot[]>(`/jobs/${jobId}/snapshots`) : Promise.resolve(null)),
+    [jobId],
   );
 
-  if (!targetId) {
+  if (!jobId) {
     return (
       <div className="panel">
-        <div className="empty">Select a target to browse snapshots.</div>
+        <div className="empty">Select a job to browse snapshots.</div>
       </div>
     );
   }
@@ -79,7 +79,7 @@ function SnapshotsPanel({ targetId, reloadHistory }: { targetId: string; reloadH
         <div className="empty">No snapshots in this repository.</div>
       ) : (
         snaps.map((s) => (
-          <SnapshotRow key={s.id} targetId={targetId} snap={s} reload={reload} reloadHistory={reloadHistory} />
+          <SnapshotRow key={s.id} jobId={jobId} snap={s} reload={reload} reloadHistory={reloadHistory} />
         ))
       )}
     </div>
@@ -87,12 +87,12 @@ function SnapshotsPanel({ targetId, reloadHistory }: { targetId: string; reloadH
 }
 
 function SnapshotRow({
-  targetId,
+  jobId,
   snap: s,
   reload,
   reloadHistory,
 }: {
-  targetId: string;
+  jobId: string;
   snap: Snapshot;
   reload: () => void;
   reloadHistory: () => void;
@@ -102,7 +102,7 @@ function SnapshotRow({
   const openRestore = (includedPaths: string[]) =>
     open((close) => (
       <RestoreDialog
-        targetId={targetId}
+        jobId={jobId}
         snap={s}
         includedPaths={includedPaths}
         onClose={close}
@@ -112,11 +112,11 @@ function SnapshotRow({
 
   const openBrowse = () =>
     open((close) => (
-      <BrowserModal targetId={targetId} snap={s} onClose={close} openRestore={openRestore} />
+      <BrowserModal jobId={jobId} snap={s} onClose={close} openRestore={openRestore} />
     ));
 
   const openDelete = () =>
-    open((close) => <DeleteSnapshotDialog targetId={targetId} snap={s} onClose={close} reload={reload} />);
+    open((close) => <DeleteSnapshotDialog jobId={jobId} snap={s} onClose={close} reload={reload} />);
 
   return (
     <div className="row">
@@ -152,12 +152,12 @@ function SnapshotRow({
 }
 
 function DeleteSnapshotDialog({
-  targetId,
+  jobId,
   snap: s,
   onClose,
   reload,
 }: {
-  targetId: string;
+  jobId: string;
   snap: Snapshot;
   onClose: () => void;
   reload: () => void;
@@ -168,7 +168,7 @@ function DeleteSnapshotDialog({
 
   const submit = async () => {
     try {
-      await api.del(`/targets/${targetId}/snapshots/${s.id}?prune=${prune}`);
+      await api.del(`/jobs/${jobId}/snapshots/${s.id}?prune=${prune}`);
       toast(prune ? 'Snapshot deleted and pruned' : 'Snapshot deleted', 'success');
       reload();
     } catch (err) {
@@ -191,12 +191,12 @@ function DeleteSnapshotDialog({
 }
 
 function BrowserModal({
-  targetId,
+  jobId,
   snap,
   onClose,
   openRestore,
 }: {
-  targetId: string;
+  jobId: string;
   snap: Snapshot;
   onClose: () => void;
   openRestore: (paths: string[]) => void;
@@ -206,7 +206,7 @@ function BrowserModal({
   const { data: entries, loading, error } = useAsync<LsEntry[]>(
     () =>
       api.get<LsEntry[]>(
-        `/targets/${targetId}/snapshots/${snap.id}/ls${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+        `/jobs/${jobId}/snapshots/${snap.id}/ls${path ? `?path=${encodeURIComponent(path)}` : ''}`,
       ),
     [path],
   );
@@ -292,13 +292,13 @@ function BrowserModal({
 }
 
 function RestoreDialog({
-  targetId,
+  jobId,
   snap,
   includedPaths,
   onClose,
   reloadHistory,
 }: {
-  targetId: string;
+  jobId: string;
   snap: Snapshot;
   includedPaths: string[];
   onClose: () => void;
@@ -312,7 +312,7 @@ function RestoreDialog({
   const [del, setDel] = useState(false);
 
   const buildPayload = (dryRun: boolean) => ({
-    targetId,
+    jobId,
     snapshotId: snap.id,
     includedPaths: includedPaths.length ? includedPaths : undefined,
     mode,

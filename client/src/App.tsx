@@ -38,7 +38,7 @@ function Gate() {
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/restore" element={<Restore />} />
-        <Route path="/restore/:targetId" element={<Restore />} />
+        <Route path="/restore/:jobId" element={<Restore />} />
         <Route path="/users" element={<Users />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/reports" element={<Reports />} />

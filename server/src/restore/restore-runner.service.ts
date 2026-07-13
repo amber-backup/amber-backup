@@ -99,7 +99,7 @@ export class RestoreRunnerService implements OnApplicationShutdown {
       .execute();
 
     try {
-      const resolved = await this.targets.resolve(run.target_id);
+      const resolved = await this.targets.resolveForRestore(run);
       const ctx = {
         repository: resolved.repository,
         password: resolved.password,

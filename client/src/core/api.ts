@@ -70,6 +70,8 @@ export interface BackendField {
   type: string;
   required?: boolean;
   secret?: boolean;
+  /** 'job' fields configure the per-job repository; others the connection. */
+  scope?: 'target' | 'job';
   placeholder?: string;
   help?: string;
   options?: { value: string; label: string }[];
@@ -92,7 +94,10 @@ export interface Job {
   location: 'local' | 'agent';
   agent_id: string | null;
   paths: string[];
-  target_id: string;
+  /** Shared connection the repository lives on; null ⇒ local filesystem repo. */
+  target_id: string | null;
+  /** Repository-specific fields (bucket, prefix, path). */
+  repo_config?: Record<string, unknown>;
   cron_expr: string;
   restic_options: Record<string, unknown>;
   notify?: JobNotify;
@@ -178,7 +183,7 @@ export interface LsEntry {
 
 export interface RestoreRun {
   id: string;
-  target_id: string;
+  job_id: string | null;
   snapshot_id: string;
   mode: string;
   status: string;

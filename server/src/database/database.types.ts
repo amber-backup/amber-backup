@@ -113,17 +113,19 @@ export interface SecretsTable {
 export type Secret = Selectable<SecretsTable>;
 export type NewSecret = Insertable<SecretsTable>;
 
-// --- targets (= one restic repository) --------------------------------------
+// --- targets (= a shared backend connection) --------------------------------
 
 export interface TargetsTable {
   id: Generated<string>;
   name: string;
   backend_type: string;
-  /** Backend-specific, non-secret config (bucket, endpoint, path, region…). */
+  /**
+   * Connection-scoped, non-secret config (endpoint, host, region, user…). The
+   * repository-specific parts (bucket, prefix, path) live per-job in
+   * `backup_jobs.repo_config`, so one target can serve many repositories.
+   */
   config: JSONColumnType<Record<string, unknown>>;
-  /** Repo password secret. */
-  password_secret_id: string;
-  /** Backend credential secret (access/secret keys etc.), nullable. */
+  /** Backend credential secret (access/secret keys, SSH key etc.), nullable. */
   credential_secret_id: string | null;
   owner_id: string;
   created_at: CreatedAt;
@@ -239,7 +241,12 @@ export interface BackupJobsTable {
   location: SourceLocation;
   agent_id: string | null;
   paths: JSONColumnType<string[]>;
-  target_id: string;
+  /** Shared connection this repository lives on; null ⇒ local filesystem repo. */
+  target_id: string | null;
+  /** Repository-specific, non-secret config (bucket, prefix, path). */
+  repo_config: JSONColumnType<Record<string, unknown>>;
+  /** Per-job restic repository password secret. */
+  repo_password_secret_id: string;
   cron_expr: string;
   restic_options: JSONColumnType<ResticOptions>;
   notify: JSONColumnType<JobNotifyConfig>;
@@ -317,7 +324,14 @@ export interface RestoreDestination {
 
 export interface RestoreRunsTable {
   id: Generated<string>;
-  target_id: string;
+  /** Connection the repository lives on; null ⇒ local filesystem repo. */
+  target_id: string | null;
+  /** Job whose repository is restored; null if the job was later deleted. */
+  job_id: string | null;
+  /** Repository-specific config, snapshotted from the job at create time. */
+  repo_config: JSONColumnType<Record<string, unknown>>;
+  /** Repository password secret, snapshotted from the job at create time. */
+  repo_password_secret_id: string;
   snapshot_id: string;
   included_paths: JSONColumnType<string[] | null, string | null, string | null>;
   mode: RestoreMode;

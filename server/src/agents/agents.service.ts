@@ -499,6 +499,8 @@ echo "Amber agent installed and started."
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
         'backup_jobs.target_id',
+        'backup_jobs.repo_config',
+        'backup_jobs.repo_password_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.paths',
       ])
@@ -518,7 +520,11 @@ echo "Amber agent installed and started."
         .executeTakeFirst();
       if (!claimed) continue;
 
-      const resolved = await this.targets.resolve(run.target_id);
+      const resolved = await this.targets.resolveForJob({
+        target_id: run.target_id,
+        repo_config: run.repo_config,
+        repo_password_secret_id: run.repo_password_secret_id,
+      });
       tasks.push({
         type: 'backup',
         taskId: run.run_id,
@@ -559,7 +565,7 @@ echo "Amber agent installed and started."
         .executeTakeFirst();
       if (!claimed) continue;
 
-      const resolved = await this.targets.resolve(run.target_id);
+      const resolved = await this.targets.resolveForRestore(run);
       const destination: RestoreDestination =
         typeof run.destination === 'string'
           ? JSON.parse(run.destination)

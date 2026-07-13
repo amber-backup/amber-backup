@@ -10,10 +10,12 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { ResticService } from '../restic/restic.service';
+import { TargetsService } from '../targets/targets.service';
 import { JobsService } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
-import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
+import { CreateJobDto, UpdateJobDto, TestRepoDto } from './dto/job.dto';
 
 @ApiTags('jobs')
 @Controller('jobs')
@@ -22,6 +24,8 @@ export class JobsController {
     private readonly jobs: JobsService,
     private readonly scheduler: SchedulerService,
     private readonly runner: JobRunnerService,
+    private readonly targets: TargetsService,
+    private readonly restic: ResticService,
   ) {}
 
   @Get()
@@ -32,6 +36,20 @@ export class JobsController {
       ...j,
       next_run: this.jobs.nextRun(j.cron_expr),
     }));
+  }
+
+  @Post('test-repo')
+  @ApiOperation({ summary: 'Test a repository (saved or pre-save connection)' })
+  async testRepo(@CurrentUser() user: RequestUser, @Body() dto: TestRepoDto) {
+    if (dto.targetId) await this.targets.get(user, dto.targetId); // view check
+    const ctx = await this.targets.resolveRepoAdHoc({
+      targetId: dto.targetId,
+      backendType: dto.backendType,
+      targetConfig: dto.targetConfig,
+      repoConfig: dto.repoConfig,
+      repoPassword: dto.repoPassword,
+    });
+    return this.restic.testConnection(ctx);
   }
 
   @Post()

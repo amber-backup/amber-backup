@@ -74,7 +74,7 @@ export class JobRunnerService implements OnApplicationShutdown {
   async executeLocal(jobRunId: string): Promise<void> {
     const ctx = await this.loadRunContext(jobRunId);
     if (!ctx) return;
-    const { job, source, targetId, options } = ctx;
+    const { job, source, repo, options } = ctx;
 
     const abort = new AbortController();
     this.running.set(jobRunId, abort);
@@ -91,7 +91,7 @@ export class JobRunnerService implements OnApplicationShutdown {
       .execute();
 
     try {
-      const resolved = await this.targets.resolve(targetId);
+      const resolved = await this.targets.resolveForJob(repo);
       const resticCtx = {
         repository: resolved.repository,
         password: resolved.password,
@@ -279,6 +279,8 @@ export class JobRunnerService implements OnApplicationShutdown {
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
         'backup_jobs.target_id',
+        'backup_jobs.repo_config',
+        'backup_jobs.repo_password_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.location',
         'backup_jobs.paths',
@@ -297,7 +299,11 @@ export class JobRunnerService implements OnApplicationShutdown {
     return {
       job: { id: row.job_id, name: row.job_name },
       source: { paths },
-      targetId: row.target_id,
+      repo: {
+        target_id: row.target_id,
+        repo_config: row.repo_config,
+        repo_password_secret_id: row.repo_password_secret_id,
+      },
       options,
     };
   }

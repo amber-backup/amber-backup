@@ -11,9 +11,9 @@ import {
 import { RestoreOptions } from '../../database/database.types';
 
 export class CreateRestoreDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Job whose repository to restore from' })
   @IsUUID()
-  targetId!: string;
+  jobId!: string;
 
   @ApiProperty()
   @IsString()
