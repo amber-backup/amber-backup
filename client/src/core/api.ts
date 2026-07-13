@@ -79,6 +79,8 @@ export interface BackendField {
 export interface BackendDef {
   type: string;
   label: string;
+  /** Not a selectable connection (e.g. local filesystem) — a per-job repo only. */
+  standalone?: boolean;
   fields: BackendField[];
 }
 

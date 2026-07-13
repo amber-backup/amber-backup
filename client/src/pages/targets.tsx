@@ -124,9 +124,9 @@ function TargetEditor({
   const isEdit = !!target && !duplicate;
   const isDuplicate = !!target && duplicate;
 
-  // Only real connections are selectable — the local filesystem backend is a
-  // per-job repository option, not a connection, and is filtered out here.
-  const connections = backends.filter((b) => b.type !== 'local');
+  // Only real connections are selectable — standalone backends (local
+  // filesystem) are a per-job repository option, not a connection.
+  const connections = backends.filter((b) => !b.standalone);
 
   const [name, setName] = useState(isDuplicate ? `Copy of ${target!.name}` : target?.name ?? '');
   const [type, setType] = useState(target?.backend_type ?? connections[0].type);
