@@ -1,3 +1,11 @@
+# [1.13.0](https://github.com/amber-backup/amber-backup/compare/v1.12.3...v1.13.0) (2026-07-13)
+
+
+### Features
+
+* **repository:** split targets from repositories in schema ([496ec82](https://github.com/amber-backup/amber-backup/commit/496ec82a521001d8b61b870e3aec9119b2bc2887))
+* **sftp:** add SSH key generation and SFTP integration ([74fb010](https://github.com/amber-backup/amber-backup/commit/74fb0101677e71957528e1af6cab98cb1e6d0469))
+
 ## [1.12.3](https://github.com/amber-backup/amber-backup/compare/v1.12.2...v1.12.3) (2026-07-12)
 
 
