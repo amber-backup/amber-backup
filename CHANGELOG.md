@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/amber-backup/amber-backup/compare/v1.13.0...v1.13.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **docker:** add openssh-client for SFTP support ([800f24c](https://github.com/amber-backup/amber-backup/commit/800f24ca968126760905461be8294009eee784d3))
+
 # [1.13.0](https://github.com/amber-backup/amber-backup/compare/v1.12.3...v1.13.0) (2026-07-13)
 
 
