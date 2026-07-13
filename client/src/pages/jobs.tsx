@@ -293,13 +293,13 @@ function JobEditor({
   });
   const [repoPassword, setRepoPassword] = useState('');
 
-  // The backend type driving the repo fields: 'local' for the local option,
-  // otherwise the selected connection's backend.
-  const repoBackendType =
-    targetId === LOCAL_REPO
-      ? 'local'
-      : targets.find((t) => t.id === targetId)?.backend_type;
-  const repoBackend = backends.find((b) => b.type === repoBackendType);
+  // The local filesystem is a job-level repository option, NOT a target/backend:
+  // it never comes from the connection catalog. For a real connection, the
+  // repo-specific fields (bucket/prefix/path) come from its backend's job-scoped
+  // fields; for local, the only field is a plain path (rendered directly below).
+  const isLocalRepo = targetId === LOCAL_REPO;
+  const selectedBackendType = targets.find((t) => t.id === targetId)?.backend_type;
+  const repoBackend = backends.find((b) => b.type === selectedBackendType);
   const repoFields = repoBackend?.fields.filter((f) => f.scope === 'job') ?? [];
   const setRepoValue = (n: string, v: string) =>
     setRepoValues((cur) => ({ ...cur, [n]: v }));
@@ -373,12 +373,17 @@ function JobEditor({
     const location = where === 'local' ? 'local' : 'agent';
     const agentId = where === 'local' ? undefined : where;
 
-    // Repository: connection (or local) + the job-scoped repo fields.
-    const targetIdPayload = targetId === LOCAL_REPO ? null : targetId;
+    // Repository: a local filesystem path (target_id null) or a connection plus
+    // its job-scoped fields.
+    const targetIdPayload = isLocalRepo ? null : targetId;
     const repoConfig: Record<string, unknown> = {};
-    for (const f of repoFields) {
-      const v = repoValues[f.name];
-      if (v != null && v !== '') repoConfig[f.name] = v;
+    if (isLocalRepo) {
+      if (repoValues.path) repoConfig.path = repoValues.path;
+    } else {
+      for (const f of repoFields) {
+        const v = repoValues[f.name];
+        if (v != null && v !== '') repoConfig[f.name] = v;
+      }
     }
 
     const notifyPayload = {
@@ -490,7 +495,18 @@ function JobEditor({
               ))}
             </select>
           </Field>
-          <BackendFields fields={repoFields} values={repoValues} onChange={setRepoValue} />
+          {isLocalRepo ? (
+            <Field label="Path *" help="Local directory on the server for the repository">
+              <input
+                type="text"
+                placeholder="/srv/restic-repo"
+                value={repoValues.path ?? ''}
+                onChange={(e) => setRepoValue('path', e.target.value)}
+              />
+            </Field>
+          ) : (
+            <BackendFields fields={repoFields} values={repoValues} onChange={setRepoValue} />
+          )}
           <Field label={isEdit ? 'Change repository password' : 'Repository password'}>
             <input
               type="password"

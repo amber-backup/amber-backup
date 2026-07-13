@@ -323,17 +323,17 @@ export function getBackend(type: string): BackendDefinition {
 }
 
 /**
- * Field schemas exposed to the client for dynamic form generation. Standalone
- * backends (local) are included but flagged so the target editor can hide them
- * as connections — the job editor still needs their job-scoped fields (e.g. the
- * local repository path). Each field carries its `scope` so the client can
- * render target-connection fields and job-repository fields from one payload.
+ * Field schemas exposed to the client for dynamic form generation — the list of
+ * selectable connection backends. Standalone backends (local) are NOT a
+ * connection/target type and are excluded entirely; the local filesystem is a
+ * job-level repository option handled directly in the job editor. Each field
+ * carries its `scope` so the client can render connection fields (target editor)
+ * and repository fields (job editor) from one payload.
  */
 export function backendCatalog() {
-  return BACKENDS.map((b) => ({
+  return BACKENDS.filter((b) => !b.standalone).map((b) => ({
     type: b.type,
     label: b.label,
-    standalone: b.standalone ?? false,
     fields: b.fields,
   }));
 }
