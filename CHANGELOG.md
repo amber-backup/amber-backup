@@ -1,3 +1,10 @@
+## [1.13.4](https://github.com/amber-backup/amber-backup/compare/v1.13.3...v1.13.4) (2026-07-13)
+
+
+### Bug Fixes
+
+* **targets:** remove standalone flag and revise backend handling ([570ecb3](https://github.com/amber-backup/amber-backup/commit/570ecb35edbd8055283437b13421570769a05acf))
+
 ## [1.13.3](https://github.com/amber-backup/amber-backup/compare/v1.13.2...v1.13.3) (2026-07-13)
 
 
