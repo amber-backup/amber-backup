@@ -14,6 +14,7 @@ import {
   getBackend,
   splitConfig,
 } from './backend-registry';
+import { SshKeyService } from './ssh-key.service';
 import { CreateTargetDto, UpdateTargetDto } from './dto/target.dto';
 
 /** A fully resolved repository ready to hand to restic (server or agent). */
@@ -23,6 +24,7 @@ export interface ResolvedTarget {
   password: string;
   env: Record<string, string>;
   credentialFiles: CredentialFile[];
+  extraArgs?: string[];
 }
 
 export type PublicTarget = Omit<
@@ -36,6 +38,7 @@ export class TargetsService {
     @Inject(KYSELY) private readonly db: Db,
     private readonly secrets: SecretsService,
     private readonly acl: AccessControlService,
+    private readonly sshKeys: SshKeyService,
   ) {}
 
   private toPublic(t: Target): PublicTarget {
@@ -73,6 +76,15 @@ export class TargetsService {
   async create(user: RequestUser, dto: CreateTargetDto): Promise<PublicTarget> {
     getBackend(dto.backendType); // validate type
     const { config, credentials } = splitConfig(dto.backendType, dto.config);
+
+    // SFTP authenticates with a server-generated key pair: keep the private key
+    // in the encrypted credential secret and expose the public key (non-secret)
+    // via the target config so the user can install it on the SSH server.
+    if (dto.backendType === 'sftp' && !credentials.privateKey) {
+      const pair = await this.sshKeys.generate(`amber-backup:${dto.name}`);
+      credentials.privateKey = pair.privateKey;
+      config.publicKey = pair.publicKey;
+    }
 
     const passwordSecretId = await this.secrets.create(
       'repo_password',
@@ -127,6 +139,16 @@ export class TargetsService {
     }
     if (dto.config !== undefined) {
       const { config, credentials } = splitConfig(target.backend_type, dto.config);
+      // The SFTP public key lives in config but isn't an editable form field —
+      // carry it (and thereby its key pair) across an edit. The private key in
+      // the credential secret is untouched because SFTP has no secret fields.
+      if (target.backend_type === 'sftp') {
+        const existing =
+          typeof target.config === 'string'
+            ? JSON.parse(target.config)
+            : (target.config as Record<string, unknown>);
+        if (existing?.publicKey) config.publicKey = existing.publicKey;
+      }
       patch.config = JSON.stringify(config);
       if (Object.keys(credentials).length > 0) {
         if (target.credential_secret_id) {
@@ -181,6 +203,7 @@ export class TargetsService {
       password,
       env: resolved.env,
       credentialFiles: resolved.credentialFiles,
+      extraArgs: resolved.extraArgs,
     };
   }
 
@@ -202,6 +225,7 @@ export class TargetsService {
       password: dto.repoPassword,
       env: resolved.env,
       credentialFiles: resolved.credentialFiles,
+      extraArgs: resolved.extraArgs,
     };
   }
 }

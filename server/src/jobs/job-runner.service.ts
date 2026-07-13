@@ -97,6 +97,7 @@ export class JobRunnerService implements OnApplicationShutdown {
         password: resolved.password,
         env: resolved.env,
         credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
       };
 
       // Pre-backup script gates the run: a non-zero exit throws and aborts the

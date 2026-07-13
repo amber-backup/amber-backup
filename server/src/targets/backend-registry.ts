@@ -25,7 +25,11 @@ export interface BackendField {
 }
 
 export interface CredentialFile {
-  /** Env var that should point at the written file (e.g. GOOGLE_APPLICATION_CREDENTIALS). */
+  /**
+   * Env var that should point at the written file (e.g.
+   * GOOGLE_APPLICATION_CREDENTIALS). Leave empty when the file is only
+   * referenced by path from `extraArgs` (e.g. an SSH private key).
+   */
   envVar: string;
   filename: string;
   content: string;
@@ -35,6 +39,33 @@ export interface ResolvedBackend {
   repository: string;
   env: Record<string, string>;
   credentialFiles: CredentialFile[];
+  /**
+   * Extra restic global options (e.g. `['-o', 'sftp.command=...']`), prepended
+   * before the subcommand at run time. May reference a credential file's
+   * on-disk path via a `{{credentialFile:<filename>}}` placeholder — the
+   * executor (server and agent) substitutes it once the file is written.
+   */
+  extraArgs?: string[];
+}
+
+/** Filename of the generated SSH private key for SFTP key-based auth. */
+export const SFTP_KEY_FILENAME = 'sftp_id_ed25519';
+
+/** Placeholder that resolves to a credential file's on-disk path in extraArgs. */
+export function credentialFileRef(filename: string): string {
+  return `{{credentialFile:${filename}}}`;
+}
+
+/** Replaces `{{credentialFile:NAME}}` tokens with each file's on-disk path. */
+export function substituteCredentialPaths(
+  args: string[],
+  paths: Record<string, string>,
+): string[] {
+  return args.map((arg) =>
+    arg.replace(/\{\{credentialFile:([^}]+)\}\}/g, (whole, name: string) =>
+      Object.prototype.hasOwnProperty.call(paths, name) ? paths[name] : whole,
+    ),
+  );
 }
 
 export interface BackendDefinition {
@@ -77,21 +108,51 @@ export const BACKENDS: BackendDefinition[] = [
   },
   {
     type: 'sftp',
-    label: 'SFTP',
+    label: 'SFTP (SSH)',
     fields: [
       { name: 'host', label: 'Host', type: 'text', required: true },
       { name: 'user', label: 'User', type: 'text', required: true },
       { name: 'path', label: 'Path', type: 'text', required: true, placeholder: '/backups/restic' },
       { name: 'port', label: 'Port', type: 'number', placeholder: '22' },
     ],
-    build: (config) => {
+    build: (config, credentials) => {
       const host = str(config.host);
       const user = str(config.user);
       const path = str(config.path);
+      const port = str(config.port);
+      const repository = `sftp:${user}@${host}:${path}`;
+      const privateKey = credentials.privateKey;
+
+      // Without a generated key (e.g. a pre-save ad-hoc test) fall back to the
+      // host's ambient SSH configuration — no custom command is injected.
+      if (!privateKey) {
+        return { repository, env: {}, credentialFiles: [] };
+      }
+
+      // Key-based auth: restic's sftp backend shells out to `ssh`, so we point
+      // it at the generated private key via a custom sftp command.
+      // `StrictHostKeyChecking=accept-new` trusts the server on first contact;
+      // `BatchMode=yes` fails fast instead of hanging on a password prompt.
+      const ssh = [
+        'ssh',
+        `${user}@${host}`,
+        ...(port ? ['-p', port] : []),
+        '-i',
+        credentialFileRef(SFTP_KEY_FILENAME),
+        '-o',
+        'StrictHostKeyChecking=accept-new',
+        '-o',
+        'BatchMode=yes',
+        '-s',
+        'sftp',
+      ];
       return {
-        repository: `sftp:${user}@${host}:${path}`,
+        repository,
         env: {},
-        credentialFiles: [],
+        credentialFiles: [
+          { envVar: '', filename: SFTP_KEY_FILENAME, content: privateKey },
+        ],
+        extraArgs: ['-o', `sftp.command=${ssh.join(' ')}`],
       };
     },
   },

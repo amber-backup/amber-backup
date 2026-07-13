@@ -7,6 +7,12 @@ export interface ResticContext {
   password: string;
   env: Record<string, string>;
   credentialFiles: CredentialFile[];
+  /**
+   * Extra restic global options prepended before the subcommand (e.g. the
+   * SFTP `-o sftp.command=...`). May reference credential file paths via the
+   * `{{credentialFile:<filename>}}` placeholder.
+   */
+  extraArgs?: string[];
 }
 
 export interface ResticSnapshot {

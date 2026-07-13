@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { loadConfig } from '../config/configuration';
+import { substituteCredentialPaths } from '../targets/backend-registry';
 import { RunStats, ResticOptions } from '../database/database.types';
 import {
   BackupResult,
@@ -56,14 +57,22 @@ export class ResticService {
     };
 
     try {
+      const credentialPaths: Record<string, string> = {};
       for (const file of ctx.credentialFiles) {
         const fp = path.join(workDir, file.filename);
         await fs.writeFile(fp, file.content, { mode: 0o600 });
-        env[file.envVar] = fp;
+        credentialPaths[file.filename] = fp;
+        // Files referenced only by path (e.g. an SSH key) carry no env var.
+        if (file.envVar) env[file.envVar] = fp;
       }
       await fs.mkdir(this.cacheDir, { recursive: true }).catch(() => undefined);
 
-      return await this.spawn(args, env, opts);
+      // Global options (e.g. sftp.command) must precede the subcommand.
+      const extraArgs = substituteCredentialPaths(
+        ctx.extraArgs ?? [],
+        credentialPaths,
+      );
+      return await this.spawn([...extraArgs, ...args], env, opts);
     } finally {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }

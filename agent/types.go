@@ -75,6 +75,10 @@ type Task struct {
 	Password        string            `json:"password"`
 	Env             map[string]string `json:"env"`
 	CredentialFiles []CredentialFile  `json:"credentialFiles"`
+	// Extra restic global options prepended before the subcommand (e.g. the
+	// SFTP -o sftp.command=...). May reference credential file paths via a
+	// {{credentialFile:<filename>}} placeholder.
+	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// backup
 	JobID   string         `json:"jobId,omitempty"`
 	JobName string         `json:"jobName,omitempty"`

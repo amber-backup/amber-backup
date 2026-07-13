@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type Target, type BackendDef, type BackendField } from '../core/api';
 import { Icon } from '../core/icons';
+import { copyToClipboard } from '../core/clipboard';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
@@ -149,6 +150,38 @@ function BackendFieldInput({
   );
 }
 
+function PublicKeyBox({ publicKey }: { publicKey: string }) {
+  const toast = useToast();
+  return (
+    <div>
+      <p className="row-sub" style={{ marginBottom: 8 }}>
+        Add this public key to the SFTP server (append it to the backup user's{' '}
+        <code>~/.ssh/authorized_keys</code>). Then use “Test” to verify the
+        connection.
+      </p>
+      <textarea
+        readOnly
+        value={publicKey}
+        rows={3}
+        style={{ fontFamily: 'monospace', fontSize: 12, width: '100%' }}
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      <div style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={async () => {
+            const ok = await copyToClipboard(publicKey);
+            toast(ok ? 'Public key copied' : 'Copy failed', ok ? 'success' : 'error');
+          }}
+        >
+          <Icon name="copy" /> Copy public key
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TargetEditor({
   backends,
   target,
@@ -172,6 +205,11 @@ function TargetEditor({
   const [name, setName] = useState(isDuplicate ? `Copy of ${target!.name}` : target?.name ?? '');
   const [type, setType] = useState(target?.backend_type ?? backends[0].type);
   const [password, setPassword] = useState('');
+  // Public key surfaced right after creating an SFTP target so the user can
+  // install it on the server before testing.
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const existingPublicKey =
+    isEdit && type === 'sftp' ? (target?.config?.publicKey as string | undefined) : undefined;
   const [values, setValues] = useState<Record<string, string>>(() => {
     const cfg = target?.config ?? {};
     const out: Record<string, string> = {};
@@ -212,7 +250,21 @@ function TargetEditor({
         if (password) payload.repoPassword = password;
         await api.patch(`/targets/${target!.id}`, payload);
       } else {
-        await api.post('/targets', { name, backendType: type, repoPassword: password, config: collect() });
+        const created = await api.post<Target>('/targets', {
+          name,
+          backendType: type,
+          repoPassword: password,
+          config: collect(),
+        });
+        toast('Target saved', 'success');
+        onSaved();
+        const pubKey = created?.config?.publicKey as string | undefined;
+        if (type === 'sftp' && pubKey) {
+          // Keep the modal open to show the generated public key.
+          setCreatedKey(pubKey);
+          return false;
+        }
+        return;
       }
       toast('Target saved', 'success');
       onSaved();
@@ -221,6 +273,19 @@ function TargetEditor({
       return false;
     }
   };
+
+  if (createdKey) {
+    return (
+      <FormModal
+        title="SFTP public key"
+        confirmLabel="Done"
+        onClose={onClose}
+        onSubmit={() => onClose()}
+      >
+        <PublicKeyBox publicKey={createdKey} />
+      </FormModal>
+    );
+  }
 
   return (
     <FormModal
@@ -256,6 +321,11 @@ function TargetEditor({
           </Field>
         ))}
       </div>
+      {existingPublicKey && (
+        <Field label="SFTP public key">
+          <PublicKeyBox publicKey={existingPublicKey} />
+        </Field>
+      )}
       <div>
         <BusyButton className="btn btn-ghost" onClick={test}>
           Test connection

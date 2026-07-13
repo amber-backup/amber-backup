@@ -43,6 +43,7 @@ export interface AgentTask {
   password: string;
   env: Record<string, string>;
   credentialFiles: { envVar: string; filename: string; content: string }[];
+  extraArgs?: string[];
   // backup
   jobId?: string;
   jobName?: string;
@@ -527,6 +528,7 @@ echo "Amber agent installed and started."
         password: resolved.password,
         env: resolved.env,
         credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
         paths:
           typeof run.paths === 'string' ? JSON.parse(run.paths) : run.paths,
         options:
@@ -577,6 +579,7 @@ echo "Amber agent installed and started."
         password: resolved.password,
         env: resolved.env,
         credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
         snapshotId: run.snapshot_id,
         targetPath: destination.path || '/',
         includedPaths,

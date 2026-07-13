@@ -105,6 +105,7 @@ export class RestoreRunnerService implements OnApplicationShutdown {
         password: resolved.password,
         env: resolved.env,
         credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
       };
 
       let targetPath: string;

@@ -7,9 +7,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var credentialFileRefRE = regexp.MustCompile(`\{\{credentialFile:([^}]+)\}\}`)
+
+// substituteCredentialPaths replaces {{credentialFile:NAME}} tokens in restic
+// args with the on-disk path of that credential file (mirrors the server).
+func substituteCredentialPaths(args []string, paths map[string]string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = credentialFileRefRE.ReplaceAllStringFunc(a, func(m string) string {
+			name := credentialFileRefRE.FindStringSubmatch(m)[1]
+			if p, ok := paths[name]; ok {
+				return p
+			}
+			return m
+		})
+	}
+	return out
+}
 
 // resticRunner executes restic on the agent host, mirroring the server executor.
 type resticRunner struct {
@@ -29,8 +48,10 @@ func newResticRunner() *resticRunner {
 	return &resticRunner{binary: bin, cacheDir: cache}
 }
 
-// prepareEnv builds the process environment and writes credential files.
-func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, error) {
+// prepareEnv builds the process environment and writes credential files. It
+// returns the env plus a map of credential filename -> on-disk path, used to
+// resolve {{credentialFile:...}} placeholders in ExtraArgs.
+func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, map[string]string, error) {
 	env := os.Environ()
 	env = append(env,
 		"RESTIC_REPOSITORY="+t.Repository,
@@ -40,14 +61,19 @@ func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, error) {
 	for k, v := range t.Env {
 		env = append(env, k+"="+v)
 	}
+	paths := make(map[string]string, len(t.CredentialFiles))
 	for _, f := range t.CredentialFiles {
 		fp := filepath.Join(workDir, f.Filename)
 		if err := os.WriteFile(fp, []byte(f.Content), 0o600); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		env = append(env, f.EnvVar+"="+fp)
+		paths[f.Filename] = fp
+		// Files referenced only by path (e.g. an SSH key) carry no env var.
+		if f.EnvVar != "" {
+			env = append(env, f.EnvVar+"="+fp)
+		}
 	}
-	return env, nil
+	return env, paths, nil
 }
 
 // run executes restic with the given args, streaming JSON stdout lines to onLine.
@@ -58,13 +84,16 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 	}
 	defer os.RemoveAll(workDir)
 
-	env, err := r.prepareEnv(t, workDir)
+	env, credPaths, err := r.prepareEnv(t, workDir)
 	if err != nil {
 		return -1, err
 	}
 	os.MkdirAll(r.cacheDir, 0o700)
 
-	cmd := exec.Command(r.binary, args...)
+	// Global options (e.g. sftp.command) must precede the subcommand.
+	extraArgs := substituteCredentialPaths(t.ExtraArgs, credPaths)
+	fullArgs := append(append([]string{}, extraArgs...), args...)
+	cmd := exec.Command(r.binary, fullArgs...)
 	cmd.Env = env
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
