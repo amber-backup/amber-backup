@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 )
 
@@ -73,6 +74,54 @@ func parseResolved(v any) (*resolvedRepo, error) {
 	return &r, nil
 }
 
+// buildEnv returns the child environment: the caller's environment with every
+// restic-controlling variable (and every key we set) stripped, then the
+// resolved values appended. Stripping first is essential — restic prefers
+// RESTIC_PASSWORD_FILE/RESTIC_PASSWORD_COMMAND over RESTIC_PASSWORD, and on Linux
+// a duplicate key resolves to the first entry, so a value the user already
+// exported in their shell (a very common restic setup) would otherwise silently
+// win over the repository we resolved and cause "wrong password".
+func buildEnv(r *resolvedRepo, credPaths map[string]string) []string {
+	managed := map[string]bool{
+		"RESTIC_REPOSITORY":       true,
+		"RESTIC_REPOSITORY_FILE":  true,
+		"RESTIC_PASSWORD":         true,
+		"RESTIC_PASSWORD_FILE":    true,
+		"RESTIC_PASSWORD_COMMAND": true,
+	}
+	for k := range r.Env {
+		managed[k] = true
+	}
+	for _, f := range r.CredentialFiles {
+		if f.EnvVar != "" {
+			managed[f.EnvVar] = true
+		}
+	}
+
+	var env []string
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i >= 0 && managed[kv[:i]] {
+			continue
+		}
+		env = append(env, kv)
+	}
+
+	env = append(env,
+		"RESTIC_REPOSITORY="+r.Repository,
+		"RESTIC_PASSWORD="+r.Password,
+	)
+	for k, v := range r.Env {
+		env = append(env, k+"="+v)
+	}
+	for _, f := range r.CredentialFiles {
+		// Files referenced only by path (e.g. an SSH key) carry no env var.
+		if f.EnvVar != "" {
+			env = append(env, f.EnvVar+"="+credPaths[f.Filename])
+		}
+	}
+	return env
+}
+
 // resticBinary is the restic executable to invoke (override with RESTIC_BINARY).
 func resticBinary() string {
 	if b := os.Getenv("RESTIC_BINARY"); b != "" {
@@ -93,14 +142,6 @@ func execRestic(r *resolvedRepo, resticArgs []string) error {
 	}
 	defer os.RemoveAll(workDir)
 
-	env := os.Environ()
-	env = append(env,
-		"RESTIC_REPOSITORY="+r.Repository,
-		"RESTIC_PASSWORD="+r.Password,
-	)
-	for k, v := range r.Env {
-		env = append(env, k+"="+v)
-	}
 	paths := make(map[string]string, len(r.CredentialFiles))
 	for _, f := range r.CredentialFiles {
 		fp := filepath.Join(workDir, f.Filename)
@@ -108,10 +149,6 @@ func execRestic(r *resolvedRepo, resticArgs []string) error {
 			return err
 		}
 		paths[f.Filename] = fp
-		// Files referenced only by path (e.g. an SSH key) carry no env var.
-		if f.EnvVar != "" {
-			env = append(env, f.EnvVar+"="+fp)
-		}
 	}
 
 	// Global options (e.g. sftp.command) must precede the subcommand.
@@ -119,7 +156,7 @@ func execRestic(r *resolvedRepo, resticArgs []string) error {
 	fullArgs := append(append([]string{}, extraArgs...), resticArgs...)
 
 	cmd := exec.Command(resticBinary(), fullArgs...)
-	cmd.Env = env
+	cmd.Env = buildEnv(r, paths)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
