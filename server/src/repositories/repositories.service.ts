@@ -1,9 +1,29 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
 import { TargetsService } from '../targets/targets.service';
 import { ResticService } from '../restic/restic.service';
+import { CredentialFile } from '../targets/backend-registry';
+
+/**
+ * Decrypted repository access handed to a trusted CLI client so it can run
+ * restic locally against a remote (network-backed) repository. Mirrors the
+ * payload the Go agent receives — same field names — so the CLI can reuse the
+ * agent's credential-file/placeholder handling verbatim.
+ */
+export interface ResolvedRepository {
+  repository: string;
+  password: string;
+  env: Record<string, string>;
+  credentialFiles: CredentialFile[];
+  extraArgs?: string[];
+}
 
 /** A repository as exposed by the API/CLI (list shape). */
 export interface PublicRepository {
@@ -145,5 +165,41 @@ export class RepositoriesService {
       detail.stats_error = (e as Error).message;
     }
     return detail;
+  }
+
+  /**
+   * Resolves the decrypted credentials needed to run restic directly against a
+   * repository (the `ambb repo use` CLI wrapper). Requires `operate` on the
+   * owning job — the same level as running the job — because it exposes the repo
+   * password and backend credentials to the caller.
+   *
+   * Only repositories on a shared connection can be reached from another host; a
+   * local filesystem repository lives on the server and is rejected.
+   */
+  async resolve(user: RequestUser, id: string): Promise<ResolvedRepository> {
+    const row = await this.baseQuery()
+      .where('r.id', '=', id)
+      .executeTakeFirst();
+    if (!row) throw new NotFoundException('Repository not found');
+    await this.acl.assert(user, 'job', row.job_id, 'operate');
+
+    if (row.target_id == null) {
+      throw new BadRequestException(
+        'Local filesystem repositories cannot be used remotely; only repositories on a shared connection are reachable from the CLI',
+      );
+    }
+
+    const resolved = await this.targets.resolveForJob({
+      target_id: row.target_id,
+      repo_config: row.repo_config as Record<string, unknown>,
+      repo_password_secret_id: row.repo_password_secret_id,
+    });
+    return {
+      repository: resolved.repository,
+      password: resolved.password,
+      env: resolved.env,
+      credentialFiles: resolved.credentialFiles,
+      extraArgs: resolved.extraArgs,
+    };
   }
 }

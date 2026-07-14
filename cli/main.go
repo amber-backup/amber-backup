@@ -21,6 +21,7 @@ Commands:
   job run <id>               Trigger a job manually
   repo list                  List repositories
   repo inspect <id>          Show a repository (with size and snapshot count)
+  repo use <id> -- <args>    Run restic against the repository (remote repos only)
   target list                List connections (shared backends)
   target inspect <id>        Show a single target
 
@@ -37,6 +38,10 @@ Examples:
   ambb agent inspect 4f3c...
   ambb --output-format json target list
   ambb job run 9a1b...
+  ambb repo use 7cc2... -- snapshots --json
+  ambb repo use 7cc2... -- mount /mnt/restic
+
+Everything after '--' is passed verbatim to restic (needs restic on PATH).
 `
 
 // usageError marks an error that should print usage and exit with code 2.
@@ -76,8 +81,17 @@ func main() {
 	if action == "" {
 		fail(usageErrorf("command %q needs an action (e.g. list, inspect)", resource))
 	}
+	var rest []string
+	if len(positionals) > 3 {
+		rest = positionals[3:]
+	}
 
-	if err := runCommand(cfg, resource, action, id); err != nil {
+	if err := runCommand(cfg, resource, action, id, rest); err != nil {
+		// A restic passthrough (repo use) carries restic's own exit code; exit
+		// with it directly and print nothing extra.
+		if ec, ok := err.(*exitCodeError); ok {
+			os.Exit(ec.code)
+		}
 		fail(err)
 	}
 }
@@ -91,6 +105,13 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 	// takeValue returns the inline (--flag=value) or next-arg value for a flag.
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+
+		// A bare "--" ends flag parsing: everything after it is passthrough
+		// (e.g. restic arguments for `repo use`), taken verbatim.
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
 
 		name, inlineVal, hasInline := arg, "", false
 		if strings.HasPrefix(arg, "--") {

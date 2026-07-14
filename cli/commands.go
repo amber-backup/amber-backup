@@ -38,8 +38,9 @@ var repoColumns = []column{
 	{"TYPE", "type"},
 }
 
-// runCommand dispatches a parsed resource/action/id triple to the API.
-func runCommand(cfg *Config, resource, action, id string) error {
+// runCommand dispatches a parsed resource/action/id triple to the API. `rest`
+// holds any trailing arguments (used by `repo use` to pass restic commands).
+func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	switch resource {
 	case "agent", "agents", "job", "jobs", "target", "targets", "repo", "repos":
 	default:
@@ -57,7 +58,7 @@ func runCommand(cfg *Config, resource, action, id string) error {
 	case "job", "jobs":
 		return runJob(cfg, client, action, id)
 	case "repo", "repos":
-		return runResource(cfg, client, "repositories", repoColumns, action, id, false)
+		return runRepo(cfg, client, action, id, rest)
 	default: // target, targets
 		return runResource(cfg, client, "targets", targetColumns, action, id, false)
 	}
@@ -84,6 +85,38 @@ func runResource(cfg *Config, client *Client, path string, cols []column, action
 	default:
 		return usageErrorf("unknown action %q for %s (want: list, inspect)", action, singular(path))
 	}
+}
+
+// runRepo adds the "use" action (a restic wrapper) on top of the shared
+// list/inspect behavior.
+func runRepo(cfg *Config, client *Client, action, id string, rest []string) error {
+	switch action {
+	case "use":
+		return runRepoUse(cfg, client, id, rest)
+	default:
+		return runResource(cfg, client, "repositories", repoColumns, action, id, false)
+	}
+}
+
+// runRepoUse resolves a repository's credentials from the server and execs
+// restic locally against it, passing `resticArgs` straight through. Only
+// repositories on a shared connection can be reached this way.
+func runRepoUse(cfg *Config, client *Client, id string, resticArgs []string) error {
+	if id == "" {
+		return usageErrorf("repo use requires an <ID>")
+	}
+	if len(resticArgs) == 0 {
+		return usageErrorf("repo use requires a restic command, e.g. ambb repo use <ID> -- snapshots")
+	}
+	v, err := client.postJSON("/repositories/"+id+"/resolve", nil)
+	if err != nil {
+		return err
+	}
+	resolved, err := parseResolved(v)
+	if err != nil {
+		return err
+	}
+	return execRestic(resolved, resticArgs)
 }
 
 // runJob adds the "run" action on top of the shared list/inspect behavior.

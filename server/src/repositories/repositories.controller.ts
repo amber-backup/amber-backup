@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
@@ -21,5 +21,15 @@ export class RepositoriesController {
   })
   get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.repositories.findOne(user, id);
+  }
+
+  @Post(':id/resolve')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Resolve decrypted credentials to run restic locally against this repository (requires operate access; remote repositories only)',
+  })
+  resolve(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.repositories.resolve(user, id);
   }
 }

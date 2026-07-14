@@ -40,6 +40,7 @@ ambb job inspect <id>          Show a single job
 ambb job run <id>              Trigger a job manually
 ambb repo list                 List repositories
 ambb repo inspect <id>         Show a repository (with size and snapshot count)
+ambb repo use <id> -- <args>   Run restic against the repository
 ambb target list               List connections (shared backends)
 ambb target inspect <id>       Show a single target
 ```
@@ -47,6 +48,31 @@ ambb target inspect <id>       Show a single target
 `repo inspect` reports the repository's deduplicated size and snapshot count,
 read live from restic; on an unreachable repository both are `null` and a
 `stats_error` field explains why.
+
+### `repo use` — restic wrapper
+
+`repo use` turns the CLI into a thin restic wrapper: it asks the server to
+resolve the repository's connection details, sets up the restic environment
+(repository URL, password, backend credentials, credential files) and execs your
+local `restic` with everything after `--` passed straight through.
+
+```bash
+ambb repo use <id> -- snapshots
+ambb repo use <id> -- stats --mode raw-data
+ambb repo use <id> -- restore latest --target /tmp/out
+ambb repo use <id> -- mount /mnt/restic      # long-running; Ctrl-C unmounts
+```
+
+Requirements and caveats:
+
+- `restic` must be on `PATH` (override with `RESTIC_BINARY`).
+- Only repositories on a **shared connection** (s3, sftp, b2, …) can be used —
+  a local filesystem repository lives on the server and is rejected.
+- Requires **operate** access on the owning backup job. The call returns
+  decrypted repository credentials to the CLI host, so it is audit-logged on the
+  server. All restic subcommands are allowed, including destructive ones
+  (`forget --prune`, `restore`, …) and `mount`.
+- The CLI's own exit status is restic's exit code.
 
 ## Examples
 
