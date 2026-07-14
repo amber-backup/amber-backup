@@ -1,3 +1,11 @@
+# [1.14.0](https://github.com/amber-backup/amber-backup/compare/v1.13.4...v1.14.0) (2026-07-14)
+
+
+### Features
+
+* **repo use:** add CLI support for local restic execution ([a6f3e7f](https://github.com/amber-backup/amber-backup/commit/a6f3e7f33f69a61d45844387f4d49eae9f6bf2cb))
+* **repository:** extract repositories from backup jobs ([81d1227](https://github.com/amber-backup/amber-backup/commit/81d1227ea8c2f10c4dcf910e3c3317ded28290e1))
+
 ## [1.13.4](https://github.com/amber-backup/amber-backup/compare/v1.13.3...v1.13.4) (2026-07-13)
 
 
