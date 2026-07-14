@@ -9,7 +9,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { SecretsService } from '../crypto/secrets.service';
 import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
-import { BackupJob, RestoreRun, Target } from '../database/database.types';
+import { Repository, RestoreRun, Target } from '../database/database.types';
 import {
   CredentialFile,
   getBackend,
@@ -197,11 +197,11 @@ export class TargetsService {
     await this.acl.assert(user, 'target', id, 'manage');
     const target = await this.getRow(id);
 
-    // A connection is shared: refuse to delete it while jobs still use it (the
-    // DB FK also enforces this via ON DELETE RESTRICT — this is the friendly
-    // error).
+    // A connection is shared: refuse to delete it while repositories still live
+    // on it (the DB FK also enforces this via ON DELETE RESTRICT — this is the
+    // friendly error).
     const inUse = await this.db
-      .selectFrom('backup_jobs')
+      .selectFrom('repositories')
       .select('id')
       .where('target_id', '=', id)
       .limit(1)
@@ -267,12 +267,15 @@ export class TargetsService {
 
   /** Resolves the repository a backup job writes to. */
   async resolveForJob(
-    job: Pick<BackupJob, 'target_id' | 'repo_config' | 'repo_password_secret_id'>,
+    repo: Pick<
+      Repository,
+      'target_id' | 'repo_config' | 'repo_password_secret_id'
+    >,
   ): Promise<ResolvedTarget> {
     return this.resolveRepo(
-      job.target_id,
-      this.parseConfig(job.repo_config),
-      job.repo_password_secret_id,
+      repo.target_id,
+      this.parseConfig(repo.repo_config),
+      repo.repo_password_secret_id,
     );
   }
 

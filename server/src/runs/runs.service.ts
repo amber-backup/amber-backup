@@ -16,6 +16,7 @@ export class RunsService {
     return this.db
       .selectFrom('job_runs')
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
+      .innerJoin('repositories', 'repositories.id', 'backup_jobs.repository_id')
       .select([
         'job_runs.id',
         'job_runs.job_id',
@@ -30,7 +31,7 @@ export class RunsService {
         'job_runs.error',
         'job_runs.created_at',
         'backup_jobs.name as job_name',
-        'backup_jobs.target_id',
+        'repositories.target_id',
       ]);
   }
 

@@ -29,6 +29,16 @@ export interface ResticSnapshot {
   };
 }
 
+/** Output of `restic stats --json` (fields present depend on the mode). */
+export interface ResticStats {
+  total_size: number;
+  total_file_count?: number;
+  total_blob_count?: number;
+  snapshots_count?: number;
+  total_uncompressed_size?: number;
+  compression_ratio?: number;
+}
+
 export interface ResticLsEntry {
   name: string;
   type: 'file' | 'dir' | string;

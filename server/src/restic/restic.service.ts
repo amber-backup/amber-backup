@@ -15,6 +15,7 @@ import {
   ResticContext,
   ResticLsEntry,
   ResticSnapshot,
+  ResticStats,
 } from './restic.types';
 
 interface RunOptions {
@@ -171,6 +172,16 @@ export class ResticService {
     const res = await this.run(ctx, args);
     if (res.code !== 0) throw new Error(res.stderr.trim() || 'snapshots failed');
     return JSON.parse(res.stdout || '[]') as ResticSnapshot[];
+  }
+
+  /**
+   * Repository storage stats. `raw-data` mode reports the deduplicated,
+   * compressed size actually stored — the repository's real footprint.
+   */
+  async stats(ctx: ResticContext): Promise<ResticStats> {
+    const res = await this.run(ctx, ['stats', '--json', '--mode', 'raw-data']);
+    if (res.code !== 0) throw new Error(res.stderr.trim() || 'stats failed');
+    return JSON.parse(res.stdout || '{}') as ResticStats;
   }
 
   async ls(

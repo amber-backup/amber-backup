@@ -494,13 +494,14 @@ echo "Amber agent installed and started."
     const runs = await this.db
       .selectFrom('job_runs')
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
+      .innerJoin('repositories', 'repositories.id', 'backup_jobs.repository_id')
       .select([
         'job_runs.id as run_id',
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
-        'backup_jobs.target_id',
-        'backup_jobs.repo_config',
-        'backup_jobs.repo_password_secret_id',
+        'repositories.target_id',
+        'repositories.repo_config',
+        'repositories.repo_password_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.paths',
       ])

@@ -10,7 +10,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
-import { BackupJob, RunTrigger } from '../database/database.types';
+import { BackupJobRow, RunTrigger } from '../database/database.types';
 import { splitConfig, requiredJobFields } from '../targets/backend-registry';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 
@@ -95,41 +95,50 @@ export class JobsService {
     }
   }
 
-  async list(user: RequestUser): Promise<BackupJob[]> {
+  /**
+   * Base query for reading a job together with its repository's resolution
+   * columns. Repositories were extracted into their own table; joining them back
+   * here keeps the job read shape (and thus the API/UI) unchanged.
+   */
+  private jobQuery() {
+    return this.db
+      .selectFrom('backup_jobs as j')
+      .innerJoin('repositories as r', 'r.id', 'j.repository_id')
+      .selectAll('j')
+      .select([
+        'r.target_id as target_id',
+        'r.repo_config as repo_config',
+        'r.repo_password_secret_id as repo_password_secret_id',
+      ]);
+  }
+
+  async list(user: RequestUser): Promise<BackupJobRow[]> {
     const ids = await this.acl.visibleResourceIds(user, 'job');
-    let q = this.db.selectFrom('backup_jobs').selectAll().orderBy('name', 'asc');
+    let q = this.jobQuery().orderBy('j.name', 'asc');
     if (ids !== 'all') {
       if (ids.length === 0) return [];
-      q = q.where('id', 'in', ids);
+      q = q.where('j.id', 'in', ids);
     }
     return q.execute();
   }
 
   /** All enabled jobs — for the scheduler (bypasses per-user ACL). */
-  async listEnabled(): Promise<BackupJob[]> {
-    return this.db
-      .selectFrom('backup_jobs')
-      .selectAll()
-      .where('enabled', '=', true)
-      .execute();
+  async listEnabled(): Promise<BackupJobRow[]> {
+    return this.jobQuery().where('j.enabled', '=', true).execute();
   }
 
-  async getRow(id: string): Promise<BackupJob> {
-    const j = await this.db
-      .selectFrom('backup_jobs')
-      .selectAll()
-      .where('id', '=', id)
-      .executeTakeFirst();
+  async getRow(id: string): Promise<BackupJobRow> {
+    const j = await this.jobQuery().where('j.id', '=', id).executeTakeFirst();
     if (!j) throw new NotFoundException('Job not found');
     return j;
   }
 
-  async get(user: RequestUser, id: string): Promise<BackupJob> {
+  async get(user: RequestUser, id: string): Promise<BackupJobRow> {
     await this.acl.assert(user, 'job', id, 'view');
     return this.getRow(id);
   }
 
-  async create(user: RequestUser, dto: CreateJobDto): Promise<BackupJob> {
+  async create(user: RequestUser, dto: CreateJobDto): Promise<BackupJobRow> {
     this.validateCron(dto.cronExpr);
     // The repository lives on a shared connection (target) or locally on the
     // executing host (target_id = null). The user must be able to use the
@@ -155,24 +164,39 @@ export class JobsService {
       dto.repoPassword,
     );
 
-    const row = await this.db
-      .insertInto('backup_jobs')
-      .values({
-        name: dto.name,
-        location: dto.location,
-        agent_id: dto.location === 'agent' ? dto.agentId! : null,
-        paths: JSON.stringify(dto.paths),
-        target_id: dto.targetId ?? null,
-        repo_config: JSON.stringify(repoConfig),
-        repo_password_secret_id: repoPasswordSecretId,
-        cron_expr: dto.cronExpr,
-        restic_options: JSON.stringify(dto.resticOptions ?? {}),
-        notify: JSON.stringify(dto.notify ?? {}),
-        enabled: dto.enabled ?? true,
-        owner_id: user.id,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    // The repository is its own entity (1:1 with the job). Create it first, then
+    // point the job at it — both in one transaction so a failed job insert never
+    // leaves an orphan repository.
+    const row = await this.db.transaction().execute(async (trx) => {
+      const repo = await trx
+        .insertInto('repositories')
+        .values({
+          name: dto.name,
+          target_id: dto.targetId ?? null,
+          repo_config: JSON.stringify(repoConfig),
+          repo_password_secret_id: repoPasswordSecretId,
+          owner_id: user.id,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+
+      return trx
+        .insertInto('backup_jobs')
+        .values({
+          name: dto.name,
+          location: dto.location,
+          agent_id: dto.location === 'agent' ? dto.agentId! : null,
+          paths: JSON.stringify(dto.paths),
+          repository_id: repo.id,
+          cron_expr: dto.cronExpr,
+          restic_options: JSON.stringify(dto.resticOptions ?? {}),
+          notify: JSON.stringify(dto.notify ?? {}),
+          enabled: dto.enabled ?? true,
+          owner_id: user.id,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    });
 
     if (!user.isAdmin) {
       await this.db
@@ -186,14 +210,14 @@ export class JobsService {
         .onConflict((oc) => oc.doNothing())
         .execute();
     }
-    return row;
+    return this.getRow(row.id);
   }
 
   async update(
     user: RequestUser,
     id: string,
     dto: UpdateJobDto,
-  ): Promise<BackupJob> {
+  ): Promise<BackupJobRow> {
     await this.acl.assert(user, 'job', id, 'manage');
     if (dto.cronExpr) this.validateCron(dto.cronExpr);
     const job = await this.getRow(id);
@@ -205,17 +229,24 @@ export class JobsService {
       dto.targetId !== undefined ? dto.targetId : job.target_id;
     this.assertRepoAllowed(effectiveLocation, effectiveTargetId);
 
-    const patch: Record<string, unknown> = { updated_at: new Date() };
-    if (dto.name !== undefined) patch.name = dto.name;
-    if (dto.location !== undefined) patch.location = dto.location;
-    if (dto.agentId !== undefined) patch.agent_id = dto.agentId;
-    if (dto.location === 'local') patch.agent_id = null;
-    if (dto.paths !== undefined) patch.paths = JSON.stringify(dto.paths);
-    if (dto.cronExpr !== undefined) patch.cron_expr = dto.cronExpr;
+    // Job-scoped columns go on backup_jobs; repository-scoped ones on the linked
+    // repository row.
+    const jobPatch: Record<string, unknown> = { updated_at: new Date() };
+    const repoPatch: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      jobPatch.name = dto.name;
+      // Keep the repository's name in sync with its (1:1) job.
+      repoPatch.name = dto.name;
+    }
+    if (dto.location !== undefined) jobPatch.location = dto.location;
+    if (dto.agentId !== undefined) jobPatch.agent_id = dto.agentId;
+    if (dto.location === 'local') jobPatch.agent_id = null;
+    if (dto.paths !== undefined) jobPatch.paths = JSON.stringify(dto.paths);
+    if (dto.cronExpr !== undefined) jobPatch.cron_expr = dto.cronExpr;
     if (dto.resticOptions !== undefined)
-      patch.restic_options = JSON.stringify(dto.resticOptions);
-    if (dto.notify !== undefined) patch.notify = JSON.stringify(dto.notify);
-    if (dto.enabled !== undefined) patch.enabled = dto.enabled;
+      jobPatch.restic_options = JSON.stringify(dto.resticOptions);
+    if (dto.notify !== undefined) jobPatch.notify = JSON.stringify(dto.notify);
+    if (dto.enabled !== undefined) jobPatch.enabled = dto.enabled;
 
     // Repository changes: switching the connection or editing the repo fields
     // re-validates against the (possibly new) backend type.
@@ -224,8 +255,8 @@ export class JobsService {
         dto.targetId !== undefined ? dto.targetId : job.target_id;
       const backendType = await this.resolveBackendType(user, targetId);
       const rawRepo = dto.repoConfig ?? this.parseConfig(job.repo_config);
-      patch.target_id = targetId ?? null;
-      patch.repo_config = JSON.stringify(
+      repoPatch.target_id = targetId ?? null;
+      repoPatch.repo_config = JSON.stringify(
         this.buildRepoConfig(backendType, rawRepo),
       );
     }
@@ -233,18 +264,35 @@ export class JobsService {
       await this.secrets.update(job.repo_password_secret_id, dto.repoPassword);
     }
 
-    return this.db
-      .updateTable('backup_jobs')
-      .set(patch)
-      .where('id', '=', id)
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    await this.db.transaction().execute(async (trx) => {
+      if (Object.keys(repoPatch).length > 0) {
+        repoPatch.updated_at = new Date();
+        await trx
+          .updateTable('repositories')
+          .set(repoPatch)
+          .where('id', '=', job.repository_id)
+          .execute();
+      }
+      await trx
+        .updateTable('backup_jobs')
+        .set(jobPatch)
+        .where('id', '=', id)
+        .execute();
+    });
+
+    return this.getRow(id);
   }
 
   async remove(user: RequestUser, id: string): Promise<void> {
     await this.acl.assert(user, 'job', id, 'manage');
     const job = await this.getRow(id);
+    // Order matters: the job references the repository, which references the
+    // password secret (both ON DELETE RESTRICT).
     await this.db.deleteFrom('backup_jobs').where('id', '=', id).execute();
+    await this.db
+      .deleteFrom('repositories')
+      .where('id', '=', job.repository_id)
+      .execute();
     await this.secrets.remove(job.repo_password_secret_id);
   }
 

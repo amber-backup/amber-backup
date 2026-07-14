@@ -31,10 +31,17 @@ var targetColumns = []column{
 	{"CREATED", "created_at"},
 }
 
+var repoColumns = []column{
+	{"ID", "id"},
+	{"NAME", "name"},
+	{"TARGET", "target"},
+	{"TYPE", "type"},
+}
+
 // runCommand dispatches a parsed resource/action/id triple to the API.
 func runCommand(cfg *Config, resource, action, id string) error {
 	switch resource {
-	case "agent", "agents", "job", "jobs", "target", "targets":
+	case "agent", "agents", "job", "jobs", "target", "targets", "repo", "repos":
 	default:
 		return usageErrorf("unknown command %q", resource)
 	}
@@ -49,6 +56,8 @@ func runCommand(cfg *Config, resource, action, id string) error {
 		return runResource(cfg, client, "agents", agentColumns, action, id, false)
 	case "job", "jobs":
 		return runJob(cfg, client, action, id)
+	case "repo", "repos":
+		return runResource(cfg, client, "repositories", repoColumns, action, id, false)
 	default: // target, targets
 		return runResource(cfg, client, "targets", targetColumns, action, id, false)
 	}

@@ -6,6 +6,7 @@ import { CommonModule } from './common/common.module';
 import { ResticModule } from './restic/restic.module';
 import { AuthModule } from './auth/auth.module';
 import { TargetsModule } from './targets/targets.module';
+import { RepositoriesModule } from './repositories/repositories.module';
 import { JobsModule } from './jobs/jobs.module';
 import { RunsModule } from './runs/runs.module';
 import { RestoreModule } from './restore/restore.module';
@@ -25,6 +26,7 @@ import { StaticModule } from './static.module';
     ResticModule,
     AuthModule,
     TargetsModule,
+    RepositoriesModule,
     JobsModule,
     RunsModule,
     RestoreModule,

@@ -19,7 +19,9 @@ Commands:
   job list                   List backup jobs
   job inspect <id>           Show a single job
   job run <id>               Trigger a job manually
-  target list                List targets (repositories)
+  repo list                  List repositories
+  repo inspect <id>          Show a repository (with size and snapshot count)
+  target list                List connections (shared backends)
   target inspect <id>        Show a single target
 
 Global flags:

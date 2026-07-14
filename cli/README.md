@@ -1,7 +1,7 @@
 # ambb — Amber Backup CLI
 
 A small, dependency-free Go CLI for the Amber Backup server's REST API. It lists
-and inspects agents, jobs and targets, and triggers jobs manually.
+and inspects agents, jobs, repositories and targets, and triggers jobs manually.
 
 ## Build
 
@@ -27,8 +27,8 @@ Output format is `text` (default) or `json`. Global flags may appear before or
 after the command.
 
 > Agent commands (`agent list` / `agent inspect`) require an API key whose owner
-> is an administrator. Job and target commands are governed by per-resource
-> grants on the key owner.
+> is an administrator. Job, repository and target commands are governed by
+> per-resource grants on the key owner.
 
 ## Commands
 
@@ -38,9 +38,15 @@ ambb agent inspect <id>        Show a single agent
 ambb job list                  List backup jobs
 ambb job inspect <id>          Show a single job
 ambb job run <id>              Trigger a job manually
-ambb target list               List targets (repositories)
+ambb repo list                 List repositories
+ambb repo inspect <id>         Show a repository (with size and snapshot count)
+ambb target list               List connections (shared backends)
 ambb target inspect <id>       Show a single target
 ```
+
+`repo inspect` reports the repository's deduplicated size and snapshot count,
+read live from restic; on an unreachable repository both are `null` and a
+`stats_error` field explains why.
 
 ## Examples
 

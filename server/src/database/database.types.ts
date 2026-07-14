@@ -135,6 +135,25 @@ export type Target = Selectable<TargetsTable>;
 export type NewTarget = Insertable<TargetsTable>;
 export type TargetUpdate = Updateable<TargetsTable>;
 
+// --- repositories (a job's restic repository) -------------------------------
+
+export interface RepositoriesTable {
+  id: Generated<string>;
+  name: string;
+  /** Shared connection this repository lives on; null ⇒ local filesystem repo. */
+  target_id: string | null;
+  /** Repository-specific, non-secret config (bucket, prefix, path). */
+  repo_config: JSONColumnType<Record<string, unknown>>;
+  /** restic repository password secret. */
+  repo_password_secret_id: string;
+  owner_id: string;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+export type Repository = Selectable<RepositoriesTable>;
+export type NewRepository = Insertable<RepositoriesTable>;
+export type RepositoryUpdate = Updateable<RepositoriesTable>;
+
 // --- agents -----------------------------------------------------------------
 
 export interface AgentsTable {
@@ -241,12 +260,8 @@ export interface BackupJobsTable {
   location: SourceLocation;
   agent_id: string | null;
   paths: JSONColumnType<string[]>;
-  /** Shared connection this repository lives on; null ⇒ local filesystem repo. */
-  target_id: string | null;
-  /** Repository-specific, non-secret config (bucket, prefix, path). */
-  repo_config: JSONColumnType<Record<string, unknown>>;
-  /** Per-job restic repository password secret. */
-  repo_password_secret_id: string;
+  /** The repository this job backs up to (1:1, extracted from the old embedded columns). */
+  repository_id: string;
   cron_expr: string;
   restic_options: JSONColumnType<ResticOptions>;
   notify: JSONColumnType<JobNotifyConfig>;
@@ -258,6 +273,14 @@ export interface BackupJobsTable {
 export type BackupJob = Selectable<BackupJobsTable>;
 export type NewBackupJob = Insertable<BackupJobsTable>;
 export type BackupJobUpdate = Updateable<BackupJobsTable>;
+
+/**
+ * A backup job as read by the app: the job row joined with its repository's
+ * resolution columns. Kept identical to the pre-extraction embedded shape so
+ * job read/write code and the API stay unchanged.
+ */
+export type BackupJobRow = BackupJob &
+  Pick<Repository, 'target_id' | 'repo_config' | 'repo_password_secret_id'>;
 
 // --- job_runs ---------------------------------------------------------------
 
@@ -472,6 +495,7 @@ export interface Database {
   resource_grants: ResourceGrantsTable;
   secrets: SecretsTable;
   targets: TargetsTable;
+  repositories: RepositoriesTable;
   agents: AgentsTable;
   enrollment_tokens: EnrollmentTokensTable;
   app_settings: AppSettingsTable;
