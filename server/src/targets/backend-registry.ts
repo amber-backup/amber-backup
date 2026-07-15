@@ -181,15 +181,26 @@ export const BACKENDS: BackendDefinition[] = [
       { name: 'url', label: 'URL', type: 'text', required: true, placeholder: 'https://backup.example.com/' },
       { name: 'username', label: 'Username', type: 'text', secret: true },
       { name: 'password', label: 'Password', type: 'password', secret: true },
+      {
+        name: 'path',
+        label: 'Repository name',
+        type: 'text',
+        scope: 'job',
+        placeholder: 'my_backup_repo',
+        help: 'Sub-repository on a REST server running with --private-repos or multiple repositories. Leave empty to use the server root.',
+      },
     ],
-    build: (config, credentials) => {
-      let url = str(config.url).replace(/^https?:\/\//, '');
-      const scheme = str(config.url).startsWith('http://') ? 'http' : 'https';
+    build: (config, credentials, repoConfig) => {
+      const raw = str(config.url);
+      const scheme = raw.startsWith('http://') ? 'http' : 'https';
+      const host = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
       const user = credentials.username;
       const pass = credentials.password;
       const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(pass ?? '')}@` : '';
+      // restic's REST backend takes the repository from the URL path and
+      // expects it to end in a slash.
       return {
-        repository: `rest:${scheme}://${auth}${url}`,
+        repository: `rest:${scheme}://${auth}${joinPath(host, repoConfig.path)}/`,
         env: {},
         credentialFiles: [],
       };
