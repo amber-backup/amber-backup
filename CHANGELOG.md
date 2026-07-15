@@ -1,3 +1,11 @@
+# [1.15.0](https://github.com/amber-backup/amber-backup/compare/v1.14.0...v1.15.0) (2026-07-15)
+
+
+### Features
+
+* **cli:** refactor environment handling for Restic commands ([55b54ed](https://github.com/amber-backup/amber-backup/commit/55b54ed6ae44f218339581225617bb55c5c17e48))
+* **targets:** add support for REST backend repository paths ([d713f05](https://github.com/amber-backup/amber-backup/commit/d713f05069fddeb7e8efa381e7497e3a060c9e5e))
+
 # [1.14.0](https://github.com/amber-backup/amber-backup/compare/v1.13.4...v1.14.0) (2026-07-14)
 
 

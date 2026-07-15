@@ -1,6 +1,6 @@
 {
   "name": "amber-backup",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "private": true,
   "description": "Central dashboard for managing Restic backups across local and remote servers",
   "license": "Apache-2.0",
