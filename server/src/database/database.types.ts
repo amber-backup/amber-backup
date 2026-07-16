@@ -26,6 +26,8 @@ export type ResourceType = 'target' | 'source' | 'job';
 export type AccessLevel = 'view' | 'operate' | 'manage';
 export type DeployMethod = 'binary' | 'docker';
 export type AgentStatus = 'enrolled' | 'online' | 'offline' | 'error';
+/** Reachability of a target's backend endpoint (unknown = not probeable yet). */
+export type TargetStatus = 'online' | 'offline' | 'unknown';
 export type SourceLocation = 'local' | 'agent';
 export type RunTrigger = 'schedule' | 'manual';
 export type RunStatus =
@@ -128,6 +130,10 @@ export interface TargetsTable {
   /** Backend credential secret (access/secret keys, SSH key etc.), nullable. */
   credential_secret_id: string | null;
   owner_id: string;
+  /** Reachability of the backend endpoint, maintained by TargetHealthService. */
+  status: ColumnType<TargetStatus, TargetStatus | undefined, TargetStatus>;
+  last_check_at: ColumnType<Date | null, Date | null, Date | null>;
+  last_check_error: string | null;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }

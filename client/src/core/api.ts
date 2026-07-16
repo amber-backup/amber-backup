@@ -62,6 +62,10 @@ export interface Target {
   backend_type: string;
   config: Record<string, unknown>;
   owner_id: string;
+  /** Reachability of the backend endpoint, maintained by the server. */
+  status: 'online' | 'offline' | 'unknown';
+  last_check_at: string | null;
+  last_check_error: string | null;
 }
 
 export interface BackendField {

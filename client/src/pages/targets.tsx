@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { api, type Target, type BackendDef } from '../core/api';
 import { Icon } from '../core/icons';
+import { fmtRelative } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
 import { BackendFields, PublicKeyBox } from '../ui/backend-fields';
 
 export function Targets() {
@@ -55,16 +56,54 @@ function TargetRow({
   const { open, confirmDialog } = useModal();
   const backend = backends.find((b) => b.type === t.backend_type);
 
+  const statusTitle =
+    t.status === 'online'
+      ? 'Reachable'
+      : t.status === 'offline'
+        ? `Offline${t.last_check_error ? `: ${t.last_check_error}` : ''}`
+        : 'Not checked yet';
+
   return (
     <div className="row">
+      <span className={`status-dot ${t.status}`} title={statusTitle} />
       <span className="stat-icon" style={{ background: 'var(--amber-glow)', color: 'var(--amber)' }}>
         <Icon name="target" size={16} />
       </span>
       <div className="row-main">
         <div className="row-title">{t.name}</div>
-        <div className="row-sub">{backend?.label ?? t.backend_type}</div>
+        <div className="row-sub">
+          {backend?.label ?? t.backend_type}
+          {t.status === 'offline' && (
+            <span style={{ color: 'var(--danger)' }}>
+              {` · offline${t.last_check_error ? `: ${t.last_check_error}` : ''}`}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
+        {t.last_check_at ? `checked ${fmtRelative(t.last_check_at)}` : 'not checked yet'}
       </div>
       <div className="row-actions">
+        <BusyButton
+          className="btn btn-ghost btn-sm"
+          title="Check now"
+          onClick={async () => {
+            try {
+              const res = await api.post<{ status: Target['status']; error: string | null }>(
+                `/targets/${t.id}/check`,
+              );
+              if (res.status === 'online') toast('Target reachable', 'success');
+              else if (res.status === 'offline')
+                toast(`Target offline${res.error ? `: ${res.error}` : ''}`, 'error');
+              else toast('This backend has no checkable endpoint', 'info');
+              reload();
+            } catch (err) {
+              toast(err instanceof Error ? err.message : 'Check failed', 'error');
+            }
+          }}
+        >
+          <Icon name="refresh" />
+        </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
           title="Edit"

@@ -610,7 +610,7 @@ input, select, textarea {
     box-shadow: 0 0 7px var(--danger);
 }
 
-.status-dot.offline, .status-dot.queued {
+.status-dot.offline, .status-dot.queued, .status-dot.unknown {
     background: var(--offline);
 }
 
