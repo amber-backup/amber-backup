@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/amber-backup/amber-backup/compare/v1.15.0...v1.15.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **client:** break list rows into two lines on mobile ([c5cf8cc](https://github.com/amber-backup/amber-backup/commit/c5cf8ccf89aa8848c6ab61f30c28653a8cb4189f))
+
 # [1.15.0](https://github.com/amber-backup/amber-backup/compare/v1.14.0...v1.15.0) (2026-07-15)
 
 
