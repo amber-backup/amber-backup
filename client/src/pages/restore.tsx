@@ -136,17 +136,19 @@ function SnapshotRow({
           ))}
         </div>
       ) : null}
-      <button className="btn btn-ghost btn-sm" title="Browse" onClick={openBrowse}>
-        <Icon name="folder" />
-        Browse
-      </button>
-      <button className="btn btn-primary btn-sm" title="Restore" onClick={() => openRestore([])}>
-        <Icon name="restore" />
-        Restore
-      </button>
-      <button className="btn btn-ghost btn-sm" title="Delete snapshot" onClick={openDelete}>
-        <Icon name="trash" />
-      </button>
+      <div className="row-actions">
+        <button className="btn btn-ghost btn-sm" title="Browse" onClick={openBrowse}>
+          <Icon name="folder" />
+          Browse
+        </button>
+        <button className="btn btn-primary btn-sm" title="Restore" onClick={() => openRestore([])}>
+          <Icon name="restore" />
+          Restore
+        </button>
+        <button className="btn btn-ghost btn-sm" title="Delete snapshot" onClick={openDelete}>
+          <Icon name="trash" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -437,10 +439,12 @@ function HistoryRow({ run: r }: { run: RestoreRun }) {
         <div className="row-sub">{`${statusLabel(r.status)} · ${fmtRelative(r.finished_at ?? r.created_at)}${r.error ? ' · ' + r.error : ''}`}</div>
       </div>
       {canDownload && (
-        <a className="btn btn-ghost btn-sm" href={`/api/restores/${r.id}/download`}>
-          <Icon name="download" />
-          Download
-        </a>
+        <div className="row-actions">
+          <a className="btn btn-ghost btn-sm" href={`/api/restores/${r.id}/download`}>
+            <Icon name="download" />
+            Download
+          </a>
+        </div>
       )}
     </div>
   );

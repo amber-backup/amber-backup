@@ -1321,6 +1321,34 @@ input[type="checkbox"]:disabled {
     }
 }
 
+/* On phones a list row breaks into two lines: the status dot with the
+   title/subtitle on the first, meta/tags/actions on their own line below. */
+@media (max-width: 640px) {
+    .row {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    /* Claim the whole first line next to the status dot / icon so that
+       everything after the main block wraps onto the second line. */
+    .row-main {
+        flex-basis: calc(100% - 44px);
+    }
+
+    .row-sub {
+        overflow-wrap: anywhere;
+    }
+
+    .row-meta {
+        text-align: left;
+        margin-right: auto;
+    }
+
+    .row-actions {
+        margin-left: auto;
+    }
+}
+
 @media (max-width: 540px) {
     .stats {
         grid-template-columns: 1fr 1fr;
