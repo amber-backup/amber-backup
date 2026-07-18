@@ -2,22 +2,27 @@ import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { SnapshotsService } from './snapshots.service';
 
 @ApiTags('snapshots')
 @Controller('jobs/:id/snapshots')
 export class SnapshotsController {
-  constructor(private readonly snapshots: SnapshotsService) {}
+  constructor(
+    private readonly snapshots: SnapshotsService,
+    private readonly slugs: SlugResolverService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: "List snapshots for a job's repository (filterable)" })
-  list(
+  async list(
     @CurrentUser() user: RequestUser,
-    @Param('id') jobId: string,
+    @Param('id') idOrSlug: string,
     @Query('host') host?: string,
     @Query('tags') tags?: string,
     @Query('path') path?: string,
   ) {
+    const jobId = await this.slugs.resolve('backup_jobs', idOrSlug);
     return this.snapshots.list(user, jobId, {
       host,
       tags: tags ? tags.split(',') : undefined,
@@ -27,23 +32,25 @@ export class SnapshotsController {
 
   @Get(':snap/ls')
   @ApiOperation({ summary: 'Browse the contents of a snapshot' })
-  ls(
+  async ls(
     @CurrentUser() user: RequestUser,
-    @Param('id') jobId: string,
+    @Param('id') idOrSlug: string,
     @Param('snap') snapshotId: string,
     @Query('path') path?: string,
   ) {
+    const jobId = await this.slugs.resolve('backup_jobs', idOrSlug);
     return this.snapshots.ls(user, jobId, snapshotId, path);
   }
 
   @Delete(':snap')
   @ApiOperation({ summary: 'Delete (forget) a snapshot; optionally prune' })
-  remove(
+  async remove(
     @CurrentUser() user: RequestUser,
-    @Param('id') jobId: string,
+    @Param('id') idOrSlug: string,
     @Param('snap') snapshotId: string,
     @Query('prune') prune?: string,
   ) {
+    const jobId = await this.slugs.resolve('backup_jobs', idOrSlug);
     return this.snapshots.remove(user, jobId, snapshotId, prune === 'true');
   }
 }
