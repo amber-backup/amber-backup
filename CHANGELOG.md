@@ -1,3 +1,11 @@
+# [1.16.0](https://github.com/amber-backup/amber-backup/compare/v1.15.1...v1.16.0) (2026-07-18)
+
+
+### Features
+
+* **slugs:** add support for name-derived unique slugs ([b99b75a](https://github.com/amber-backup/amber-backup/commit/b99b75adafdb9cfacb831dc4a7a46e4f47932c90))
+* **targets:** add target health checks and UI integration ([52c6ca2](https://github.com/amber-backup/amber-backup/commit/52c6ca2d810043ee9dc656209d4ad6cf07d6cfe3))
+
 ## [1.15.1](https://github.com/amber-backup/amber-backup/compare/v1.15.0...v1.15.1) (2026-07-16)
 
 
