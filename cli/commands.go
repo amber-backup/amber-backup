@@ -6,6 +6,7 @@ import (
 
 var agentColumns = []column{
 	{"ID", "id"},
+	{"SLUG", "slug"},
 	{"NAME", "name"},
 	{"HOSTNAME", "hostname"},
 	{"OS", "os"},
@@ -16,6 +17,7 @@ var agentColumns = []column{
 
 var jobColumns = []column{
 	{"ID", "id"},
+	{"SLUG", "slug"},
 	{"NAME", "name"},
 	{"ENABLED", "enabled"},
 	{"CRON", "cron_expr"},
@@ -26,6 +28,7 @@ var jobColumns = []column{
 
 var targetColumns = []column{
 	{"ID", "id"},
+	{"SLUG", "slug"},
 	{"NAME", "name"},
 	{"BACKEND", "backend_type"},
 	{"CREATED", "created_at"},
@@ -33,12 +36,14 @@ var targetColumns = []column{
 
 var repoColumns = []column{
 	{"ID", "id"},
+	{"SLUG", "slug"},
 	{"NAME", "name"},
 	{"TARGET", "target"},
 	{"TYPE", "type"},
 }
 
-// runCommand dispatches a parsed resource/action/id triple to the API. `rest`
+// runCommand dispatches a parsed resource/action/id triple to the API. The id
+// may be a UUID or the entity's slug — the server resolves either. `rest`
 // holds any trailing arguments (used by `repo use` to pass restic commands).
 func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	switch resource {
@@ -75,7 +80,7 @@ func runResource(cfg *Config, client *Client, path string, cols []column, action
 		return renderList(cfg, v, cols)
 	case "inspect", "get", "show":
 		if id == "" {
-			return usageErrorf("%s inspect requires an <ID>", singular(path))
+			return usageErrorf("%s inspect requires an <id|slug>", singular(path))
 		}
 		v, err := client.getJSON("/" + path + "/" + id)
 		if err != nil {
@@ -103,10 +108,10 @@ func runRepo(cfg *Config, client *Client, action, id string, rest []string) erro
 // repositories on a shared connection can be reached this way.
 func runRepoUse(cfg *Config, client *Client, id string, resticArgs []string) error {
 	if id == "" {
-		return usageErrorf("repo use requires an <ID>")
+		return usageErrorf("repo use requires an <id|slug>")
 	}
 	if len(resticArgs) == 0 {
-		return usageErrorf("repo use requires a restic command, e.g. ambb repo use <ID> -- snapshots")
+		return usageErrorf("repo use requires a restic command, e.g. ambb repo use <id|slug> -- snapshots")
 	}
 	v, err := client.postJSON("/repositories/"+id+"/resolve", nil)
 	if err != nil {
@@ -124,7 +129,7 @@ func runJob(cfg *Config, client *Client, action, id string) error {
 	switch action {
 	case "run":
 		if id == "" {
-			return usageErrorf("job run requires an <ID>")
+			return usageErrorf("job run requires an <id|slug>")
 		}
 		v, err := client.postJSON("/jobs/"+id+"/run", nil)
 		if err != nil {

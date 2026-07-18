@@ -16,6 +16,7 @@ import {
   splitConfig,
 } from './backend-registry';
 import { SshKeyService } from './ssh-key.service';
+import { uniqueSlug } from '../common/slug';
 import { CreateTargetDto, UpdateTargetDto } from './dto/target.dto';
 
 /** A fully resolved repository ready to hand to restic (server or agent). */
@@ -121,6 +122,7 @@ export class TargetsService {
       .insertInto('targets')
       .values({
         name: dto.name,
+        slug: await uniqueSlug(this.db, 'targets', dto.name),
         backend_type: dto.backendType,
         config: JSON.stringify(config),
         credential_secret_id: credentialSecretId,
@@ -154,7 +156,11 @@ export class TargetsService {
     const target = await this.getRow(id);
     const patch: Record<string, unknown> = { updated_at: new Date() };
 
-    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.name !== undefined) {
+      patch.name = dto.name;
+      // The slug follows the name; never user-editable.
+      patch.slug = await uniqueSlug(this.db, 'targets', dto.name, id);
+    }
     if (dto.config !== undefined) {
       const { config, credentials } = splitConfig(
         target.backend_type,

@@ -16,6 +16,7 @@ import {
 } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { AgentsService } from './agents.service';
 import {
   CreateEnrollmentTokenDto,
@@ -26,7 +27,10 @@ import {
 @ApiTags('agents')
 @Controller('agents')
 export class AgentsController {
-  constructor(private readonly agents: AgentsService) {}
+  constructor(
+    private readonly agents: AgentsService,
+    private readonly slugs: SlugResolverService,
+  ) {}
 
   @Public()
   @Get('install.sh')
@@ -83,23 +87,26 @@ export class AgentsController {
 
   @RequireAdmin()
   @Get(':id')
-  @ApiOperation({ summary: 'Get an agent (admin)' })
-  get(@Param('id') id: string) {
-    return this.agents.get(id);
+  @ApiOperation({ summary: 'Get an agent by id or slug (admin)' })
+  async get(@Param('id') idOrSlug: string) {
+    return this.agents.get(await this.slugs.resolve('agents', idOrSlug));
   }
 
   @RequireAdmin()
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an agent (admin)' })
-  update(@Param('id') id: string, @Body() dto: UpdateAgentDto) {
-    return this.agents.update(id, dto);
+  @ApiOperation({ summary: 'Update an agent by id or slug (admin)' })
+  async update(@Param('id') idOrSlug: string, @Body() dto: UpdateAgentDto) {
+    return this.agents.update(
+      await this.slugs.resolve('agents', idOrSlug),
+      dto,
+    );
   }
 
   @RequireAdmin()
   @Delete(':id')
-  @ApiOperation({ summary: 'Remove an agent (admin)' })
-  async remove(@Param('id') id: string) {
-    await this.agents.remove(id);
+  @ApiOperation({ summary: 'Remove an agent by id or slug (admin)' })
+  async remove(@Param('id') idOrSlug: string) {
+    await this.agents.remove(await this.slugs.resolve('agents', idOrSlug));
     return { ok: true };
   }
 }

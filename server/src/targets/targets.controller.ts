@@ -11,6 +11,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { Public } from '../common/decorators/public.decorator';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { TargetsService } from './targets.service';
 import { TargetHealthService } from './target-health.service';
 import { backendCatalog } from './backend-registry';
@@ -22,6 +23,7 @@ export class TargetsController {
   constructor(
     private readonly targets: TargetsService,
     private readonly health: TargetHealthService,
+    private readonly slugs: SlugResolverService,
   ) {}
 
   @Public()
@@ -47,18 +49,20 @@ export class TargetsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a target' })
-  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  @ApiOperation({ summary: 'Get a target (by id or slug)' })
+  async get(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('targets', idOrSlug);
     return this.targets.get(user, id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a target' })
+  @ApiOperation({ summary: 'Update a target (by id or slug)' })
   async update(
     @CurrentUser() user: RequestUser,
-    @Param('id') id: string,
+    @Param('id') idOrSlug: string,
     @Body() dto: UpdateTargetDto,
   ) {
+    const id = await this.slugs.resolve('targets', idOrSlug);
     const target = await this.targets.update(user, id, dto);
     // An edit may have changed the endpoint — re-probe in the background.
     void this.health.refresh(id).catch(() => undefined);
@@ -67,15 +71,19 @@ export class TargetsController {
 
   @Post(':id/check')
   @ApiOperation({ summary: 'Probe a connection now and return its status' })
-  async check(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async check(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('targets', idOrSlug);
     await this.targets.get(user, id); // view access check
     return this.health.refresh(id);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a connection' })
-  async remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    await this.targets.remove(user, id);
+  @ApiOperation({ summary: 'Delete a connection (by id or slug)' })
+  async remove(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    await this.targets.remove(
+      user,
+      await this.slugs.resolve('targets', idOrSlug),
+    );
     return { ok: true };
   }
 }

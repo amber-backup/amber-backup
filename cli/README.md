@@ -33,17 +33,23 @@ after the command.
 ## Commands
 
 ```text
-ambb agent list                List enrolled agents
-ambb agent inspect <id>        Show a single agent
-ambb job list                  List backup jobs
-ambb job inspect <id>          Show a single job
-ambb job run <id>              Trigger a job manually
-ambb repo list                 List repositories
-ambb repo inspect <id>         Show a repository (with size and snapshot count)
-ambb repo use <id> -- <args>   Run restic against the repository
-ambb target list               List connections (shared backends)
-ambb target inspect <id>       Show a single target
+ambb agent list                     List enrolled agents
+ambb agent inspect <id|slug>        Show a single agent
+ambb job list                       List backup jobs
+ambb job inspect <id|slug>          Show a single job
+ambb job run <id|slug>              Trigger a job manually
+ambb repo list                      List repositories
+ambb repo inspect <id|slug>         Show a repository (with size and snapshot count)
+ambb repo use <id|slug> -- <args>   Run restic against the repository
+ambb target list                    List connections (shared backends)
+ambb target inspect <id|slug>       Show a single target
 ```
+
+Single-entity commands accept either the entity's UUID or its **slug** — a
+unique, lowercase kebab-case identifier the server derives from the entity's
+name (e.g. `Daily Backup` → `daily-backup`, with `-2`, `-3`, … appended on name
+collisions). Slugs are shown in every `list` output, are not editable, and
+change automatically when the entity is renamed.
 
 `repo inspect` reports the repository's deduplicated size and snapshot count,
 read live from restic; on an unreachable repository both are `null` and a
@@ -57,10 +63,10 @@ resolve the repository's connection details, sets up the restic environment
 local `restic` with everything after `--` passed straight through.
 
 ```bash
-ambb repo use <id> -- snapshots
-ambb repo use <id> -- stats --mode raw-data
-ambb repo use <id> -- restore latest --target /tmp/out
-ambb repo use <id> -- mount /mnt/restic      # long-running; Ctrl-C unmounts
+ambb repo use <id|slug> -- snapshots
+ambb repo use <id|slug> -- stats --mode raw-data
+ambb repo use <id|slug> -- restore latest --target /tmp/out
+ambb repo use <id|slug> -- mount /mnt/restic   # long-running; Ctrl-C unmounts
 ```
 
 Requirements and caveats:
@@ -78,11 +84,11 @@ Requirements and caveats:
 
 ```bash
 ambb --url http://localhost:3000 --api-key ak_xxxx agent list
-ambb agent inspect 4f3c1a2b-...
+ambb agent inspect web-1
 ambb job list
-ambb job inspect 9a1b...
+ambb job inspect daily-backup
 ambb --output-format json target list
-ambb -o text target inspect <id>
+ambb -o text target inspect offsite-s3
 ambb job run 9a1b...
 ```
 

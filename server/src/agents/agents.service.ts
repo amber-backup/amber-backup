@@ -24,6 +24,7 @@ import {
   RestoreDestination,
 } from '../database/database.types';
 import { RequestAgent } from '../common/auth/request-user';
+import { uniqueSlug } from '../common/slug';
 import { SETTINGS_KEYS } from '../settings/settings.service';
 import {
   CreateEnrollmentTokenDto,
@@ -365,7 +366,11 @@ echo "Amber agent installed and started."
 
   async update(id: string, dto: UpdateAgentDto): Promise<PublicAgent> {
     const patch: Record<string, unknown> = { updated_at: new Date() };
-    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.name !== undefined) {
+      patch.name = dto.name;
+      // The slug follows the name; never user-editable.
+      patch.slug = await uniqueSlug(this.db, 'agents', dto.name, id);
+    }
     if (dto.pollIntervalSeconds !== undefined)
       patch.poll_interval_seconds = dto.pollIntervalSeconds;
     const a = await this.db
@@ -424,6 +429,7 @@ echo "Amber agent installed and started."
       .insertInto('agents')
       .values({
         name,
+        slug: await uniqueSlug(this.db, 'agents', name),
         hostname: dto.hostname ?? null,
         os: dto.os ?? null,
         deploy_method: 'binary',

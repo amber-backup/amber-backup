@@ -29,6 +29,8 @@ export interface ResolvedRepository {
 export interface PublicRepository {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   /** Connection the repository lives on; null ⇒ local filesystem repo. */
   target_id: string | null;
   /** Human-readable connection name, or null for a local repo. */
@@ -81,6 +83,7 @@ export class RepositoriesService {
       .select([
         'r.id as id',
         'r.name as name',
+        'r.slug as slug',
         'r.target_id as target_id',
         'r.repo_config as repo_config',
         'r.repo_password_secret_id as repo_password_secret_id',
@@ -97,6 +100,7 @@ export class RepositoriesService {
   private toPublic(row: {
     id: string;
     name: string;
+    slug: string;
     target_id: string | null;
     repo_config: unknown;
     created_at: Date;
@@ -110,6 +114,7 @@ export class RepositoriesService {
     return {
       id: row.id,
       name: row.name,
+      slug: row.slug,
       target_id: row.target_id,
       target: row.target_name ?? null,
       type: row.backend_type ?? 'local',

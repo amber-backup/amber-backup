@@ -59,6 +59,8 @@ export interface User {
 export interface Target {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the server. */
+  slug: string;
   backend_type: string;
   config: Record<string, unknown>;
   owner_id: string;
@@ -95,6 +97,8 @@ export interface JobNotify {
 export interface Job {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the server. */
+  slug: string;
   location: 'local' | 'agent';
   agent_id: string | null;
   paths: string[];
@@ -112,6 +116,8 @@ export interface Job {
 export interface NotificationChannel {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the server. */
+  slug: string;
   type: string;
   config: Record<string, unknown>;
   enabled: boolean;
@@ -132,6 +138,8 @@ export interface ReportDataset {
 export interface Report {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the server. */
+  slug: string;
   tags: string[];
   dataset: ReportDataset;
   cron_expr: string;
@@ -159,6 +167,8 @@ export interface Run {
 export interface Agent {
   id: string;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the server. */
+  slug: string;
   hostname: string | null;
   os: string | null;
   status: string;

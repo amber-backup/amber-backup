@@ -11,19 +11,22 @@ import (
 const usage = `ambb — Amber Backup CLI
 
 Usage:
-  ambb [global flags] <command> <action> [id]
+  ambb [global flags] <command> <action> [id|slug]
 
 Commands:
-  agent list                 List enrolled agents (requires an admin API key)
-  agent inspect <id>         Show a single agent
-  job list                   List backup jobs
-  job inspect <id>           Show a single job
-  job run <id>               Trigger a job manually
-  repo list                  List repositories
-  repo inspect <id>          Show a repository (with size and snapshot count)
-  repo use <id> -- <args>    Run restic against the repository (remote repos only)
-  target list                List connections (shared backends)
-  target inspect <id>        Show a single target
+  agent list                      List enrolled agents (requires an admin API key)
+  agent inspect <id|slug>         Show a single agent
+  job list                        List backup jobs
+  job inspect <id|slug>           Show a single job
+  job run <id|slug>               Trigger a job manually
+  repo list                       List repositories
+  repo inspect <id|slug>          Show a repository (with size and snapshot count)
+  repo use <id|slug> -- <args>    Run restic against the repository (remote repos only)
+  target list                     List connections (shared backends)
+  target inspect <id|slug>        Show a single target
+
+Entities can be addressed by UUID or by their slug — the lowercase kebab-case
+identifier derived from the entity's name (shown in list output).
 
 Global flags:
   --url <url>                Server base URL         (env AMBER_URL / AMBB_URL)
@@ -35,10 +38,10 @@ Global flags:
 
 Examples:
   ambb --url http://localhost:3000 --api-key ak_xxxx agent list
-  ambb agent inspect 4f3c...
+  ambb agent inspect web-1
   ambb --output-format json target list
-  ambb job run 9a1b...
-  ambb repo use 7cc2... -- snapshots --json
+  ambb job run daily-backup
+  ambb repo use offsite-s3 -- snapshots --json
   ambb repo use 7cc2... -- mount /mnt/restic
 
 Everything after '--' is passed verbatim to restic (needs restic on PATH).

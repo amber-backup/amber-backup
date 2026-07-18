@@ -8,6 +8,7 @@ import {
 import parser from 'cron-parser';
 import { Db, KYSELY } from '../database/database.module';
 import { RequestUser } from '../common/auth/request-user';
+import { uniqueSlug } from '../common/slug';
 import { loadConfig } from '../config/configuration';
 import {
   Report,
@@ -107,6 +108,7 @@ export class ReportsService {
       .insertInto('reports')
       .values({
         name: dto.name,
+        slug: await uniqueSlug(this.db, 'reports', dto.name),
         tags: JSON.stringify(dto.tags ?? []),
         dataset: JSON.stringify(dto.dataset),
         cron_expr: dto.cronExpr,
@@ -123,7 +125,11 @@ export class ReportsService {
     if (dto.cronExpr) this.validateCron(dto.cronExpr);
 
     const patch: Record<string, unknown> = { updated_at: new Date() };
-    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.name !== undefined) {
+      patch.name = dto.name;
+      // The slug follows the name; never user-editable.
+      patch.slug = await uniqueSlug(this.db, 'reports', dto.name, id);
+    }
     if (dto.tags !== undefined) patch.tags = JSON.stringify(dto.tags);
     if (dto.dataset !== undefined) patch.dataset = JSON.stringify(dto.dataset);
     if (dto.cronExpr !== undefined) patch.cron_expr = dto.cronExpr;

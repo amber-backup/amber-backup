@@ -12,6 +12,7 @@ import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
 import { BackupJobRow, RunTrigger } from '../database/database.types';
 import { splitConfig, requiredJobFields } from '../targets/backend-registry';
+import { uniqueSlug } from '../common/slug';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 
 @Injectable()
@@ -164,6 +165,10 @@ export class JobsService {
       dto.repoPassword,
     );
 
+    // Each entity draws its slug from its own table's namespace.
+    const jobSlug = await uniqueSlug(this.db, 'backup_jobs', dto.name);
+    const repoSlug = await uniqueSlug(this.db, 'repositories', dto.name);
+
     // The repository is its own entity (1:1 with the job). Create it first, then
     // point the job at it — both in one transaction so a failed job insert never
     // leaves an orphan repository.
@@ -172,6 +177,7 @@ export class JobsService {
         .insertInto('repositories')
         .values({
           name: dto.name,
+          slug: repoSlug,
           target_id: dto.targetId ?? null,
           repo_config: JSON.stringify(repoConfig),
           repo_password_secret_id: repoPasswordSecretId,
@@ -184,6 +190,7 @@ export class JobsService {
         .insertInto('backup_jobs')
         .values({
           name: dto.name,
+          slug: jobSlug,
           location: dto.location,
           agent_id: dto.location === 'agent' ? dto.agentId! : null,
           paths: JSON.stringify(dto.paths),
@@ -235,8 +242,16 @@ export class JobsService {
     const repoPatch: Record<string, unknown> = {};
     if (dto.name !== undefined) {
       jobPatch.name = dto.name;
-      // Keep the repository's name in sync with its (1:1) job.
+      // The slug follows the name; never user-editable.
+      jobPatch.slug = await uniqueSlug(this.db, 'backup_jobs', dto.name, id);
+      // Keep the repository's name (and thus slug) in sync with its (1:1) job.
       repoPatch.name = dto.name;
+      repoPatch.slug = await uniqueSlug(
+        this.db,
+        'repositories',
+        dto.name,
+        job.repository_id,
+      );
     }
     if (dto.location !== undefined) jobPatch.location = dto.location;
     if (dto.agentId !== undefined) jobPatch.agent_id = dto.agentId;

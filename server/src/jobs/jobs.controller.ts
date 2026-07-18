@@ -10,6 +10,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { JobsService } from './jobs.service';
@@ -26,6 +27,7 @@ export class JobsController {
     private readonly runner: JobRunnerService,
     private readonly targets: TargetsService,
     private readonly restic: ResticService,
+    private readonly slugs: SlugResolverService,
   ) {}
 
   @Get()
@@ -61,35 +63,39 @@ export class JobsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a job' })
-  async get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  @ApiOperation({ summary: 'Get a job (by id or slug)' })
+  async get(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     const job = await this.jobs.get(user, id);
     return { ...job, next_run: this.jobs.nextRun(job.cron_expr) };
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a job' })
+  @ApiOperation({ summary: 'Update a job (by id or slug)' })
   async update(
     @CurrentUser() user: RequestUser,
-    @Param('id') id: string,
+    @Param('id') idOrSlug: string,
     @Body() dto: UpdateJobDto,
   ) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     const job = await this.jobs.update(user, id, dto);
     await this.scheduler.sync(job.id);
     return job;
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a job' })
-  async remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  @ApiOperation({ summary: 'Delete a job (by id or slug)' })
+  async remove(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     await this.jobs.remove(user, id);
     this.scheduler.unregister(id);
     return { ok: true };
   }
 
   @Post(':id/run')
-  @ApiOperation({ summary: 'Trigger a job manually' })
-  async run(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  @ApiOperation({ summary: 'Trigger a job manually (by id or slug)' })
+  async run(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     await this.jobs.assertOperate(user, id);
     const runId = await this.jobs.createRun(id, 'manual');
     await this.runner.dispatch(runId);

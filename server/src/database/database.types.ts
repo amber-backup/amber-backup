@@ -120,6 +120,8 @@ export type NewSecret = Insertable<SecretsTable>;
 export interface TargetsTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   backend_type: string;
   /**
    * Connection-scoped, non-secret config (endpoint, host, region, user…). The
@@ -146,6 +148,8 @@ export type TargetUpdate = Updateable<TargetsTable>;
 export interface RepositoriesTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   /** Shared connection this repository lives on; null ⇒ local filesystem repo. */
   target_id: string | null;
   /** Repository-specific, non-secret config (bucket, prefix, path). */
@@ -165,6 +169,8 @@ export type RepositoryUpdate = Updateable<RepositoriesTable>;
 export interface AgentsTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   hostname: string | null;
   os: string | null;
   deploy_method: DeployMethod | null;
@@ -262,6 +268,8 @@ export interface JobNotifyConfig {
 export interface BackupJobsTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   /** Where the data lives (embedded, formerly the sources table). */
   location: SourceLocation;
   agent_id: string | null;
@@ -386,6 +394,8 @@ export type RestoreRunUpdate = Updateable<RestoreRunsTable>;
 export interface NotificationChannelsTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   type: string;
   /** Non-secret provider config (host, chat id, from address…). */
   config: JSONColumnType<Record<string, unknown>>;
@@ -417,6 +427,8 @@ export interface ReportDataset {
 export interface ReportsTable {
   id: Generated<string>;
   name: string;
+  /** Name-derived, unique, kebab-case identifier; maintained by the app. */
+  slug: string;
   /** User-facing labels for grouping/filtering reports. */
   tags: JSONColumnType<string[]>;
   dataset: JSONColumnType<ReportDataset>;

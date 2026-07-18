@@ -3,6 +3,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { SecretsService } from '../crypto/secrets.service';
 import { loadConfig } from '../config/configuration';
 import { RequestUser } from '../common/auth/request-user';
+import { uniqueSlug } from '../common/slug';
 import { JobNotifyConfig, NotificationChannel } from '../database/database.types';
 import {
   NotificationMessage,
@@ -63,6 +64,7 @@ export class NotificationsService {
       .insertInto('notification_channels')
       .values({
         name: dto.name,
+        slug: await uniqueSlug(this.db, 'notification_channels', dto.name),
         type: dto.type,
         config: JSON.stringify(config),
         secret_id: secretId,
@@ -77,7 +79,16 @@ export class NotificationsService {
   async update(id: string, dto: UpdateChannelDto): Promise<PublicChannel> {
     const channel = await this.getRow(id);
     const patch: Record<string, unknown> = { updated_at: new Date() };
-    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.name !== undefined) {
+      patch.name = dto.name;
+      // The slug follows the name; never user-editable.
+      patch.slug = await uniqueSlug(
+        this.db,
+        'notification_channels',
+        dto.name,
+        id,
+      );
+    }
     if (dto.enabled !== undefined) patch.enabled = dto.enabled;
 
     if (dto.config !== undefined) {

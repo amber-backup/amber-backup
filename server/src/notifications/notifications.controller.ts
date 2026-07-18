@@ -11,6 +11,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequireAdmin } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { NotificationsService } from './notifications.service';
 import { channelCatalog } from './channel-registry';
 import { CreateChannelDto, UpdateChannelDto } from './dto/channel.dto';
@@ -19,7 +20,10 @@ import { CreateChannelDto, UpdateChannelDto } from './dto/channel.dto';
 @RequireAdmin()
 @Controller('notification-channels')
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly slugs: SlugResolverService,
+  ) {}
 
   @Get('providers')
   @ApiOperation({ summary: 'Notification provider catalog (field schemas)' })
@@ -40,27 +44,35 @@ export class NotificationsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a notification channel (admin)' })
-  get(@Param('id') id: string) {
-    return this.notifications.get(id);
+  @ApiOperation({ summary: 'Get a notification channel by id or slug (admin)' })
+  async get(@Param('id') idOrSlug: string) {
+    return this.notifications.get(await this.resolve(idOrSlug));
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a notification channel (admin)' })
-  update(@Param('id') id: string, @Body() dto: UpdateChannelDto) {
-    return this.notifications.update(id, dto);
+  @ApiOperation({
+    summary: 'Update a notification channel by id or slug (admin)',
+  })
+  async update(@Param('id') idOrSlug: string, @Body() dto: UpdateChannelDto) {
+    return this.notifications.update(await this.resolve(idOrSlug), dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a notification channel (admin)' })
-  async remove(@Param('id') id: string) {
-    await this.notifications.remove(id);
+  @ApiOperation({
+    summary: 'Delete a notification channel by id or slug (admin)',
+  })
+  async remove(@Param('id') idOrSlug: string) {
+    await this.notifications.remove(await this.resolve(idOrSlug));
     return { ok: true };
   }
 
   @Post(':id/test')
   @ApiOperation({ summary: 'Send a test notification (admin)' })
-  test(@Param('id') id: string) {
-    return this.notifications.test(id);
+  async test(@Param('id') idOrSlug: string) {
+    return this.notifications.test(await this.resolve(idOrSlug));
+  }
+
+  private resolve(idOrSlug: string): Promise<string> {
+    return this.slugs.resolve('notification_channels', idOrSlug);
   }
 }

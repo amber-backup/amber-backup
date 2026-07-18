@@ -11,6 +11,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequireAdmin } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
+import { SlugResolverService } from '../common/slug-resolver.service';
 import { ReportsService } from './reports.service';
 import { ReportSchedulerService } from './report-scheduler.service';
 import { CreateReportDto, UpdateReportDto } from './dto/report.dto';
@@ -22,6 +23,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly scheduler: ReportSchedulerService,
+    private readonly slugs: SlugResolverService,
   ) {}
 
   @Get()
@@ -43,23 +45,27 @@ export class ReportsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a report definition (admin)' })
-  async get(@Param('id') id: string) {
-    const report = await this.reports.get(id);
+  @ApiOperation({ summary: 'Get a report definition by id or slug (admin)' })
+  async get(@Param('id') idOrSlug: string) {
+    const report = await this.reports.get(
+      await this.slugs.resolve('reports', idOrSlug),
+    );
     return { ...report, next_run: this.reports.nextRun(report.cron_expr) };
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a report definition (admin)' })
-  async update(@Param('id') id: string, @Body() dto: UpdateReportDto) {
+  @ApiOperation({ summary: 'Update a report definition by id or slug (admin)' })
+  async update(@Param('id') idOrSlug: string, @Body() dto: UpdateReportDto) {
+    const id = await this.slugs.resolve('reports', idOrSlug);
     const report = await this.reports.update(id, dto);
     await this.scheduler.sync(report.id);
     return report;
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a report definition (admin)' })
-  async remove(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Delete a report definition by id or slug (admin)' })
+  async remove(@Param('id') idOrSlug: string) {
+    const id = await this.slugs.resolve('reports', idOrSlug);
     await this.reports.remove(id);
     this.scheduler.unregister(id);
     return { ok: true };
@@ -67,8 +73,8 @@ export class ReportsController {
 
   @Post(':id/run')
   @ApiOperation({ summary: 'Generate and send a report now (admin)' })
-  async run(@Param('id') id: string) {
-    await this.reports.generate(id);
+  async run(@Param('id') idOrSlug: string) {
+    await this.reports.generate(await this.slugs.resolve('reports', idOrSlug));
     return { ok: true };
   }
 }
