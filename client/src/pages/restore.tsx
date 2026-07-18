@@ -9,7 +9,7 @@ import { PageHeader, Field, Loading, Spinner } from '../ui/primitives';
 
 export function Restore() {
   const { data: jobs, loading } = useAsync(() => api.get<Job[]>('/jobs'));
-  const [jobId, setJobId] = useState('');
+  const [job, setJob] = useState<Job | null>(null);
   const history = useAsync(() => api.get<RestoreRun[]>('/restores?limit=15').catch(() => [] as RestoreRun[]));
 
   if (loading || !jobs) return <Loading label="Loading…" />;
@@ -18,70 +18,104 @@ export function Restore() {
     <div>
       <PageHeader
         title="Restore"
-        subtitle="Browse snapshots and restore selectively or in full"
-        actions={
-          <div className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <select style={{ maxWidth: 280 }} value={jobId} onChange={(e) => setJobId(e.target.value)}>
-              <option value="">— Select job —</option>
-              {jobs.map((j) => (
-                <option key={j.id} value={j.id}>
-                  {j.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        subtitle={
+          job
+            ? 'Browse snapshots and restore selectively or in full'
+            : 'Pick a job to browse its snapshots'
         }
       />
-      <SnapshotsPanel jobId={jobId} reloadHistory={history.reload} />
-      <HistoryPanel runs={history.data} />
+      {job ? (
+        <>
+          <SnapshotsPanel job={job} onBack={() => setJob(null)} reloadHistory={history.reload} />
+          <HistoryPanel runs={history.data} />
+        </>
+      ) : (
+        <JobListPanel jobs={jobs} onSelect={setJob} />
+      )}
     </div>
   );
 }
 
-function SnapshotsPanel({ jobId, reloadHistory }: { jobId: string; reloadHistory: () => void }) {
-  const { data: snaps, loading, error, reload } = useAsync<Snapshot[] | null>(
-    () => (jobId ? api.get<Snapshot[]>(`/jobs/${jobId}/snapshots`) : Promise.resolve(null)),
-    [jobId],
+function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => void }) {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>{`Jobs (${jobs.length})`}</h2>
+      </div>
+      {jobs.length === 0 ? (
+        <div className="empty">No backup jobs yet.</div>
+      ) : (
+        jobs.map((j) => (
+          <div
+            className="row"
+            key={j.id}
+            style={{ cursor: 'pointer' }}
+            onClick={() => onSelect(j)}
+          >
+            <span className="stat-icon" style={{ background: 'var(--amber-glow)', color: 'var(--amber)' }}>
+              <Icon name="job" size={16} />
+            </span>
+            <div className="row-main">
+              <div className="row-title">{j.name}</div>
+              <div className="row-sub">{`${j.location === 'agent' ? 'Agent' : 'Local'} · ${j.paths.join(', ')}`}</div>
+            </div>
+            <div className="row-actions">
+              <button className="btn btn-ghost btn-sm" onClick={() => onSelect(j)}>
+                <Icon name="snapshot" />
+                Snapshots
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function SnapshotsPanel({
+  job,
+  onBack,
+  reloadHistory,
+}: {
+  job: Job;
+  onBack: () => void;
+  reloadHistory: () => void;
+}) {
+  const { data: snaps, loading, error, reload } = useAsync<Snapshot[]>(
+    () => api.get<Snapshot[]>(`/jobs/${job.id}/snapshots`),
+    [job.id],
   );
 
-  if (!jobId) {
-    return (
-      <div className="panel">
-        <div className="empty">Select a job to browse snapshots.</div>
-      </div>
-    );
-  }
+  let body: React.ReactNode;
   if (loading) {
-    return (
-      <div className="panel">
-        <div className="loading">
-          <Spinner />
-          Loading snapshots…
-        </div>
+    body = (
+      <div className="loading">
+        <Spinner />
+        Loading snapshots…
       </div>
     );
+  } else if (error) {
+    body = <div className="empty">{error.message}</div>;
+  } else if (!snaps || snaps.length === 0) {
+    body = <div className="empty">No snapshots in this repository.</div>;
+  } else {
+    body = snaps.map((s) => (
+      <SnapshotRow key={s.id} jobId={job.id} snap={s} reload={reload} reloadHistory={reloadHistory} />
+    ));
   }
-  if (error) {
-    return (
-      <div className="panel">
-        <div className="empty">{error.message}</div>
-      </div>
-    );
-  }
-  if (!snaps) return null;
 
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>{`Snapshots (${snaps.length})`}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button className="btn btn-ghost btn-sm" onClick={onBack}>
+            <Icon name="arrow-left" />
+            Back
+          </button>
+          <h2>{`${job.name} — Snapshots${snaps ? ` (${snaps.length})` : ''}`}</h2>
+        </div>
       </div>
-      {snaps.length === 0 ? (
-        <div className="empty">No snapshots in this repository.</div>
-      ) : (
-        snaps.map((s) => (
-          <SnapshotRow key={s.id} jobId={jobId} snap={s} reload={reload} reloadHistory={reloadHistory} />
-        ))
-      )}
+      {body}
     </div>
   );
 }
