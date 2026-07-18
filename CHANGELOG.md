@@ -1,3 +1,15 @@
+# [1.17.0](https://github.com/amber-backup/amber-backup/compare/v1.16.0...v1.17.0) (2026-07-18)
+
+
+### Bug Fixes
+
+* **restore:** center icons properly with flex styling ([9008200](https://github.com/amber-backup/amber-backup/commit/90082008a0a13f623797182dac92eacd9d4ee98b))
+
+
+### Features
+
+* **restore:** improve job selection and navigation ([448e674](https://github.com/amber-backup/amber-backup/commit/448e674137eb80d3ab0c9ff941d0a7fc24cf22c2))
+
 # [1.16.0](https://github.com/amber-backup/amber-backup/compare/v1.15.1...v1.16.0) (2026-07-18)
 
 
