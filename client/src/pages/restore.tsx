@@ -261,7 +261,9 @@ function BrowserModal({
             onClick={(ev) => ev.stopPropagation()}
             onChange={() => toggle(e.path)}
           />
-          <span style={{ color: `var(--${isDir ? 'amber' : 'text-3'})` }}>
+          {/* display:flex so the svg (Icon renders display:contents) is
+              centered by the flex row instead of sitting on the baseline */}
+          <span style={{ display: 'flex', color: `var(--${isDir ? 'amber' : 'text-3'})` }}>
             <Icon name={isDir ? 'folder' : 'file'} />
           </span>
           <span className="fb-name">{e.name}</span>
