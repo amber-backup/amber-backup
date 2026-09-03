@@ -19,6 +19,7 @@ Commands:
   job list                        List backup jobs
   job inspect <id|slug>           Show a single job
   job run <id|slug>               Trigger a job manually
+  job credentials <id|slug>       Set or clear the job's credential override
   repo list                       List repositories
   repo inspect <id|slug>          Show a repository (with size and snapshot count)
   repo use <id|slug> -- <args>    Run restic against the repository (remote repos only)
@@ -36,11 +37,20 @@ Global flags:
   -h, --help                 Show this help
   --version                  Print the CLI version
 
+Flags for 'job credentials' (a job may authenticate against its connection with
+its own credentials, e.g. a REST server with per-repository accounts):
+  --username <user>          Set the override's username
+  --password <pass>          Set the override's password
+  --password-stdin           Read the password from stdin instead (safer)
+  --clear                    Remove the override; the connection's own
+                             credentials apply again
+
 Examples:
   ambb --url http://localhost:3000 --api-key ak_xxxx agent list
   ambb agent inspect web-1
   ambb --output-format json target list
   ambb job run daily-backup
+  ambb job credentials daily-backup --username repo1 --password-stdin < pw.txt
   ambb repo use offsite-s3 -- snapshots --json
   ambb repo use 7cc2... -- mount /mnt/restic
 
@@ -159,6 +169,22 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 				return nil, err
 			}
 			cfg.Format = OutputFormat(v)
+		case "--username":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Username = strPtr(v)
+		case "--password":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Password = strPtr(v)
+		case "--password-stdin":
+			cfg.Flags.PasswordStdin = true
+		case "--clear":
+			cfg.Flags.Clear = true
 		default:
 			if strings.HasPrefix(arg, "-") && arg != "-" {
 				return nil, usageErrorf("unknown flag %q", arg)

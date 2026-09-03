@@ -122,6 +122,19 @@ func (c *Client) getJSON(path string) (any, error) {
 	return v, nil
 }
 
+// patchJSON performs a PATCH with a body and decodes the response.
+func (c *Client) patchJSON(path string, body any) (any, error) {
+	data, err := c.do(http.MethodPatch, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return v, nil
+}
+
 // postJSON performs a POST (optionally with a body) and decodes the response.
 func (c *Client) postJSON(path string, body any) (any, error) {
 	data, err := c.do(http.MethodPost, path, body)

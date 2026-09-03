@@ -47,6 +47,9 @@ export class RestoreService {
             ? job.repo_config
             : JSON.stringify(job.repo_config),
         repo_password_secret_id: job.repo_password_secret_id,
+        // The override is snapshotted with the repository so a queued restore
+        // keeps resolving while the job is being edited.
+        credential_secret_id: job.credential_secret_id,
         snapshot_id: dto.snapshotId,
         included_paths: dto.includedPaths
           ? JSON.stringify(dto.includedPaths)

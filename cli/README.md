@@ -38,6 +38,7 @@ ambb agent inspect <id|slug>        Show a single agent
 ambb job list                       List backup jobs
 ambb job inspect <id|slug>          Show a single job
 ambb job run <id|slug>              Trigger a job manually
+ambb job credentials <id|slug>      Set or clear the job's credential override
 ambb repo list                      List repositories
 ambb repo inspect <id|slug>         Show a repository (with size and snapshot count)
 ambb repo use <id|slug> -- <args>   Run restic against the repository
@@ -54,6 +55,39 @@ change automatically when the entity is renamed.
 `repo inspect` reports the repository's deduplicated size and snapshot count,
 read live from restic; on an unreachable repository both are `null` and a
 `stats_error` field explains why.
+
+### `job credentials` — per-job credential override
+
+A backup job normally authenticates with the credentials stored on its
+connection. Some backends hand out an account per repository — a restic REST
+server started with `--private-repos` is the typical case — so a job may carry
+its own credentials instead. They are stored encrypted on the server, never
+returned by the API, and win over the connection's for that one job.
+
+```bash
+ambb job credentials daily-backup --username repo1 --password s3cret
+ambb job credentials daily-backup --password-stdin < password.txt
+ambb job credentials daily-backup --username repo1     # keeps the stored password
+ambb job credentials daily-backup --clear              # back to the connection's
+```
+
+| Flag | Effect |
+|------|--------|
+| `--username <user>` | Sets the override's username |
+| `--password <pass>` | Sets the override's password (visible in the shell history — prefer `--password-stdin`) |
+| `--password-stdin` | Reads the password from stdin; the trailing newline is stripped |
+| `--clear` | Removes the override entirely |
+
+Only the flags you pass are sent, and the server merges them into the stored
+override — setting just the password keeps the username. `--clear` cannot be
+combined with a value, and the flags are rejected on any other command.
+
+Which fields a connection allows a job to override comes from the backend
+definition (`GET /api/targets/backends`, fields flagged `overridable`);
+currently that is the REST server's username and password. Requires **manage**
+access on the job. `job inspect` and `repo list` show whether an override is in
+place (`has_credential_override`), never its values. Moving a job to another
+connection drops the override, because it belonged to the old one.
 
 ### `repo use` — restic wrapper
 

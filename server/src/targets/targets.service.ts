@@ -39,6 +39,8 @@ export interface AdHocRepoInput {
   targetConfig?: Record<string, unknown>;
   /** Repository-specific values (bucket, prefix, path). */
   repoConfig?: Record<string, unknown>;
+  /** Per-repository override of the connection's overridable credentials. */
+  repoCredentials?: Record<string, string>;
   repoPassword: string;
 }
 
@@ -224,7 +226,11 @@ export class TargetsService {
     }
   }
 
-  /** Assembles a ResolvedTarget from already-decrypted parts. */
+  /**
+   * Assembles a ResolvedTarget from already-decrypted parts. A repository's
+   * credential override (see `backend-registry`) is folded over the
+   * connection's credentials per key, so `build()` sees one flat set.
+   */
   private assemble(
     backendType: string,
     config: Record<string, unknown>,
@@ -232,8 +238,13 @@ export class TargetsService {
     repoConfig: Record<string, unknown>,
     password: string,
     targetId: string,
+    overrides: Record<string, string> = {},
   ): ResolvedTarget {
-    const b = getBackend(backendType).build(config, credentials, repoConfig);
+    const b = getBackend(backendType).build(
+      config,
+      { ...credentials, ...overrides },
+      repoConfig,
+    );
     return {
       targetId,
       repository: b.repository,
@@ -252,15 +263,15 @@ export class TargetsService {
     targetId: string | null,
     repoConfig: Record<string, unknown>,
     repoPasswordSecretId: string,
+    credentialSecretId: string | null,
   ): Promise<ResolvedTarget> {
     const password = await this.secrets.reveal(repoPasswordSecretId);
     if (targetId == null) {
       return this.assemble('local', {}, {}, repoConfig, password, 'local');
     }
     const t = await this.getRow(targetId);
-    const credentials: Record<string, string> = t.credential_secret_id
-      ? JSON.parse(await this.secrets.reveal(t.credential_secret_id))
-      : {};
+    const credentials = await this.revealCredentials(t.credential_secret_id);
+    const overrides = await this.revealCredentials(credentialSecretId);
     return this.assemble(
       t.backend_type,
       this.parseConfig(t.config),
@@ -268,20 +279,36 @@ export class TargetsService {
       repoConfig,
       password,
       targetId,
+      overrides,
     );
+  }
+
+  /** Decrypts a credential secret into its flat field map ({} when absent). */
+  private async revealCredentials(
+    secretId: string | null,
+  ): Promise<Record<string, string>> {
+    if (!secretId) return {};
+    return JSON.parse(await this.secrets.reveal(secretId)) as Record<
+      string,
+      string
+    >;
   }
 
   /** Resolves the repository a backup job writes to. */
   async resolveForJob(
     repo: Pick<
       Repository,
-      'target_id' | 'repo_config' | 'repo_password_secret_id'
+      | 'target_id'
+      | 'repo_config'
+      | 'repo_password_secret_id'
+      | 'credential_secret_id'
     >,
   ): Promise<ResolvedTarget> {
     return this.resolveRepo(
       repo.target_id,
       this.parseConfig(repo.repo_config),
       repo.repo_password_secret_id,
+      repo.credential_secret_id,
     );
   }
 
@@ -289,13 +316,17 @@ export class TargetsService {
   async resolveForRestore(
     run: Pick<
       RestoreRun,
-      'target_id' | 'repo_config' | 'repo_password_secret_id'
+      | 'target_id'
+      | 'repo_config'
+      | 'repo_password_secret_id'
+      | 'credential_secret_id'
     >,
   ): Promise<ResolvedTarget> {
     return this.resolveRepo(
       run.target_id,
       this.parseConfig(run.repo_config),
       run.repo_password_secret_id,
+      run.credential_secret_id,
     );
   }
 
@@ -306,11 +337,10 @@ export class TargetsService {
    */
   async resolveRepoAdHoc(input: AdHocRepoInput): Promise<ResolvedTarget> {
     const repoConfig = input.repoConfig ?? {};
+    const overrides = input.repoCredentials ?? {};
     if (input.targetId) {
       const t = await this.getRow(input.targetId);
-      const credentials: Record<string, string> = t.credential_secret_id
-        ? JSON.parse(await this.secrets.reveal(t.credential_secret_id))
-        : {};
+      const credentials = await this.revealCredentials(t.credential_secret_id);
       return this.assemble(
         t.backend_type,
         this.parseConfig(t.config),
@@ -318,6 +348,7 @@ export class TargetsService {
         repoConfig,
         input.repoPassword,
         t.id,
+        overrides,
       );
     }
     const backendType = input.backendType ?? 'local';
@@ -333,6 +364,7 @@ export class TargetsService {
       repoConfig,
       input.repoPassword,
       'adhoc',
+      overrides,
     );
   }
 

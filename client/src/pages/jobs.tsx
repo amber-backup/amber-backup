@@ -292,6 +292,13 @@ function JobEditor({
     return out;
   });
   const [repoPassword, setRepoPassword] = useState('');
+  // Some connections (a REST server with per-repository accounts) allow a job to
+  // authenticate with its own credentials. Duplicating a job cannot carry the
+  // secrets over, so only a real edit starts with the box ticked.
+  const [overrideCreds, setOverrideCreds] = useState(
+    isEdit && !!job?.has_credential_override,
+  );
+  const [credValues, setCredValues] = useState<Record<string, string>>({});
 
   // The local filesystem is a job-level repository option, NOT a target/backend:
   // it never comes from the connection catalog. For a real connection, the
@@ -301,12 +308,25 @@ function JobEditor({
   const selectedBackendType = targets.find((t) => t.id === targetId)?.backend_type;
   const repoBackend = backends.find((b) => b.type === selectedBackendType);
   const repoFields = repoBackend?.fields.filter((f) => f.scope === 'job') ?? [];
+  // Connection credentials this backend lets a single job override. On an edit
+  // the stored values are never returned, so the inputs stay empty and only
+  // what is typed here is sent.
+  const credFields = (repoBackend?.fields.filter((f) => f.overridable) ?? []).map((f) =>
+    isEdit && job?.has_credential_override
+      ? { ...f, placeholder: '(leave unchanged)' }
+      : f,
+  );
   const setRepoValue = (n: string, v: string) =>
     setRepoValues((cur) => ({ ...cur, [n]: v }));
-  // Switching the connection changes which repo fields apply — start fresh.
+  const setCredValue = (n: string, v: string) =>
+    setCredValues((cur) => ({ ...cur, [n]: v }));
+  // Switching the connection changes which repo fields apply — start fresh. The
+  // credential override belongs to the old connection, so it goes too.
   const changeTarget = (id: string) => {
     setTargetId(id);
     setRepoValues({});
+    setOverrideCreds(false);
+    setCredValues({});
   };
   // A local filesystem repository is, for now, only allowed when the job runs on
   // the server (not on an agent).
@@ -386,6 +406,22 @@ function JobEditor({
       }
     }
 
+    // Credential override: undefined leaves the stored one untouched, null
+    // removes it, an object merges the entered fields into it.
+    let repoCredentials: Record<string, string> | null | undefined;
+    if (!isLocalRepo && credFields.length > 0) {
+      if (overrideCreds) {
+        const entered: Record<string, string> = {};
+        for (const f of credFields) {
+          const v = credValues[f.name];
+          if (v != null && v !== '') entered[f.name] = v;
+        }
+        if (Object.keys(entered).length > 0) repoCredentials = entered;
+      } else if (isEdit && job?.has_credential_override) {
+        repoCredentials = null;
+      }
+    }
+
     const notifyPayload = {
       channelIds: channels.filter((c) => selected.has(c.id)).map((c) => c.id),
       onSuccess,
@@ -408,6 +444,7 @@ function JobEditor({
         };
         // Secrets are never returned: only send a new repo password if set.
         if (repoPassword) patch.repoPassword = repoPassword;
+        if (repoCredentials !== undefined) patch.repoCredentials = repoCredentials;
         await api.patch(`/jobs/${job!.id}`, patch);
       } else {
         const payload: Record<string, unknown> = {
@@ -423,6 +460,7 @@ function JobEditor({
           enabled,
         };
         if (agentId) payload.agentId = agentId;
+        if (repoCredentials) payload.repoCredentials = repoCredentials;
         await api.post('/jobs', payload);
       }
       toast('Job saved', 'success');
@@ -506,6 +544,28 @@ function JobEditor({
             </Field>
           ) : (
             <BackendFields fields={repoFields} values={repoValues} onChange={setRepoValue} />
+          )}
+          {!isLocalRepo && credFields.length > 0 && (
+            <>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={overrideCreds}
+                  onChange={(e) => {
+                    setOverrideCreds(e.target.checked);
+                    if (!e.target.checked) setCredValues({});
+                  }}
+                />
+                Use different credentials than the connection
+              </label>
+              {overrideCreds && (
+                <BackendFields
+                  fields={credFields}
+                  values={credValues}
+                  onChange={setCredValue}
+                />
+              )}
+            </>
           )}
           <Field label={isEdit ? 'Change repository password' : 'Repository password'}>
             <input

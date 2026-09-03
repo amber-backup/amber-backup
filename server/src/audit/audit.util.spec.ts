@@ -12,6 +12,7 @@ describe('audit redaction (never persist plaintext secrets)', () => {
       },
       creds: { token: 'abc' },
       credentialBlob: { region: 'eu' },
+      repoCredentials: { username: 'job-user', password: 'job-pw' },
       nested: [{ clientSecret: 'x' }, { webhookUrl: 'https://hook' }],
     };
 
@@ -28,10 +29,12 @@ describe('audit redaction (never persist plaintext secrets)', () => {
     expect(out.nested[1].webhookUrl).toBe('[redacted]');
     // A secret-named container is masked wholesale, not descended into.
     expect(out.credentialBlob).toBe('[redacted]');
+    // A job's per-job credential override travels in one such container.
+    expect(out.repoCredentials).toBe('[redacted]');
 
     // No plaintext secret survives anywhere in the serialized output.
     const serialized = JSON.stringify(out);
-    for (const secret of ['hunter2', 'topsecret', 'AKIA123', 'https://hook']) {
+    for (const secret of ['hunter2', 'topsecret', 'AKIA123', 'https://hook', 'job-pw']) {
       expect(serialized).not.toContain(secret);
     }
   });

@@ -11,7 +11,11 @@ import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
 import { BackupJobRow, RunTrigger } from '../database/database.types';
-import { splitConfig, requiredJobFields } from '../targets/backend-registry';
+import {
+  overridableFields,
+  requiredJobFields,
+  splitConfig,
+} from '../targets/backend-registry';
 import { uniqueSlug } from '../common/slug';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 
@@ -88,6 +92,29 @@ export class JobsService {
     return config;
   }
 
+  /**
+   * Validates a per-job credential override against the backend's overridable
+   * fields and normalises it to a flat string map. Empty values are dropped so
+   * an untouched form field never blanks a stored credential.
+   */
+  private buildCredentialOverride(
+    backendType: string,
+    values: Record<string, unknown>,
+  ): Record<string, string> {
+    const allowed = overridableFields(backendType);
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(values)) {
+      if (!allowed.includes(name)) {
+        throw new BadRequestException(
+          `Field '${name}' cannot be overridden per job on a ${backendType} connection`,
+        );
+      }
+      if (value === undefined || value === null || value === '') continue;
+      out[name] = String(value);
+    }
+    return out;
+  }
+
   nextRun(expr: string): Date | null {
     try {
       return parser.parseExpression(expr).next().toDate();
@@ -110,6 +137,7 @@ export class JobsService {
         'r.target_id as target_id',
         'r.repo_config as repo_config',
         'r.repo_password_secret_id as repo_password_secret_id',
+        'r.credential_secret_id as credential_secret_id',
       ]);
   }
 
@@ -147,6 +175,10 @@ export class JobsService {
     this.assertRepoAllowed(dto.location, dto.targetId);
     const backendType = await this.resolveBackendType(user, dto.targetId);
     const repoConfig = this.buildRepoConfig(backendType, dto.repoConfig ?? {});
+    const overrides = this.buildCredentialOverride(
+      backendType,
+      dto.repoCredentials ?? {},
+    );
 
     if (dto.location === 'agent') {
       if (!dto.agentId) {
@@ -164,6 +196,15 @@ export class JobsService {
       'repo_password',
       dto.repoPassword,
     );
+    // The override is a credential secret of its own, so it can be replaced or
+    // removed without touching the connection's shared credentials.
+    const credentialSecretId =
+      Object.keys(overrides).length > 0
+        ? await this.secrets.create(
+            'backend_credential',
+            JSON.stringify(overrides),
+          )
+        : null;
 
     // Each entity draws its slug from its own table's namespace.
     const jobSlug = await uniqueSlug(this.db, 'backup_jobs', dto.name);
@@ -181,6 +222,7 @@ export class JobsService {
           target_id: dto.targetId ?? null,
           repo_config: JSON.stringify(repoConfig),
           repo_password_secret_id: repoPasswordSecretId,
+          credential_secret_id: credentialSecretId,
           owner_id: user.id,
         })
         .returning('id')
@@ -279,6 +321,54 @@ export class JobsService {
       await this.secrets.update(job.repo_password_secret_id, dto.repoPassword);
     }
 
+    // A credential override belongs to the connection it was entered for: moving
+    // the repository to another connection drops it, unless this request brings
+    // a new one. Secrets are removed only after the column no longer points at
+    // them (the FK is ON DELETE RESTRICT).
+    let orphanedSecretId: string | null = null;
+    const movesConnection =
+      dto.targetId !== undefined && dto.targetId !== job.target_id;
+    if (movesConnection && dto.repoCredentials === undefined) {
+      if (job.credential_secret_id) {
+        repoPatch.credential_secret_id = null;
+        orphanedSecretId = job.credential_secret_id;
+      }
+    } else if (dto.repoCredentials !== undefined) {
+      if (dto.repoCredentials === null) {
+        repoPatch.credential_secret_id = null;
+        orphanedSecretId = job.credential_secret_id;
+      } else {
+        const backendType = await this.resolveBackendType(
+          user,
+          effectiveTargetId,
+        );
+        const overrides = this.buildCredentialOverride(
+          backendType,
+          dto.repoCredentials,
+        );
+        // Given fields are merged into the existing override, so a form that
+        // only re-sends the password keeps the stored username.
+        if (job.credential_secret_id && !movesConnection) {
+          const current = JSON.parse(
+            await this.secrets.reveal(job.credential_secret_id),
+          ) as Record<string, string>;
+          await this.secrets.update(
+            job.credential_secret_id,
+            JSON.stringify({ ...current, ...overrides }),
+          );
+        } else if (Object.keys(overrides).length > 0) {
+          repoPatch.credential_secret_id = await this.secrets.create(
+            'backend_credential',
+            JSON.stringify(overrides),
+          );
+          if (movesConnection) orphanedSecretId = job.credential_secret_id;
+        } else if (movesConnection && job.credential_secret_id) {
+          repoPatch.credential_secret_id = null;
+          orphanedSecretId = job.credential_secret_id;
+        }
+      }
+    }
+
     await this.db.transaction().execute(async (trx) => {
       if (Object.keys(repoPatch).length > 0) {
         repoPatch.updated_at = new Date();
@@ -295,6 +385,8 @@ export class JobsService {
         .execute();
     });
 
+    if (orphanedSecretId) await this.secrets.remove(orphanedSecretId);
+
     return this.getRow(id);
   }
 
@@ -309,6 +401,9 @@ export class JobsService {
       .where('id', '=', job.repository_id)
       .execute();
     await this.secrets.remove(job.repo_password_secret_id);
+    if (job.credential_secret_id) {
+      await this.secrets.remove(job.credential_secret_id);
+    }
   }
 
   async assertOperate(user: RequestUser, id: string): Promise<void> {

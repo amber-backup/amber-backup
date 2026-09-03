@@ -17,6 +17,7 @@ import { JobsService } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
 import { CreateJobDto, UpdateJobDto, TestRepoDto } from './dto/job.dto';
+import { BackupJobRow } from '../database/database.types';
 
 @ApiTags('jobs')
 @Controller('jobs')
@@ -30,14 +31,25 @@ export class JobsController {
     private readonly slugs: SlugResolverService,
   ) {}
 
+  /**
+   * API read shape of a job: the stored row plus its next scheduled run. The
+   * credential override is exposed as a flag only — neither its values (they
+   * are encrypted) nor its secret id leave the server.
+   */
+  private toApi(job: BackupJobRow) {
+    const { credential_secret_id, ...rest } = job;
+    return {
+      ...rest,
+      next_run: this.jobs.nextRun(job.cron_expr),
+      has_credential_override: credential_secret_id != null,
+    };
+  }
+
   @Get()
   @ApiOperation({ summary: 'List jobs the user can view' })
   async list(@CurrentUser() user: RequestUser) {
     const jobs = await this.jobs.list(user);
-    return jobs.map((j) => ({
-      ...j,
-      next_run: this.jobs.nextRun(j.cron_expr),
-    }));
+    return jobs.map((j) => this.toApi(j));
   }
 
   @Post('test-repo')
@@ -49,6 +61,7 @@ export class JobsController {
       backendType: dto.backendType,
       targetConfig: dto.targetConfig,
       repoConfig: dto.repoConfig,
+      repoCredentials: dto.repoCredentials,
       repoPassword: dto.repoPassword,
     });
     return this.restic.testConnection(ctx);
@@ -59,15 +72,14 @@ export class JobsController {
   async create(@CurrentUser() user: RequestUser, @Body() dto: CreateJobDto) {
     const job = await this.jobs.create(user, dto);
     await this.scheduler.sync(job.id);
-    return job;
+    return this.toApi(job);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a job (by id or slug)' })
   async get(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
     const id = await this.slugs.resolve('backup_jobs', idOrSlug);
-    const job = await this.jobs.get(user, id);
-    return { ...job, next_run: this.jobs.nextRun(job.cron_expr) };
+    return this.toApi(await this.jobs.get(user, id));
   }
 
   @Patch(':id')
@@ -80,7 +92,7 @@ export class JobsController {
     const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     const job = await this.jobs.update(user, id, dto);
     await this.scheduler.sync(job.id);
-    return job;
+    return this.toApi(job);
   }
 
   @Delete(':id')

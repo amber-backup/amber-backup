@@ -78,6 +78,8 @@ export interface BackendField {
   secret?: boolean;
   /** 'job' fields configure the per-job repository; others the connection. */
   scope?: 'target' | 'job';
+  /** Connection credential a single job may override with its own value. */
+  overridable?: boolean;
   placeholder?: string;
   help?: string;
   options?: { value: string; label: string }[];
@@ -106,6 +108,8 @@ export interface Job {
   target_id: string | null;
   /** Repository-specific fields (bucket, prefix, path). */
   repo_config?: Record<string, unknown>;
+  /** True when the job overrides the connection's credentials (values stay secret). */
+  has_credential_override?: boolean;
   cron_expr: string;
   restic_options: Record<string, unknown>;
   notify?: JobNotify;

@@ -9,6 +9,12 @@
  *   - `'job'`: the repository-specific part entered per backup job (bucket,
  *     prefix, path). One target/connection therefore serves many repositories.
  * `build()` receives both halves and composes the repository string from them.
+ *
+ * A target-scoped secret may additionally be marked `overridable`: it is
+ * configured on the connection, but a single repository may supply its own
+ * value (e.g. a REST server with per-repository accounts). The override is
+ * stored encrypted on the repository and wins over the connection's value when
+ * the repository is resolved, so `build()` never has to know about it.
  */
 
 export type FieldType =
@@ -29,6 +35,11 @@ export interface BackendField {
   secret?: boolean;
   /** Where the field is configured. Defaults to 'target' when omitted. */
   scope?: FieldScope;
+  /**
+   * Target-scoped secret that a single repository (backup job) may override
+   * with its own value. Only meaningful together with `secret`.
+   */
+  overridable?: boolean;
   placeholder?: string;
   help?: string;
   options?: { value: string; label: string }[];
@@ -179,8 +190,8 @@ export const BACKENDS: BackendDefinition[] = [
     label: 'REST Server',
     fields: [
       { name: 'url', label: 'URL', type: 'text', required: true, placeholder: 'https://backup.example.com/' },
-      { name: 'username', label: 'Username', type: 'text', secret: true },
-      { name: 'password', label: 'Password', type: 'password', secret: true },
+      { name: 'username', label: 'Username', type: 'text', secret: true, overridable: true },
+      { name: 'password', label: 'Password', type: 'password', secret: true, overridable: true },
       {
         name: 'path',
         label: 'Repository name',
@@ -352,6 +363,9 @@ export function backendCatalog() {
 /**
  * Splits a flat form payload into non-secret config and secret credentials,
  * considering only the fields in the requested `scope` (default 'target').
+ *
+ * Overridable fields live on the connection but may also be supplied per job,
+ * so they are picked up in both scopes.
  */
 export function splitConfig(
   type: string,
@@ -362,13 +376,21 @@ export function splitConfig(
   const config: Record<string, unknown> = {};
   const credentials: Record<string, string> = {};
   for (const field of def.fields) {
-    if ((field.scope ?? 'target') !== scope) continue;
+    const own = (field.scope ?? 'target') === scope;
+    if (!own && !(scope === 'job' && field.overridable)) continue;
     const v = values[field.name];
     if (v === undefined || v === '') continue;
     if (field.secret) credentials[field.name] = String(v);
     else config[field.name] = v;
   }
   return { config, credentials };
+}
+
+/** Names of the connection fields a single repository may override. */
+export function overridableFields(type: string): string[] {
+  return getBackend(type)
+    .fields.filter((f) => f.overridable)
+    .map((f) => f.name);
 }
 
 /** Required job-scoped field names for a backend (used to validate repos). */

@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"strings"
 )
 
 var agentColumns = []column{
@@ -40,6 +43,7 @@ var repoColumns = []column{
 	{"NAME", "name"},
 	{"TARGET", "target"},
 	{"TYPE", "type"},
+	{"OVERRIDE", "has_credential_override"},
 }
 
 // runCommand dispatches a parsed resource/action/id triple to the API. The id
@@ -50,6 +54,15 @@ func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	case "agent", "agents", "job", "jobs", "target", "targets", "repo", "repos":
 	default:
 		return usageErrorf("unknown command %q", resource)
+	}
+
+	// The credential flags are parsed globally but belong to one command only.
+	isJobCredentials := (resource == "job" || resource == "jobs") &&
+		(action == "credentials" || action == "creds")
+	if cfg.Flags.used() && !isJobCredentials {
+		return usageErrorf(
+			"--username/--password/--password-stdin/--clear are only valid for 'job credentials'",
+		)
 	}
 
 	if err := cfg.requireCredentials(); err != nil {
@@ -124,9 +137,87 @@ func runRepoUse(cfg *Config, client *Client, id string, resticArgs []string) err
 	return execRestic(resolved, resticArgs)
 }
 
-// runJob adds the "run" action on top of the shared list/inspect behavior.
+// readPasswordStdin reads the password piped into the process, dropping the
+// trailing newline a shell heredoc or `echo` adds.
+func readPasswordStdin() (string, error) {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
+}
+
+// buildCredentialPayload turns the credential flags into the PATCH body for a
+// job's credential override. `--clear` sends JSON null (remove the override);
+// otherwise only the given fields are sent and the server merges them into the
+// stored override, so setting just the password keeps the username.
+func buildCredentialPayload(
+	flags *CommandFlags,
+	readPassword func() (string, error),
+) (map[string]any, error) {
+	if flags.Clear {
+		if flags.Username != nil || flags.Password != nil || flags.PasswordStdin {
+			return nil, usageErrorf("--clear cannot be combined with --username/--password")
+		}
+		return map[string]any{"repoCredentials": nil}, nil
+	}
+
+	credentials := map[string]any{}
+	if flags.Username != nil {
+		credentials["username"] = *flags.Username
+	}
+	switch {
+	case flags.PasswordStdin && flags.Password != nil:
+		return nil, usageErrorf("--password and --password-stdin are mutually exclusive")
+	case flags.PasswordStdin:
+		password, err := readPassword()
+		if err != nil {
+			return nil, err
+		}
+		credentials["password"] = password
+	case flags.Password != nil:
+		credentials["password"] = *flags.Password
+	}
+
+	if len(credentials) == 0 {
+		return nil, usageErrorf(
+			"job credentials requires --username, --password, --password-stdin or --clear",
+		)
+	}
+	return map[string]any{"repoCredentials": credentials}, nil
+}
+
+// runJobCredentials sets or clears a job's per-job credential override — the
+// credentials it uses instead of its connection's (see `--help`).
+func runJobCredentials(cfg *Config, client *Client, id string) error {
+	if id == "" {
+		return usageErrorf("job credentials requires an <id|slug>")
+	}
+	body, err := buildCredentialPayload(&cfg.Flags, readPasswordStdin)
+	if err != nil {
+		return err
+	}
+	v, err := client.patchJSON("/jobs/"+id, body)
+	if err != nil {
+		return err
+	}
+	if cfg.Format == FormatJSON {
+		return printJSON(v)
+	}
+	if cfg.Flags.Clear {
+		fmt.Printf("Removed the credential override of job %s\n", id)
+	} else {
+		fmt.Printf("Updated the credential override of job %s\n", id)
+	}
+	return nil
+}
+
+// runJob adds the "run" and "credentials" actions on top of the shared
+// list/inspect behavior.
 func runJob(cfg *Config, client *Client, action, id string) error {
 	switch action {
+	case "credentials", "creds":
+		return runJobCredentials(cfg, client, id)
 	case "run":
 		if id == "" {
 			return usageErrorf("job run requires an <id|slug>")

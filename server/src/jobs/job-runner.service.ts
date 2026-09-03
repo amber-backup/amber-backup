@@ -282,6 +282,7 @@ export class JobRunnerService implements OnApplicationShutdown {
         'repositories.target_id',
         'repositories.repo_config',
         'repositories.repo_password_secret_id',
+        'repositories.credential_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.location',
         'backup_jobs.paths',
@@ -304,6 +305,7 @@ export class JobRunnerService implements OnApplicationShutdown {
         target_id: row.target_id,
         repo_config: row.repo_config,
         repo_password_secret_id: row.repo_password_secret_id,
+        credential_secret_id: row.credential_secret_id,
       },
       options,
     };

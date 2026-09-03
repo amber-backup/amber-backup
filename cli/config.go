@@ -17,12 +17,34 @@ const (
 	FormatJSON OutputFormat = "json"
 )
 
+// CommandFlags holds the flags a single command accepts. They are parsed by the
+// same pass as the global flags (which may appear anywhere, so the command is
+// not yet known) and validated by the command that accepts them; a command that
+// does not accept them rejects their use.
+type CommandFlags struct {
+	// Username and Password are nil when the flag was not given at all, which
+	// is what keeps a stored value untouched.
+	Username      *string
+	Password      *string
+	PasswordStdin bool
+	Clear         bool
+}
+
+// used reports whether any command flag was given.
+func (f *CommandFlags) used() bool {
+	return f.Username != nil || f.Password != nil || f.PasswordStdin || f.Clear
+}
+
+// strPtr returns a pointer to v (flag values are optional by pointer).
+func strPtr(v string) *string { return &v }
+
 // Config is the resolved runtime configuration, merged from CLI flags and
 // environment variables (flags win).
 type Config struct {
 	URL    string
 	APIKey string
 	Format OutputFormat
+	Flags  CommandFlags
 }
 
 // firstEnv returns the first non-empty value among the given env vars.

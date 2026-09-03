@@ -1,4 +1,9 @@
-import { getBackend, requiredJobFields, splitConfig } from './backend-registry';
+import {
+  getBackend,
+  overridableFields,
+  requiredJobFields,
+  splitConfig,
+} from './backend-registry';
 
 describe('backend-registry', () => {
   describe('rest', () => {
@@ -40,6 +45,32 @@ describe('backend-registry', () => {
       expect(requiredJobFields('rest')).toEqual([]);
       expect(splitConfig('rest', { url: 'https://host', path: 'repo' }, 'job')).toEqual({
         config: { path: 'repo' },
+        credentials: {},
+      });
+    });
+
+    it('declares username and password as per-job overridable', () => {
+      expect(overridableFields('rest')).toEqual(['username', 'password']);
+    });
+  });
+
+  describe('overridable fields', () => {
+    it('are collected as credentials at job scope', () => {
+      expect(
+        splitConfig('rest', { username: 'u', password: 'p', path: 'repo' }, 'job'),
+      ).toEqual({ config: { path: 'repo' }, credentials: { username: 'u', password: 'p' } });
+    });
+
+    it('still belong to the connection at target scope', () => {
+      expect(
+        splitConfig('rest', { url: 'https://host', username: 'u', password: 'p' }, 'target'),
+      ).toEqual({ config: { url: 'https://host' }, credentials: { username: 'u', password: 'p' } });
+    });
+
+    it('are empty for a backend that declares none', () => {
+      expect(overridableFields('s3')).toEqual([]);
+      expect(splitConfig('s3', { accessKeyId: 'a', bucket: 'b' }, 'job')).toEqual({
+        config: { bucket: 'b' },
         credentials: {},
       });
     });

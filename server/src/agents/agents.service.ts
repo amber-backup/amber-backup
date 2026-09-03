@@ -508,6 +508,7 @@ echo "Amber agent installed and started."
         'repositories.target_id',
         'repositories.repo_config',
         'repositories.repo_password_secret_id',
+        'repositories.credential_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.paths',
       ])
@@ -531,6 +532,7 @@ echo "Amber agent installed and started."
         target_id: run.target_id,
         repo_config: run.repo_config,
         repo_password_secret_id: run.repo_password_secret_id,
+        credential_secret_id: run.credential_secret_id,
       });
       tasks.push({
         type: 'backup',

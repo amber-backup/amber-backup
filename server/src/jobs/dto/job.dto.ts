@@ -49,6 +49,15 @@ export class CreateJobDto {
   @IsObject()
   repoConfig?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    type: Object,
+    description:
+      "Per-job override of the connection's overridable credentials (e.g. a REST server's username/password)",
+  })
+  @IsOptional()
+  @IsObject()
+  repoCredentials?: Record<string, string> | null;
+
   @ApiProperty({ description: 'Restic repository password' })
   @IsString()
   @MinLength(1)
@@ -95,6 +104,14 @@ export class TestRepoDto {
   @IsObject()
   repoConfig?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    type: Object,
+    description: "Per-job override of the connection's overridable credentials",
+  })
+  @IsOptional()
+  @IsObject()
+  repoCredentials?: Record<string, string>;
+
   @ApiProperty({ description: 'Restic repository password' })
   @IsString()
   @MinLength(1)
@@ -132,6 +149,16 @@ export class UpdateJobDto {
   @IsOptional()
   @IsObject()
   repoConfig?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    type: Object,
+    nullable: true,
+    description:
+      "Per-job override of the connection's overridable credentials: given fields are merged into the existing override, null removes it, omitting the property leaves it untouched",
+  })
+  @IsOptional()
+  @IsObject()
+  repoCredentials?: Record<string, string> | null;
 
   @ApiPropertyOptional({ description: 'New restic repository password' })
   @IsOptional()

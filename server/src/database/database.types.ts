@@ -156,6 +156,11 @@ export interface RepositoriesTable {
   repo_config: JSONColumnType<Record<string, unknown>>;
   /** restic repository password secret. */
   repo_password_secret_id: string;
+  /**
+   * Per-repository override of the connection's overridable credentials (see
+   * `backend-registry`), encrypted; null ⇒ the connection's own credentials.
+   */
+  credential_secret_id: string | null;
   owner_id: string;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
@@ -294,7 +299,13 @@ export type BackupJobUpdate = Updateable<BackupJobsTable>;
  * job read/write code and the API stay unchanged.
  */
 export type BackupJobRow = BackupJob &
-  Pick<Repository, 'target_id' | 'repo_config' | 'repo_password_secret_id'>;
+  Pick<
+    Repository,
+    | 'target_id'
+    | 'repo_config'
+    | 'repo_password_secret_id'
+    | 'credential_secret_id'
+  >;
 
 // --- job_runs ---------------------------------------------------------------
 
@@ -369,6 +380,8 @@ export interface RestoreRunsTable {
   repo_config: JSONColumnType<Record<string, unknown>>;
   /** Repository password secret, snapshotted from the job at create time. */
   repo_password_secret_id: string;
+  /** Credential override secret, snapshotted from the job at create time. */
+  credential_secret_id: string | null;
   snapshot_id: string;
   included_paths: JSONColumnType<string[] | null, string | null, string | null>;
   mode: RestoreMode;

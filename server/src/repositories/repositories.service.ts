@@ -38,6 +38,8 @@ export interface PublicRepository {
   /** Backend type (s3, sftp, …); 'local' for a local filesystem repo. */
   type: string;
   repo_config: Record<string, unknown>;
+  /** True when the repository overrides the connection's credentials. */
+  has_credential_override: boolean;
   /** The (1:1) backup job that owns this repository. */
   job_id: string;
   job_name: string;
@@ -87,6 +89,7 @@ export class RepositoriesService {
         'r.target_id as target_id',
         'r.repo_config as repo_config',
         'r.repo_password_secret_id as repo_password_secret_id',
+        'r.credential_secret_id as credential_secret_id',
         'r.created_at as created_at',
         'r.updated_at as updated_at',
         'j.id as job_id',
@@ -103,6 +106,7 @@ export class RepositoriesService {
     slug: string;
     target_id: string | null;
     repo_config: unknown;
+    credential_secret_id: string | null;
     created_at: Date;
     updated_at: Date;
     job_id: string;
@@ -119,6 +123,7 @@ export class RepositoriesService {
       target: row.target_name ?? null,
       type: row.backend_type ?? 'local',
       repo_config: this.parseConfig(row.repo_config),
+      has_credential_override: row.credential_secret_id != null,
       job_id: row.job_id,
       job_name: row.job_name,
       location: row.location,
@@ -159,6 +164,7 @@ export class RepositoriesService {
         target_id: row.target_id,
         repo_config: row.repo_config as Record<string, unknown>,
         repo_password_secret_id: row.repo_password_secret_id,
+        credential_secret_id: row.credential_secret_id,
       });
       const [snaps, stats] = await Promise.all([
         this.restic.snapshots(ctx),
@@ -198,6 +204,7 @@ export class RepositoriesService {
       target_id: row.target_id,
       repo_config: row.repo_config as Record<string, unknown>,
       repo_password_secret_id: row.repo_password_secret_id,
+      credential_secret_id: row.credential_secret_id,
     });
     return {
       repository: resolved.repository,
