@@ -1,3 +1,11 @@
+# [1.18.0](https://github.com/amber-backup/amber-backup/compare/v1.17.0...v1.18.0) (2026-09-03)
+
+
+### Features
+
+* **jobs:** allow overriding target credentials per job ([bf55297](https://github.com/amber-backup/amber-backup/commit/bf55297cb1dce1dedf2d5ead500c890dd94a8b88))
+* **restore:** support slug resolution for job snapshots ([bfec3de](https://github.com/amber-backup/amber-backup/commit/bfec3debf74cfbaddda54f72b20b758a3ae1d7b9))
+
 # [1.17.0](https://github.com/amber-backup/amber-backup/compare/v1.16.0...v1.17.0) (2026-07-18)
 
 
