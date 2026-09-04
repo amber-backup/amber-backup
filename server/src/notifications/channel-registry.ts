@@ -40,10 +40,11 @@ export interface NotificationMessage {
    */
   meta?: { label: string; value: string }[];
   /**
-   * Optional tabular data (e.g. a report's per-job breakdown), rendered as an
-   * HTML table by rich channels. Plain channels rely on `body`.
+   * Optional tabular data (e.g. a report's per-job breakdown), rendered as a
+   * real table by rich channels (email, Teams). Plain channels rely on `body`.
+   * `foot` is an optional emphasised totals row.
    */
-  table?: { head: string[]; rows: string[][] };
+  table?: { head: string[]; rows: string[][]; foot?: string[] };
 }
 
 export interface ChannelDefinition {
@@ -122,7 +123,7 @@ export function renderEmailHtml(message: NotificationMessage): string {
     const head = message.table.head
       .map(
         (c, i) =>
-          `<th style="padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#71717a;text-align:${
+          `<th style="padding:9px 12px;font-size:13px;font-weight:600;color:#71717a;text-align:${
             i === 0 ? 'left' : 'center'
           };background:#fafafa;border-bottom:1px solid #e4e4e7;">${escapeHtml(c)}</th>`,
       )
@@ -142,9 +143,21 @@ export function renderEmailHtml(message: NotificationMessage): string {
           `</tr>`,
       )
       .join('');
+    const foot = message.table.foot
+      ? `<tr>` +
+        message.table.foot
+          .map(
+            (cell, i) =>
+              `<td style="padding:9px 12px;font-size:13px;font-weight:700;color:#18181b;background:#fafafa;border-top:1px solid #e4e4e7;text-align:${
+                i === 0 ? 'left' : 'center'
+              };">${escapeHtml(cell)}</td>`,
+          )
+          .join('') +
+        `</tr>`
+      : '';
     tableBlock =
       `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 4px;border:1px solid #e4e4e7;border-radius:8px;border-collapse:collapse;overflow:hidden;">` +
-      `<thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+      `<thead><tr>${head}</tr></thead><tbody>${rows}${foot}</tbody></table>`;
   }
 
   // When there's no structured data, render the plain-text body verbatim.
@@ -182,6 +195,106 @@ export function renderEmailHtml(message: NotificationMessage): string {
     `<tr><td style="padding:16px 28px;border-top:1px solid #eeeeee;font-size:12px;color:#a1a1aa;">Sent by Amber Backup</td></tr>` +
     `</table></td></tr></table></body></html>`
   );
+}
+
+/**
+ * Renders a NotificationMessage as an Adaptive Card for Microsoft Teams.
+ *
+ * Teams connector cards (`MessageCard`) drop most markdown — notably tables —
+ * so the report ends up as a wall of text. Adaptive Cards are accepted by both
+ * the classic incoming webhook and the newer Workflows webhook, and give us a
+ * real header, a fact list and a column-aligned table.
+ */
+export function renderTeamsCard(message: NotificationMessage): unknown {
+  const ok = message.status === 'success';
+  /** Numeric columns get a fixed width so rows line up across ColumnSets. */
+  const columnWidth = (i: number): string => (i === 0 ? 'stretch' : '54px');
+
+  const tableRow = (
+    cells: string[],
+    opts: { header?: boolean; total?: boolean } = {},
+  ) => ({
+    type: 'ColumnSet',
+    // The header opens the block, every later row gets a rule above it.
+    separator: !opts.header,
+    spacing: opts.header ? 'None' : 'Small',
+    columns: cells.map((cell, i) => ({
+      type: 'Column',
+      width: columnWidth(i),
+      verticalContentAlignment: 'Center',
+      items: [
+        {
+          type: 'TextBlock',
+          text: cell,
+          wrap: i === 0,
+          spacing: 'None',
+          horizontalAlignment: i === 0 ? 'Left' : 'Center',
+          weight: opts.header || opts.total ? 'Bolder' : 'Default',
+          isSubtle: opts.header === true,
+        },
+      ],
+    })),
+  });
+
+  const body: unknown[] = [
+    {
+      type: 'TextBlock',
+      text: message.title,
+      size: 'Large',
+      weight: 'Bolder',
+      wrap: true,
+      color: ok ? 'Good' : 'Attention',
+    },
+  ];
+
+  if (message.meta?.length) {
+    body.push({
+      type: 'FactSet',
+      spacing: 'Small',
+      facts: message.meta.map((m) => ({ title: m.label, value: m.value })),
+    });
+  }
+
+  if (message.table && message.table.rows.length) {
+    body.push({
+      type: 'Container',
+      spacing: 'Medium',
+      items: [
+        tableRow(message.table.head, { header: true }),
+        ...message.table.rows.map((r) => tableRow(r)),
+        ...(message.table.foot ? [tableRow(message.table.foot, { total: true })] : []),
+      ],
+    });
+  }
+
+  // Without structured data the plain-text body is all we have.
+  if (!message.meta?.length && !message.table) {
+    body.push({ type: 'TextBlock', text: message.body, wrap: true });
+  }
+
+  return {
+    type: 'message',
+    attachments: [
+      {
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        contentUrl: null,
+        content: {
+          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.4',
+          msteams: { width: 'Full' },
+          body,
+          actions: [
+            {
+              type: 'Action.OpenUrl',
+              title: 'Open Amber Backup',
+              url: message.url,
+            },
+          ],
+        },
+      },
+    ],
+  };
 }
 
 export const CHANNELS: ChannelDefinition[] = [
@@ -292,21 +405,7 @@ export const CHANNELS: ChannelDefinition[] = [
       },
     ],
     send: async (_config, secrets, message) => {
-      await postJson(secrets.webhookUrl, {
-        '@type': 'MessageCard',
-        '@context': 'http://schema.org/extensions',
-        themeColor: message.status === 'success' ? COLOR_OK : COLOR_FAIL,
-        summary: message.title,
-        title: message.title,
-        text: message.body.replace(/\n/g, '\n\n'),
-        potentialAction: [
-          {
-            '@type': 'OpenUri',
-            name: 'Open Amber Backup',
-            targets: [{ os: 'default', uri: message.url }],
-          },
-        ],
-      });
+      await postJson(secrets.webhookUrl, renderTeamsCard(message));
     },
   },
   {

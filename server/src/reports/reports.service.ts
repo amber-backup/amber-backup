@@ -39,6 +39,19 @@ const WINDOW_LABEL: Record<ReportWindow, string> = {
   '12mo': 'last 12 months',
 };
 
+/** Run status → glyph used instead of the status word in rendered reports. */
+const STATUS_ICON: Record<RunStatus, string> = {
+  success: '\u2705',
+  failed: '\u274C',
+  cancelled: '\u26D4',
+  running: '\u{1F504}',
+  queued: '\u23F3',
+};
+
+function statusIcon(status: string): string {
+  return STATUS_ICON[status as RunStatus] ?? status;
+}
+
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -224,10 +237,6 @@ export class ReportsService {
         : [];
     for (const j of jobNameRows) if (!names.has(j.id)) names.set(j.id, j.name);
 
-    const statusTitle: Record<string, string> = {
-      success: 'Success',
-      failed: 'Failed',
-    };
     let totalSuccess = 0;
     let totalFailed = 0;
     const lines: string[] = [];
@@ -242,24 +251,24 @@ export class ReportsService {
         if (status === 'success') totalSuccess += n;
         if (status === 'failed') totalFailed += n;
         statusTotals.set(status, (statusTotals.get(status) ?? 0) + n);
-        parts.push(`${n} ${status}`);
+        parts.push(`${statusIcon(status)} ${n}`);
         row.push(String(n));
       }
-      lines.push(`${names.get(jobId) ?? jobId}: ${parts.join(', ')}`);
+      lines.push(`${names.get(jobId) ?? jobId}: ${parts.join('  ')}`);
       tableRows.push(row);
     }
-    // Append a totals row when more than one job is summarized.
-    if (tableRows.length > 1) {
-      tableRows.push([
-        'Total',
-        ...statuses.map((s) => String(statusTotals.get(s) ?? 0)),
-      ]);
-    }
+    // A totals footer is only meaningful when more than one job is summarized.
+    const tableFoot =
+      tableRows.length > 1
+        ? ['Total', ...statuses.map((s) => String(statusTotals.get(s) ?? 0))]
+        : undefined;
 
     const status: NotificationMessage['status'] =
       totalFailed > 0 ? 'failed' : 'success';
     const icon = totalFailed > 0 ? '⚠️' : '✅';
     const windowLabel = WINDOW_LABEL[dataset.window] ?? dataset.window;
+
+    const totalsLabel = `${STATUS_ICON.success} ${totalSuccess}  ${STATUS_ICON.failed} ${totalFailed}`;
 
     const body = [
       `Report: ${name}`,
@@ -267,7 +276,7 @@ export class ReportsService {
       '',
       ...(lines.length ? lines : ['No jobs selected.']),
       '',
-      `Totals: ${totalSuccess} success, ${totalFailed} failed`,
+      `Total: ${totalsLabel}`,
     ].join('\n');
 
     return {
@@ -278,15 +287,13 @@ export class ReportsService {
       url: `${loadConfig().publicBaseUrl.replace(/\/$/, '')}/#/reports`,
       meta: [
         { label: 'Window', value: windowLabel },
-        {
-          label: 'Totals',
-          value: `${totalSuccess} success, ${totalFailed} failed`,
-        },
+        { label: 'Total', value: totalsLabel },
       ],
       table: tableRows.length
         ? {
-            head: ['Job', ...statuses.map((s) => statusTitle[s] ?? s)],
+            head: ['Job', ...statuses.map(statusIcon)],
             rows: tableRows,
+            foot: tableFoot,
           }
         : undefined,
     };
