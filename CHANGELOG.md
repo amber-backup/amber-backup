@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/amber-backup/amber-backup/compare/v1.18.0...v1.19.0) (2026-09-04)
+
+
+### Features
+
+* **notifications:** render Teams reports as an Adaptive Card ([f69e13f](https://github.com/amber-backup/amber-backup/commit/f69e13f6e45eae786001eee59bf8f13d23e51af8))
+
 # [1.18.0](https://github.com/amber-backup/amber-backup/compare/v1.17.0...v1.18.0) (2026-09-03)
 
 
