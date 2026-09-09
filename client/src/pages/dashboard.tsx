@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtBytes, fmtRelative, statusLabel } from '../core/format';
+import { fmtBytes, fmtDuration, fmtRelative, runDurationMs, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
@@ -325,6 +325,7 @@ function RunRow({ run: r }: { run: Run }) {
       ? bytesDone / totalBytes
       : ((r.stats?.percentDone as number) ?? 0);
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+  const duration = fmtDuration(runDurationMs(r));
 
   let meta: React.ReactNode;
   if (r.status === 'running') {
@@ -346,6 +347,9 @@ function RunRow({ run: r }: { run: Run }) {
     meta = (
       <div className="row-meta run-meta">
         <span style={{ fontWeight: 500 }}>{fmtBytes(bytes)}</span>
+        <span className="muted" title="Duration">
+          {duration}
+        </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
@@ -353,18 +357,26 @@ function RunRow({ run: r }: { run: Run }) {
     meta = (
       <div className="row-meta run-meta">
         <StatusBadge status={r.status} />
+        {r.started_at && (
+          <span className="muted" title="Duration">
+            {duration}
+          </span>
+        )}
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
   }
 
-  // For failed/queued show the reason (or plain status) instead of a snapshot id.
+  // For failed/queued show the reason (or plain status) instead of a snapshot id;
+  // a running backup shows how long it has been going.
   const sub =
     r.status === 'failed' && r.error
       ? r.error
-      : r.snapshot_id
-        ? r.snapshot_id.slice(0, 12)
-        : statusLabel(r.status);
+      : r.status === 'running' && r.started_at
+        ? `${statusLabel(r.status)} · ${duration}`
+        : r.snapshot_id
+          ? r.snapshot_id.slice(0, 12)
+          : statusLabel(r.status);
 
   return (
     <div className="row compact" data-run-id={r.id}>

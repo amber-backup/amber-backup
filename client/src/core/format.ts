@@ -24,6 +24,29 @@ export function fmtRelative(date?: string | null): string {
   return new Date(date).toLocaleDateString('en-US');
 }
 
+/** Human-readable elapsed time, e.g. "42 s", "3 min 12 s", "1 h 05 min". */
+export function fmtDuration(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const total = Math.round(ms / 1000);
+  if (total < 1) return '<1 s';
+  if (total < 60) return `${total} s`;
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  if (min < 60) return sec ? `${min} min ${sec} s` : `${min} min`;
+  const h = Math.floor(min / 60);
+  return `${h} h ${String(min % 60).padStart(2, '0')} min`;
+}
+
+/**
+ * Milliseconds a run has taken: from its start to its end, or to now while it
+ * is still running. Null when it never started.
+ */
+export function runDurationMs(run: { started_at: string | null; finished_at: string | null }): number | null {
+  if (!run.started_at) return null;
+  const end = run.finished_at ? new Date(run.finished_at).getTime() : Date.now();
+  return end - new Date(run.started_at).getTime();
+}
+
 export function fmtDateTime(date?: string | null): string {
   if (!date) return '—';
   return new Date(date).toLocaleString('en-US', {
