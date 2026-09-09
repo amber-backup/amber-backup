@@ -553,6 +553,7 @@ input, select, textarea {
    takes whatever height is left. */
 .main-stack > .panel.panel-auto {
     flex: 0 0 auto;
+    height: auto;
 }
 .panel-auto .storage-chart {
     height: 220px;
