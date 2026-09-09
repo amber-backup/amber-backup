@@ -218,7 +218,7 @@ function StoragePanel() {
   );
 
   return (
-    <div className="panel fill-col panel-auto">
+    <div className="panel fill-col">
       <div className="panel-head">
         <div className="panel-title-group">
           <h2>Repository storage</h2>

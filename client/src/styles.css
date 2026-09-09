@@ -549,18 +549,6 @@ input, select, textarea {
     flex: 1;
     min-height: 0;
 }
-/* The storage chart sits above the activity feed at a fixed height; the feed
-   takes whatever height is left. */
-.main-stack > .panel.panel-auto {
-    flex: 0 0 auto;
-    height: auto;
-}
-/* An explicit flex-basis: with the panel at auto height, `flex: 1` (basis 0%)
-   would size the chart to its content, which is nothing until it is measured. */
-.panel-auto .storage-chart {
-    flex: 0 0 220px;
-    height: 220px;
-}
 
 .panel-scroll {
     flex: 1;
