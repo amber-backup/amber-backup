@@ -705,6 +705,11 @@ input, select, textarea {
     margin-left: 8px;
     vertical-align: 1px;
 }
+.schedule-next {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--amber);
+}
 
 .row.compact .row-sub {
     font-size: 11px;

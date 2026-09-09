@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtBytes, fmtDuration, fmtRelative, runDurationMs, statusLabel } from '../core/format';
+import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative, runDurationMs, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
@@ -192,17 +192,12 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                 <div className="empty">No scheduled jobs.</div>
               ) : (
                 nextJobs.map((j) => (
-                  <div className="row" key={j.id}>
-                    <span className="stat-icon" style={{ background: 'var(--bg-3)', color: 'var(--text-2)' }}>
-                      <Icon name="clock" size={16} />
-                    </span>
+                  <div className="row compact" key={j.id} title={fmtDateTime(j.next_run)}>
                     <div className="row-main">
                       <div className="row-title">{j.name}</div>
                       <div className="row-sub">{j.cron_expr}</div>
                     </div>
-                    <div className="row-meta">
-                      <div style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 500 }}>{fmtRelative(j.next_run)}</div>
-                    </div>
+                    <div className="row-meta schedule-next">{fmtRelative(j.next_run)}</div>
                   </div>
                 ))
               )}
