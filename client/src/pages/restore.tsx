@@ -47,17 +47,15 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
       ) : (
         jobs.map((j) => (
           <div
-            className="row"
+            className="row compact"
             key={j.id}
             style={{ cursor: 'pointer' }}
+            title={`${j.location === 'agent' ? 'Agent' : 'Local'} · ${j.paths.join(', ')}`}
             onClick={() => onSelect(j)}
           >
-            <span className="stat-icon" style={{ background: 'var(--amber-glow)', color: 'var(--amber)' }}>
-              <Icon name="job" size={16} />
-            </span>
             <div className="row-main">
               <div className="row-title">{j.name}</div>
-              <div className="row-sub">{`${j.location === 'agent' ? 'Agent' : 'Local'} · ${j.paths.join(', ')}`}</div>
+              <div className="row-sub">{repoSizeLabel(j)}</div>
             </div>
             <div className="row-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => onSelect(j)}>
@@ -70,6 +68,12 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
       )}
     </div>
   );
+}
+
+/** Cached repository size and snapshot count, as read after the last successful run. */
+function repoSizeLabel(j: Job): string {
+  if (j.repo_size_bytes == null) return 'size unknown';
+  return `${fmtBytes(j.repo_size_bytes)} · ${j.repo_snapshot_count ?? '?'} snapshots`;
 }
 
 function SnapshotsPanel({
@@ -153,13 +157,10 @@ function SnapshotRow({
     open((close) => <DeleteSnapshotDialog jobId={jobId} snap={s} onClose={close} reload={reload} />);
 
   return (
-    <div className="row">
-      <span className="stat-icon" style={{ background: 'var(--amber-glow)', color: 'var(--amber)' }}>
-        <Icon name="snapshot" size={16} />
-      </span>
+    <div className="row compact" title={s.paths.join(', ')}>
       <div className="row-main">
-        <div className="row-title">{`${s.hostname} · ${s.paths.join(', ')}`}</div>
-        <div className="row-sub">{`${s.short_id ?? s.id.slice(0, 8)} · ${fmtDateTime(s.time)}`}</div>
+        <div className="row-title">{fmtDateTime(s.time)}</div>
+        <div className="row-sub">{`${s.short_id ?? s.id.slice(0, 8)} · ${s.hostname}`}</div>
       </div>
       {s.tags && s.tags.length ? (
         <div className="tags">
@@ -468,7 +469,7 @@ function HistoryRow({ run: r }: { run: RestoreRun }) {
     (!r.download_expires_at || new Date(r.download_expires_at) > new Date());
 
   return (
-    <div className="row">
+    <div className="row compact">
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
         <div className="row-title">{`${modeLabels[r.mode] ?? r.mode} · ${r.snapshot_id.slice(0, 12)}`}</div>
