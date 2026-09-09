@@ -549,6 +549,14 @@ input, select, textarea {
     flex: 1;
     min-height: 0;
 }
+/* The storage chart sits above the activity feed at a fixed height; the feed
+   takes whatever height is left. */
+.main-stack > .panel.panel-auto {
+    flex: 0 0 auto;
+}
+.panel-auto .storage-chart {
+    height: 220px;
+}
 
 .panel-scroll {
     flex: 1;

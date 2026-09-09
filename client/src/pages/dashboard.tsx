@@ -151,6 +151,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
       <div className="content-grid dashboard-grid">
         <div className="main-stack fill-col">
+          <StoragePanel />
+
           <div className="panel fill-col">
             <div className="panel-head">
               <h2>Recent activities</h2>
@@ -175,8 +177,6 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
               <div ref={sentinelRef} style={{ height: 1 }} />
             </div>
           </div>
-
-          <StoragePanel />
         </div>
 
         <div className="side-stack fill-col">
@@ -223,7 +223,7 @@ function StoragePanel() {
   );
 
   return (
-    <div className="panel fill-col">
+    <div className="panel fill-col panel-auto">
       <div className="panel-head">
         <div className="panel-title-group">
           <h2>Repository storage</h2>
