@@ -6,9 +6,10 @@ import {
   type Agent,
   type NotificationChannel,
   type BackendDef,
+  type RepositoryStats,
 } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtRelative } from '../core/format';
+import { fmtBytes, fmtDateTime, fmtRelative } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
@@ -118,6 +119,7 @@ function JobRow({
         ) : (
           <span className="muted">disabled</span>
         )}
+        <RepoSize job={j} />
       </div>
       <div className="row-actions">
         <BusyButton
@@ -192,6 +194,51 @@ function JobRow({
           <Icon name="trash" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Cached repository size and snapshot count with a refresh action. Figures are
+ * read by the server after each successful run; the button re-reads them now.
+ */
+function RepoSize({ job }: { job: Job }) {
+  const toast = useToast();
+  const [stats, setStats] = useState<RepositoryStats>({
+    size_bytes: job.repo_size_bytes ?? null,
+    snapshot_count: job.repo_snapshot_count ?? null,
+    stats_at: job.repo_stats_at ?? null,
+    stats_error: job.repo_stats_error ?? null,
+  });
+
+  const title = stats.stats_error
+    ? `Could not read repository stats: ${stats.stats_error}`
+    : stats.stats_at
+      ? `Repository size as of ${fmtDateTime(stats.stats_at)}`
+      : 'Repository size not read yet';
+  const label =
+    stats.size_bytes == null
+      ? 'size unknown'
+      : `${fmtBytes(stats.size_bytes)} · ${stats.snapshot_count ?? '?'} snapshots`;
+
+  return (
+    <div className="repo-size" title={title}>
+      <span className={stats.stats_error ? 'repo-size-stale' : undefined}>{label}</span>
+      <BusyButton
+        className="btn btn-ghost"
+        title="Refresh repository size"
+        onClick={async () => {
+          try {
+            const fresh = await api.post<RepositoryStats>(`/repositories/${job.repository_id}/stats`);
+            setStats(fresh);
+            if (fresh.stats_error) toast(`Stats refresh failed: ${fresh.stats_error}`, 'error');
+          } catch (err) {
+            toast(err instanceof Error ? err.message : 'Refresh failed', 'error');
+          }
+        }}
+      >
+        <Icon name="refresh" size={12} />
+      </BusyButton>
     </div>
   );
 }

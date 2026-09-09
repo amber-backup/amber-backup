@@ -110,11 +110,36 @@ export interface Job {
   repo_config?: Record<string, unknown>;
   /** True when the job overrides the connection's credentials (values stay secret). */
   has_credential_override?: boolean;
+  /** The (1:1) repository this job backs up to. */
+  repository_id: string;
+  /** Cached repository figures; refreshed after each successful run and on demand. */
+  repo_size_bytes?: number | null;
+  repo_snapshot_count?: number | null;
+  /** When the figures were last read successfully. */
+  repo_stats_at?: string | null;
+  /** Last refresh failure (figures then reflect the previous read), if any. */
+  repo_stats_error?: string | null;
   cron_expr: string;
   restic_options: Record<string, unknown>;
   notify?: JobNotify;
   enabled: boolean;
   next_run?: string | null;
+}
+
+/** Result of POST /repositories/:id/stats. */
+export interface RepositoryStats {
+  size_bytes: number | null;
+  snapshot_count: number | null;
+  stats_at: string | null;
+  stats_error: string | null;
+}
+
+/** Result of GET /repositories/stats-history?days=N (dashboard growth chart). */
+export interface RepositoryStatsHistory {
+  since: string;
+  repositories: { id: string; name: string }[];
+  /** Readings inside the window plus, per repository, the last one before it. */
+  points: { repository_id: string; measured_at: string; size_bytes: number }[];
 }
 
 export interface NotificationChannel {

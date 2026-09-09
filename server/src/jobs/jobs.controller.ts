@@ -40,6 +40,9 @@ export class JobsController {
     const { credential_secret_id, ...rest } = job;
     return {
       ...rest,
+      // pg returns bigint as a string.
+      repo_size_bytes:
+        job.repo_size_bytes == null ? null : Number(job.repo_size_bytes),
       next_run: this.jobs.nextRun(job.cron_expr),
       has_credential_override: credential_secret_id != null,
     };

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Run, type Job, type Agent } from '../core/api';
+import { api, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtRelative, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
+import { StorageChart, StorageSummary } from '../ui/storage-chart';
 
 interface DashboardData {
   recent: Run[];
@@ -14,6 +15,13 @@ interface DashboardData {
 }
 
 const RUNS_PAGE = 50;
+/** Time windows offered for the storage growth chart. */
+const STORAGE_RANGES: { label: string; days: number }[] = [
+  { label: '7d', days: 7 },
+  { label: '30d', days: 30 },
+  { label: '90d', days: 90 },
+  { label: '1y', days: 365 },
+];
 // Poll fairly briskly so running backups show near-live progress (bytes/percent).
 const REFRESH_MS = 2000;
 
@@ -142,29 +150,33 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       <Stats dash={dash} agents={agents} />
 
       <div className="content-grid dashboard-grid">
-        <div className="panel fill-col">
-          <div className="panel-head">
-            <h2>Recent runs</h2>
-            <span className="link" onClick={() => navigate('/jobs')}>
-              All jobs →
-            </span>
-          </div>
-          <div className="panel-scroll" ref={scrollRef}>
-            <div>
-              {runs.map((r) => (
-                <RunRow key={r.id} run={r} />
-              ))}
-              {pageLoading && (
-                <div className="loading" style={{ padding: 16 }}>
-                  <Spinner />
-                </div>
-              )}
-              {runs.length === 0 && !pageLoading && doneRef.current && (
-                <div className="empty">No backup runs yet.</div>
-              )}
+        <div className="main-stack fill-col">
+          <div className="panel fill-col">
+            <div className="panel-head">
+              <h2>Recent runs</h2>
+              <span className="link" onClick={() => navigate('/jobs')}>
+                All jobs →
+              </span>
             </div>
-            <div ref={sentinelRef} style={{ height: 1 }} />
+            <div className="panel-scroll" ref={scrollRef}>
+              <div>
+                {runs.map((r) => (
+                  <RunRow key={r.id} run={r} />
+                ))}
+                {pageLoading && (
+                  <div className="loading" style={{ padding: 16 }}>
+                    <Spinner />
+                  </div>
+                )}
+                {runs.length === 0 && !pageLoading && doneRef.current && (
+                  <div className="empty">No backup runs yet.</div>
+                )}
+              </div>
+              <div ref={sentinelRef} style={{ height: 1 }} />
+            </div>
           </div>
+
+          <StoragePanel />
         </div>
 
         <div className="side-stack fill-col">
@@ -198,6 +210,46 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Repository storage growth over a selectable window. */
+function StoragePanel() {
+  const [days, setDays] = useState(30);
+  const { data, loading, error } = useAsync(
+    () => api.get<RepositoryStatsHistory>(`/repositories/stats-history?days=${days}`),
+    [days],
+  );
+
+  return (
+    <div className="panel fill-col">
+      <div className="panel-head">
+        <div className="panel-title-group">
+          <h2>Repository storage</h2>
+          {data && <StorageSummary history={data} />}
+        </div>
+        <div className="seg" role="group" aria-label="Time window">
+          {STORAGE_RANGES.map((r) => (
+            <button
+              key={r.days}
+              className={`seg-btn${r.days === days ? ' active' : ''}`}
+              onClick={() => setDays(r.days)}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error ? (
+        <div className="empty">Could not load storage history.</div>
+      ) : loading && !data ? (
+        <div className="loading" style={{ padding: 16 }}>
+          <Spinner />
+        </div>
+      ) : (
+        data && <StorageChart history={data} />
+      )}
     </div>
   );
 }
@@ -277,7 +329,7 @@ function RunRow({ run: r }: { run: Run }) {
   let meta: React.ReactNode;
   if (r.status === 'running') {
     meta = (
-      <div style={{ width: 150 }}>
+      <div style={{ width: 130 }}>
         <div className="progress-track">
           <div className="fill" style={{ width: `${pct}%` }} />
         </div>
@@ -292,20 +344,16 @@ function RunRow({ run: r }: { run: Run }) {
     );
   } else if (r.status === 'success') {
     meta = (
-      <div className="row-meta">
-        <div style={{ fontSize: 13, fontWeight: 500 }}>{fmtBytes(bytes)}</div>
-        <div className="muted" style={{ fontSize: 11.5 }}>
-          {fmtRelative(r.finished_at ?? r.created_at)}
-        </div>
+      <div className="row-meta run-meta">
+        <span style={{ fontWeight: 500 }}>{fmtBytes(bytes)}</span>
+        <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
   } else {
     meta = (
-      <div className="row-meta" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+      <div className="row-meta run-meta">
         <StatusBadge status={r.status} />
-        <div className="muted" style={{ fontSize: 11.5 }}>
-          {fmtRelative(r.finished_at ?? r.created_at)}
-        </div>
+        <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
   }
@@ -319,7 +367,7 @@ function RunRow({ run: r }: { run: Run }) {
         : statusLabel(r.status);
 
   return (
-    <div className="row" data-run-id={r.id}>
+    <div className="row compact" data-run-id={r.id}>
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
         <div className="row-title">{r.job_name ?? 'Job'}</div>

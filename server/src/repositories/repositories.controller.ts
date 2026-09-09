@@ -1,5 +1,12 @@
-import { Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SlugResolverService } from '../common/slug-resolver.service';
@@ -19,6 +26,17 @@ export class RepositoriesController {
     return this.repositories.list(user);
   }
 
+  @Get('stats-history')
+  @ApiOperation({
+    summary:
+      'Storage readings over time for the repositories the user can view (dashboard growth chart)',
+  })
+  @ApiQuery({ name: 'days', required: false, description: 'Window in days (1–3650, default 30)' })
+  statsHistory(@CurrentUser() user: RequestUser, @Query('days') days?: string) {
+    const n = Math.min(3650, Math.max(1, Math.floor(Number(days)) || 30));
+    return this.repositories.statsHistory(user, n);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary:
@@ -27,6 +45,20 @@ export class RepositoriesController {
   async get(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
     const id = await this.slugs.resolve('repositories', idOrSlug);
     return this.repositories.findOne(user, id);
+  }
+
+  @Post(':id/stats')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Re-read size and snapshot count from restic and cache them on the repository',
+  })
+  async refreshStats(
+    @CurrentUser() user: RequestUser,
+    @Param('id') idOrSlug: string,
+  ) {
+    const id = await this.slugs.resolve('repositories', idOrSlug);
+    return this.repositories.refreshStatsFor(user, id);
   }
 
   @Post(':id/resolve')

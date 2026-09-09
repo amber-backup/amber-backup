@@ -15,6 +15,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { CryptoService } from '../crypto/crypto.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RepositoriesService } from '../repositories/repositories.service';
 import { loadConfig } from '../config/configuration';
 import {
   Agent,
@@ -68,6 +69,7 @@ export class AgentsService {
     private readonly crypto: CryptoService,
     private readonly targets: TargetsService,
     private readonly notifications: NotificationsService,
+    private readonly repositories: RepositoriesService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -626,9 +628,10 @@ echo "Amber agent installed and started."
   ): Promise<void> {
     const run = await this.db
       .selectFrom('job_runs')
-      .select('id')
-      .where('id', '=', taskId)
-      .where('agent_id', '=', agentId)
+      .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
+      .select(['job_runs.id as id', 'backup_jobs.repository_id as repository_id'])
+      .where('job_runs.id', '=', taskId)
+      .where('job_runs.agent_id', '=', agentId)
       .executeTakeFirst();
     if (!run) throw new NotFoundException('Task not found for this agent');
 
@@ -647,6 +650,11 @@ echo "Amber agent installed and started."
       })
       .where('id', '=', taskId)
       .execute();
+
+    // The repository just changed size — refresh its cached figures.
+    if (dto.status === 'success') {
+      this.repositories.refreshStatsInBackground(run.repository_id);
+    }
 
     // Fire configured notifications for the now-terminal run (best-effort).
     void this.notifications

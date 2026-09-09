@@ -10,6 +10,7 @@ import { Db, KYSELY } from '../database/database.module';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RepositoriesService } from '../repositories/repositories.service';
 import { ResticOptions, RunStats } from '../database/database.types';
 
 const execFileAsync = promisify(execFile);
@@ -37,6 +38,7 @@ export class JobRunnerService implements OnApplicationShutdown {
     private readonly restic: ResticService,
     private readonly targets: TargetsService,
     private readonly notifications: NotificationsService,
+    private readonly repositories: RepositoriesService,
   ) {}
 
   /** Dispatches a queued run: run locally now, or leave it for an agent. */
@@ -74,7 +76,7 @@ export class JobRunnerService implements OnApplicationShutdown {
   async executeLocal(jobRunId: string): Promise<void> {
     const ctx = await this.loadRunContext(jobRunId);
     if (!ctx) return;
-    const { job, source, repo, options } = ctx;
+    const { job, source, repo, repositoryId, options } = ctx;
 
     const abort = new AbortController();
     this.running.set(jobRunId, abort);
@@ -173,6 +175,8 @@ export class JobRunnerService implements OnApplicationShutdown {
         })
         .where('id', '=', jobRunId)
         .execute();
+      // The repository just changed size — refresh its cached figures.
+      this.repositories.refreshStatsInBackground(repositoryId);
     } catch (err) {
       const aborted = abort.signal.aborted;
       appendLog(String(err));
@@ -279,6 +283,7 @@ export class JobRunnerService implements OnApplicationShutdown {
         'job_runs.id as run_id',
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
+        'repositories.id as repository_id',
         'repositories.target_id',
         'repositories.repo_config',
         'repositories.repo_password_secret_id',
@@ -301,6 +306,7 @@ export class JobRunnerService implements OnApplicationShutdown {
     return {
       job: { id: row.job_id, name: row.job_name },
       source: { paths },
+      repositoryId: row.repository_id,
       repo: {
         target_id: row.target_id,
         repo_config: row.repo_config,

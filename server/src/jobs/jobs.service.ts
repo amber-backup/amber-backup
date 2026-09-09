@@ -138,6 +138,10 @@ export class JobsService {
         'r.repo_config as repo_config',
         'r.repo_password_secret_id as repo_password_secret_id',
         'r.credential_secret_id as credential_secret_id',
+        'r.size_bytes as repo_size_bytes',
+        'r.snapshot_count as repo_snapshot_count',
+        'r.stats_at as repo_stats_at',
+        'r.stats_error as repo_stats_error',
       ]);
   }
 

@@ -162,12 +162,34 @@ export interface RepositoriesTable {
    */
   credential_secret_id: string | null;
   owner_id: string;
+  /**
+   * Cached figures from `restic stats` / `restic snapshots`, refreshed after
+   * each successful backup run and on demand (RepositoriesService).
+   * `size_bytes` is a bigint; pg returns it as a string.
+   */
+  size_bytes: ColumnType<string | null, number | null, number | null>;
+  snapshot_count: number | null;
+  /** When the figures were last read successfully. */
+  stats_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** Last refresh failure (figures then reflect the previous read), if any. */
+  stats_error: string | null;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
 export type Repository = Selectable<RepositoriesTable>;
 export type NewRepository = Insertable<RepositoriesTable>;
 export type RepositoryUpdate = Updateable<RepositoriesTable>;
+
+/** One reading of a repository's figures; appended whenever they change. */
+export interface RepositoryStatsHistoryTable {
+  id: Generated<string>;
+  repository_id: string;
+  measured_at: ColumnType<Date, Date | undefined, never>;
+  /** bigint — pg returns it as a string. */
+  size_bytes: ColumnType<string, number, never>;
+  snapshot_count: number;
+}
+export type RepositoryStatsHistory = Selectable<RepositoryStatsHistoryTable>;
 
 // --- agents -----------------------------------------------------------------
 
@@ -305,7 +327,13 @@ export type BackupJobRow = BackupJob &
     | 'repo_config'
     | 'repo_password_secret_id'
     | 'credential_secret_id'
-  >;
+  > & {
+    /** Cached repository figures (see RepositoriesTable), prefixed to avoid clashes. */
+    repo_size_bytes: string | null;
+    repo_snapshot_count: number | null;
+    repo_stats_at: Date | null;
+    repo_stats_error: string | null;
+  };
 
 // --- job_runs ---------------------------------------------------------------
 
@@ -527,6 +555,7 @@ export interface Database {
   secrets: SecretsTable;
   targets: TargetsTable;
   repositories: RepositoriesTable;
+  repository_stats_history: RepositoryStatsHistoryTable;
   agents: AgentsTable;
   enrollment_tokens: EnrollmentTokensTable;
   app_settings: AppSettingsTable;

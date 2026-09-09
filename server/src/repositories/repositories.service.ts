@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Db, KYSELY } from '../database/database.module';
@@ -48,17 +49,36 @@ export interface PublicRepository {
   updated_at: Date;
 }
 
-/** Detail shape adds live figures obtained from restic on demand. */
-export interface RepositoryDetail extends PublicRepository {
-  /** Deduplicated repository size in bytes; null if restic was unreachable. */
+/**
+ * Cached repository figures. Refreshed after every successful backup run and
+ * on demand; a failed refresh keeps the previous figures and records the error.
+ */
+export interface RepositoryStats {
+  /** Deduplicated repository size in bytes; null until first read. */
   size_bytes: number | null;
   snapshot_count: number | null;
-  /** Present only when the live figures could not be fetched. */
-  stats_error?: string;
+  /** When the figures were last read successfully; null until first read. */
+  stats_at: Date | null;
+  /** Last refresh failure, or null when the last refresh succeeded. */
+  stats_error: string | null;
+}
+
+/** Detail shape adds the (freshly refreshed) repository figures. */
+export type RepositoryDetail = PublicRepository & RepositoryStats;
+
+/** Storage readings over time for the repositories a user can see. */
+export interface RepositoryStatsHistoryResponse {
+  /** Start of the requested window. */
+  since: Date;
+  repositories: { id: string; name: string }[];
+  /** Readings inside the window plus, per repository, the last one before it. */
+  points: { repository_id: string; measured_at: Date; size_bytes: number }[];
 }
 
 @Injectable()
 export class RepositoriesService {
+  private readonly logger = new Logger(RepositoriesService.name);
+
   constructor(
     @Inject(KYSELY) private readonly db: Db,
     private readonly acl: AccessControlService,
@@ -149,33 +169,165 @@ export class RepositoriesService {
       .executeTakeFirst();
     if (!row) throw new NotFoundException('Repository not found');
     await this.acl.assert(user, 'job', row.job_id, 'view');
+    return { ...this.toPublic(row), ...(await this.refreshStats(id)) };
+  }
 
-    const detail: RepositoryDetail = {
-      ...this.toPublic(row),
-      size_bytes: null,
-      snapshot_count: null,
-    };
+  /** Refreshes a repository's figures after an access check (API entry point). */
+  async refreshStatsFor(user: RequestUser, id: string): Promise<RepositoryStats> {
+    const row = await this.db
+      .selectFrom('repositories as r')
+      .innerJoin('backup_jobs as j', 'j.repository_id', 'r.id')
+      .select('j.id as job_id')
+      .where('r.id', '=', id)
+      .executeTakeFirst();
+    if (!row) throw new NotFoundException('Repository not found');
+    await this.acl.assert(user, 'job', row.job_id, 'view');
+    return this.refreshStats(id);
+  }
 
-    // Size and snapshot count are read live from restic. A repository may be
-    // unreachable (offline backend, wrong credentials) — degrade gracefully
-    // rather than failing the whole request.
+  /**
+   * Reads size and snapshot count from restic and caches them on the
+   * repository. A repository may be unreachable (offline backend, wrong
+   * credentials, or one only the agent can reach) — then the previous figures
+   * are kept and the error recorded, so callers degrade gracefully instead of
+   * failing.
+   */
+  async refreshStats(id: string): Promise<RepositoryStats> {
+    const repo = await this.db
+      .selectFrom('repositories')
+      .select([
+        'id',
+        'target_id',
+        'repo_config',
+        'repo_password_secret_id',
+        'credential_secret_id',
+        'size_bytes',
+        'snapshot_count',
+        'stats_at',
+        'stats_error',
+      ])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!repo) throw new NotFoundException('Repository not found');
+
     try {
       const ctx = await this.targets.resolveForJob({
-        target_id: row.target_id,
-        repo_config: row.repo_config as Record<string, unknown>,
-        repo_password_secret_id: row.repo_password_secret_id,
-        credential_secret_id: row.credential_secret_id,
+        target_id: repo.target_id,
+        repo_config: this.parseConfig(repo.repo_config),
+        repo_password_secret_id: repo.repo_password_secret_id,
+        credential_secret_id: repo.credential_secret_id,
       });
       const [snaps, stats] = await Promise.all([
         this.restic.snapshots(ctx),
         this.restic.stats(ctx),
       ]);
-      detail.snapshot_count = snaps.length;
-      detail.size_bytes = stats.total_size ?? null;
+      const fresh: RepositoryStats = {
+        size_bytes: stats.total_size ?? null,
+        snapshot_count: snaps.length,
+        stats_at: new Date(),
+        stats_error: null,
+      };
+      await this.db
+        .updateTable('repositories')
+        .set(fresh)
+        .where('id', '=', id)
+        .execute();
+      // Append to the history only when the figures actually changed so
+      // manual refreshes don't pile up identical readings.
+      const changed =
+        repo.stats_at == null ||
+        Number(repo.size_bytes) !== fresh.size_bytes ||
+        repo.snapshot_count !== fresh.snapshot_count;
+      if (changed && fresh.size_bytes != null) {
+        await this.db
+          .insertInto('repository_stats_history')
+          .values({
+            repository_id: id,
+            measured_at: fresh.stats_at ?? undefined,
+            size_bytes: fresh.size_bytes,
+            snapshot_count: fresh.snapshot_count ?? 0,
+          })
+          .execute();
+      }
+      return fresh;
     } catch (e) {
-      detail.stats_error = (e as Error).message;
+      const stats_error = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Stats refresh for repository ${id} failed: ${stats_error}`);
+      await this.db
+        .updateTable('repositories')
+        .set({ stats_error })
+        .where('id', '=', id)
+        .execute();
+      return {
+        size_bytes: repo.size_bytes == null ? null : Number(repo.size_bytes),
+        snapshot_count: repo.snapshot_count,
+        stats_at: repo.stats_at,
+        stats_error,
+      };
     }
-    return detail;
+  }
+
+  /**
+   * Storage readings for the dashboard growth chart, scoped to the
+   * repositories whose job the user can view. Besides the readings inside the
+   * window, the last reading before it is included per repository so the total
+   * at the window start already counts every repository.
+   */
+  async statsHistory(
+    user: RequestUser,
+    days: number,
+  ): Promise<RepositoryStatsHistoryResponse> {
+    const since = new Date(Date.now() - days * 86400_000);
+    const ids = await this.acl.visibleResourceIds(user, 'job');
+    let reposQ = this.db
+      .selectFrom('repositories as r')
+      .innerJoin('backup_jobs as j', 'j.repository_id', 'r.id')
+      .select(['r.id as id', 'r.name as name'])
+      .orderBy('r.name', 'asc');
+    if (ids !== 'all') {
+      if (ids.length === 0) return { since, repositories: [], points: [] };
+      reposQ = reposQ.where('j.id', 'in', ids);
+    }
+    const repositories = await reposQ.execute();
+    const repoIds = repositories.map((r) => r.id);
+    if (repoIds.length === 0) return { since, repositories, points: [] };
+
+    const [inside, before] = await Promise.all([
+      this.db
+        .selectFrom('repository_stats_history')
+        .select(['repository_id', 'measured_at', 'size_bytes'])
+        .where('repository_id', 'in', repoIds)
+        .where('measured_at', '>=', since)
+        .orderBy('measured_at', 'asc')
+        .execute(),
+      this.db
+        .selectFrom('repository_stats_history')
+        .distinctOn('repository_id')
+        .select(['repository_id', 'measured_at', 'size_bytes'])
+        .where('repository_id', 'in', repoIds)
+        .where('measured_at', '<', since)
+        .orderBy('repository_id')
+        .orderBy('measured_at', 'desc')
+        .execute(),
+    ]);
+    const points = [...before, ...inside]
+      .map((p) => ({
+        repository_id: p.repository_id,
+        measured_at: p.measured_at,
+        size_bytes: Number(p.size_bytes),
+      }))
+      .sort((a, b) => +a.measured_at - +b.measured_at);
+    return { since, repositories, points };
+  }
+
+  /**
+   * Best-effort refresh after a backup run; never throws so a run's own
+   * bookkeeping can't be disturbed by a stats failure.
+   */
+  refreshStatsInBackground(id: string): void {
+    void this.refreshStats(id).catch((e) =>
+      this.logger.warn(`Stats refresh for repository ${id} failed: ${e}`),
+    );
   }
 
   /**

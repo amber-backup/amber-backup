@@ -17,11 +17,13 @@ import { CryptoService } from '../crypto/crypto.service';
 import { AgentsService } from './agents.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RepositoriesService } from '../repositories/repositories.service';
 
 describe('AgentsService (enrollment tokens & agent keys)', () => {
   let crypto: CryptoService;
   const targets = {} as TargetsService;
   const notifications = {} as NotificationsService;
+  const repositories = {} as RepositoriesService;
 
   beforeEach(() => {
     process.env.MASTER_ENCRYPTION_KEY = TEST_MASTER_KEY;
@@ -33,7 +35,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     it('persists only the token hash and returns the plaintext token once', async () => {
       const insert = chain({ execute: [] });
       const { db } = createDbMock({ insertInto: insert });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const result = await service.createEnrollmentToken('admin-1', {});
 
@@ -47,7 +49,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
 
     it('emits a docker-compose file for the docker-compose method', async () => {
       const { db } = createDbMock({ insertInto: chain({ execute: [] }) });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const result = await service.createEnrollmentToken('admin-1', {
         deployMethod: 'docker-compose',
@@ -62,7 +64,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
 
     it('emits a docker run command for the docker method', async () => {
       const { db } = createDbMock({ insertInto: chain({ execute: [] }) });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const result = await service.createEnrollmentToken('admin-1', {
         deployMethod: 'docker',
@@ -79,7 +81,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       writeFileSync(path.join(dir, 'amber-agent-linux-amd64'), 'ELF');
       process.env.AGENT_BINARY_DIR = dir;
       const { db } = createDbMock({});
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       expect(service.binary('linux-amd64')).toBeInstanceOf(StreamableFile);
     });
@@ -87,7 +89,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     it('rejects an unsupported target (no path traversal)', () => {
       process.env.AGENT_BINARY_DIR = tmpdir();
       const { db } = createDbMock({});
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       expect(() => service.binary('linux-amd64/../../etc/passwd')).toThrow(
         NotFoundException,
@@ -98,7 +100,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     it('404s when the binary is not bundled on this server', () => {
       process.env.AGENT_BINARY_DIR = mkdtempSync(path.join(tmpdir(), 'empty-'));
       const { db } = createDbMock({});
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       expect(() => service.binary('linux-arm64')).toThrow(NotFoundException);
     });
@@ -110,7 +112,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       writeFileSync(path.join(dir, 'version'), '1.4.2\n');
       process.env.AGENT_BINARY_DIR = dir;
       const { db } = createDbMock({});
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       expect(service.latestAgentVersion()).toBe('1.4.2');
     });
@@ -118,7 +120,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     it('returns null when no version file is bundled (dev)', () => {
       process.env.AGENT_BINARY_DIR = mkdtempSync(path.join(tmpdir(), 'nover-'));
       const { db } = createDbMock({});
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       expect(service.latestAgentVersion()).toBeNull();
     });
@@ -144,7 +146,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     it('rejects an unknown token', async () => {
       const select = chain({ executeTakeFirst: undefined });
       const { db } = createDbMock({ selectFrom: noGlobal(select) });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       await expect(
         service.enroll({ token: 'nope', agentName: 'web-1' } as never),
@@ -156,7 +158,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         executeTakeFirst: { ...validTokenRow(), used_at: new Date() },
       });
       const { db } = createDbMock({ selectFrom: noGlobal(select) });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       await expect(
         service.enroll({ token: 't', agentName: 'web-1' } as never),
@@ -171,7 +173,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         },
       });
       const { db } = createDbMock({ selectFrom: noGlobal(select) });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       await expect(
         service.enroll({ token: 't', agentName: 'web-1' } as never),
@@ -189,7 +191,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         insertInto: insert,
         updateTable: update,
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const result = await service.enroll({
         token: 'plaintext-token',
@@ -250,7 +252,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         selectFrom: chain({ executeTakeFirst: undefined }), // nothing stored yet
         insertInto: insert,
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const res = await service.setGlobalEnrollment(true);
 
@@ -268,7 +270,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       const { db } = createDbMock({
         selectFrom: storedGlobal('SECRET-GLOBAL', false),
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       await expect(service.getGlobalEnrollment()).resolves.toEqual({
         enabled: false,
@@ -280,7 +282,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       const { db } = createDbMock({
         selectFrom: storedGlobal('SECRET-GLOBAL'),
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const info = await service.globalEnrollmentInfo();
       expect(info.enabled).toBe(true);
@@ -301,7 +303,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
             : chain({ executeTakeFirst: undefined }),
         insertInto: insert,
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       const result = await service.enroll({
         token: 'GLOBAL-TOK',
@@ -322,7 +324,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
             ? storedGlobal('GLOBAL-TOK')
             : chain({ executeTakeFirst: undefined }),
       });
-      const service = new AgentsService(db, crypto, targets, notifications);
+      const service = new AgentsService(db, crypto, targets, notifications, repositories);
 
       await expect(
         service.enroll({ token: 'GLOBAL-TOK', agentName: '  ' } as never),
