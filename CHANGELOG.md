@@ -1,3 +1,15 @@
+# [1.21.0](https://github.com/amber-backup/amber-backup/compare/v1.20.0...v1.21.0) (2026-09-09)
+
+
+### Features
+
+* **dashboard:** compact upcoming schedules ([c3820aa](https://github.com/amber-backup/amber-backup/commit/c3820aa33d08114a9841f52f19a56e3d46e87788))
+* **dashboard:** move storage chart above recent activities ([f77897e](https://github.com/amber-backup/amber-backup/commit/f77897e0157b01f5ee57cfb5e7ab5b82a429ac03))
+* **dashboard:** show how long each run took ([d4d1b1d](https://github.com/amber-backup/amber-backup/commit/d4d1b1d9452d40d315d1fe9f1710fcd663c3c619))
+* **restore:** compact job and snapshot lists, show repository size ([05d6482](https://github.com/amber-backup/amber-backup/commit/05d648202430fabd46128f32cecdcf3832b5bae2))
+* **runs:** fail backups that wait in the queue for too long ([2499718](https://github.com/amber-backup/amber-backup/commit/24997187155cbfd7536ddbb6fc4036ceaed5ca02))
+* **runs:** record prune as its own activity ([5ecc180](https://github.com/amber-backup/amber-backup/commit/5ecc180319b7de3ed588a75b625cbca05bd73a30))
+
 # [1.20.0](https://github.com/amber-backup/amber-backup/compare/v1.19.0...v1.20.0) (2026-09-09)
 
 
