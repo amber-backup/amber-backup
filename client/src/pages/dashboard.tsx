@@ -327,12 +327,10 @@ function RunRow({ run: r }: { run: Run }) {
     // A prune has no progress or snapshot: outcome, duration and time.
     meta = (
       <div className="row-meta run-meta">
-        {r.status !== 'success' && <StatusBadge status={r.status} />}
-        {r.started_at && (
-          <span className="muted" title="Duration">
-            {duration}
-          </span>
-        )}
+        <span>{r.status !== 'success' && <StatusBadge status={r.status} />}</span>
+        <span className="muted" title="Duration">
+          {r.started_at ? duration : ''}
+        </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
@@ -364,12 +362,12 @@ function RunRow({ run: r }: { run: Run }) {
   } else {
     meta = (
       <div className="row-meta run-meta">
-        <StatusBadge status={r.status} />
-        {r.started_at && (
-          <span className="muted" title="Duration">
-            {duration}
-          </span>
-        )}
+        <span>
+          <StatusBadge status={r.status} />
+        </span>
+        <span className="muted" title="Duration">
+          {r.started_at ? duration : ''}
+        </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
       </div>
     );
