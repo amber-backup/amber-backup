@@ -1,3 +1,10 @@
+## [1.21.1](https://github.com/amber-backup/amber-backup/compare/v1.21.0...v1.21.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **dashboard:** keep the storage chart at a fixed height ([695a10e](https://github.com/amber-backup/amber-backup/commit/695a10e64b33077df7b35afda9df95c1773cc3ee))
+
 # [1.21.0](https://github.com/amber-backup/amber-backup/compare/v1.20.0...v1.21.0) (2026-09-09)
 
 
