@@ -27,6 +27,11 @@ export interface AppConfig {
   restoreTmpDir: string;
   /** Directory holding the compiled agent binaries served to hosts. */
   agentBinaryDir: string;
+  /**
+   * How long a backup run may wait in the queue before it is marked failed
+   * (typically because its agent is offline). <= 0 disables the timeout.
+   */
+  runQueueTimeoutSeconds: number;
   /** Days to keep audit log entries; <= 0 disables purging (keep forever). */
   auditRetentionDays: number;
   bootstrapAdminEmail: string;
@@ -91,6 +96,7 @@ export function loadConfig(): AppConfig {
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
     // Bundled into the Docker image at /app/agent-bin; overridable in dev.
     agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
+    runQueueTimeoutSeconds: int(env.RUN_QUEUE_TIMEOUT_SECONDS, 300),
     auditRetentionDays: int(env.AUDIT_RETENTION_DAYS, 90),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
     bootstrapAdminPassword: env.BOOTSTRAP_ADMIN_PASSWORD ?? '',

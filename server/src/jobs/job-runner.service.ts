@@ -4,9 +4,11 @@ import {
   Logger,
   OnApplicationShutdown,
 } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Db, KYSELY } from '../database/database.module';
+import { loadConfig } from '../config/configuration';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -65,6 +67,36 @@ export class JobRunnerService implements OnApplicationShutdown {
       );
     }
     // Agent-bound runs stay 'queued' until the agent polls (§8).
+  }
+
+  /**
+   * Fails backup runs that sat in the queue for longer than the configured
+   * timeout without being picked up — normally because the job's agent is
+   * offline. Each one is notified like any other failed run.
+   */
+  @Interval(30_000)
+  async failStaleQueuedRuns(): Promise<void> {
+    const timeoutSeconds = loadConfig().runQueueTimeoutSeconds;
+    if (timeoutSeconds <= 0) return;
+    const minutes = Math.round(timeoutSeconds / 60);
+    const stale = await this.db
+      .updateTable('job_runs')
+      .set({
+        status: 'failed',
+        finished_at: new Date(),
+        error: `Not picked up within ${minutes} min — is the agent offline?`,
+      })
+      .where('kind', '=', 'backup')
+      .where('status', '=', 'queued')
+      .where('created_at', '<', new Date(Date.now() - timeoutSeconds * 1000))
+      .returning('id')
+      .execute();
+    for (const run of stale) {
+      this.logger.warn(`Run ${run.id} timed out in the queue`);
+      void this.notifications
+        .notifyJobRun(run.id)
+        .catch((e) => this.logger.warn(`Notify failed for run ${run.id}: ${e}`));
+    }
   }
 
   cancel(jobRunId: string): boolean {
