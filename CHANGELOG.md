@@ -1,3 +1,15 @@
+# [1.22.0](https://github.com/amber-backup/amber-backup/compare/v1.21.1...v1.22.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* **dashboard:** show the storage chart and align activity columns ([ddd04c3](https://github.com/amber-backup/amber-backup/commit/ddd04c3322c15166db99e84d637a905b583ba2b0))
+
+
+### Features
+
+* **dashboard:** give the storage chart and activities equal height ([1666560](https://github.com/amber-backup/amber-backup/commit/1666560d23774743acecd74212987f1a9482e963))
+
 ## [1.21.1](https://github.com/amber-backup/amber-backup/compare/v1.21.0...v1.21.1) (2026-09-09)
 
 
