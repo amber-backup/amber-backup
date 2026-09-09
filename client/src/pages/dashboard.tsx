@@ -153,7 +153,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         <div className="main-stack fill-col">
           <div className="panel fill-col">
             <div className="panel-head">
-              <h2>Recent runs</h2>
+              <h2>Recent activities</h2>
               <span className="link" onClick={() => navigate('/jobs')}>
                 All jobs →
               </span>
@@ -169,7 +169,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                   </div>
                 )}
                 {runs.length === 0 && !pageLoading && doneRef.current && (
-                  <div className="empty">No backup runs yet.</div>
+                  <div className="empty">No activities yet.</div>
                 )}
               </div>
               <div ref={sentinelRef} style={{ height: 1 }} />
