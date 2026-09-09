@@ -20,6 +20,8 @@ export class RunsService {
       .select([
         'job_runs.id',
         'job_runs.job_id',
+        'job_runs.kind',
+        'job_runs.parent_run_id',
         'job_runs.trigger',
         'job_runs.status',
         'job_runs.agent_id',
@@ -42,6 +44,7 @@ export class RunsService {
       offset?: number;
       jobId?: string;
       status?: string;
+      kind?: string;
     } = {},
   ) {
     const ids = await this.acl.visibleResourceIds(user, 'job');
@@ -58,6 +61,7 @@ export class RunsService {
     if (opts.jobId) q = q.where('job_runs.job_id', '=', opts.jobId);
     if (opts.status)
       q = q.where('job_runs.status', '=', opts.status as never);
+    if (opts.kind) q = q.where('job_runs.kind', '=', opts.kind as never);
     return q.execute();
   }
 
@@ -86,7 +90,11 @@ export class RunsService {
     return { cancelled: true };
   }
 
-  /** Aggregate figures for the dashboard, scoped to what the user can see. */
+  /**
+   * Aggregate figures for the dashboard, scoped to what the user can see.
+   * `recent` and `running` cover every activity (backups and prunes); the
+   * success/failure counters are about backups only.
+   */
   async dashboard(user: RequestUser) {
     const ids = await this.acl.visibleResourceIds(user, 'job');
     const jobFilter = <T>(q: T): T => {
@@ -102,6 +110,7 @@ export class RunsService {
         .selectFrom('job_runs')
         .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
         .select((eb) => eb.fn.countAll<number>().as('c'))
+        .where('job_runs.kind', '=', 'backup')
         .where('job_runs.status', '=', 'failed')
         .where('job_runs.created_at', '>', new Date(Date.now() - 7 * 86400_000)),
     ).executeTakeFirst();
@@ -111,6 +120,7 @@ export class RunsService {
         .selectFrom('job_runs')
         .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
         .select((eb) => eb.fn.countAll<number>().as('c'))
+        .where('job_runs.kind', '=', 'backup')
         .where('job_runs.status', '=', 'success'),
     ).executeTakeFirst();
 

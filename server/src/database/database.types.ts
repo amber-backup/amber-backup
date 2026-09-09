@@ -30,6 +30,8 @@ export type AgentStatus = 'enrolled' | 'online' | 'offline' | 'error';
 export type TargetStatus = 'online' | 'offline' | 'unknown';
 export type SourceLocation = 'local' | 'agent';
 export type RunTrigger = 'schedule' | 'manual';
+/** What a job_runs row records: a backup, or a `restic prune` of the job's repository. */
+export type RunKind = 'backup' | 'prune';
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -357,6 +359,9 @@ export interface RunStats {
 export interface JobRunsTable {
   id: Generated<string>;
   job_id: string;
+  kind: ColumnType<RunKind, RunKind | undefined, RunKind>;
+  /** For a prune started by a backup's retention: that backup run. */
+  parent_run_id: string | null;
   trigger: RunTrigger;
   status: ColumnType<RunStatus, RunStatus | undefined, RunStatus>;
   /** Set when dispatched to an agent; null for local runs. */

@@ -291,11 +291,14 @@ func (a *agent) runBackup(t *Task) {
 		return
 	}
 
-	// Retention as part of the run (§7).
+	// Retention as part of the run (§7). Only the forget happens inside the
+	// backup; the prune it may ask for is reported as an activity of its own.
 	if t.Options != nil && hasRetention(t.Options.Retention) {
 		fcode, ferr := a.runner.run(t, forgetArgs(t.Options.Retention), nil, appendLog)
 		if ferr != nil || fcode != 0 {
 			appendLog(fmt.Sprintf("forget failed: code=%d err=%v", fcode, ferr))
+		} else if t.Options.Retention.Prune {
+			result.Prune = a.runPrune(t)
 		}
 	}
 
@@ -311,6 +314,23 @@ func (a *agent) runBackup(t *Task) {
 	result.Log = logBuf.String()
 	a.postResult(t.TaskID, result)
 	log.Printf("backup task %s complete (snapshot %s)", t.TaskID, result.SnapshotID)
+}
+
+// runPrune reclaims unreferenced storage after a backup's forget. It is timed
+// and logged separately so the server can show it as its own activity.
+func (a *agent) runPrune(t *Task) *PruneResult {
+	var logBuf strings.Builder
+	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	res := &PruneResult{Status: "success", StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	code, err := a.runner.run(t, []string{"prune"}, nil, appendLog)
+	if err != nil || code != 0 {
+		res.Status = "failed"
+		res.Error = fmt.Sprintf("prune exited %d: %v", code, err)
+	}
+	res.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	res.Log = logBuf.String()
+	log.Printf("prune for task %s finished: %s", t.TaskID, res.Status)
+	return res
 }
 
 func (a *agent) runRestore(t *Task) {

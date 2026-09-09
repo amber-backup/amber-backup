@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsObject,
@@ -8,6 +10,7 @@ import {
   IsString,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class CreateEnrollmentTokenDto {
@@ -106,6 +109,31 @@ export class TaskProgressDto {
   stats!: Record<string, unknown>;
 }
 
+/** Outcome of the prune an agent ran after a backup's retention asked for one. */
+export class PruneResultDto {
+  @ApiProperty({ enum: ['success', 'failed'] })
+  @IsIn(['success', 'failed'])
+  status!: 'success' | 'failed';
+
+  @ApiProperty({ description: 'ISO-8601 start time' })
+  @IsDateString()
+  startedAt!: string;
+
+  @ApiProperty({ description: 'ISO-8601 end time' })
+  @IsDateString()
+  finishedAt!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  error?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  log?: string;
+}
+
 export class TaskResultDto {
   @ApiProperty({ enum: ['success', 'failed'] })
   @IsIn(['success', 'failed'])
@@ -123,6 +151,12 @@ export class TaskResultDto {
   @ApiPropertyOptional({ type: Object })
   @IsOptional()
   forgetResult?: unknown;
+
+  @ApiPropertyOptional({ type: PruneResultDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PruneResultDto)
+  prune?: PruneResultDto;
 
   @ApiPropertyOptional()
   @IsOptional()

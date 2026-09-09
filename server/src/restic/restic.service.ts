@@ -333,6 +333,24 @@ export class ResticService {
   }
 
   /**
+   * Reclaims storage no longer referenced by any snapshot (`restic prune`).
+   * Slow and takes an exclusive repository lock; progress and summary lines
+   * are streamed to `onLog`.
+   */
+  async prune(
+    ctx: ResticContext,
+    hooks: { onLog?: LogCallback } = {},
+  ): Promise<void> {
+    const res = await this.run(ctx, ['prune'], {
+      onStdoutLine: (line) => hooks.onLog?.(line),
+      onStderrLine: (line) => hooks.onLog?.(line),
+    });
+    if (res.code !== 0) {
+      throw new Error(res.stderr.trim() || `restic prune exited ${res.code}`);
+    }
+  }
+
+  /**
    * Deletes specific snapshots by id (`restic forget <id...>`). With `prune`,
    * the freed data is repacked and removed from the backend immediately;
    * otherwise storage is only reclaimed by a later prune.

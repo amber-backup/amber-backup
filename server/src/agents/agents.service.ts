@@ -16,6 +16,7 @@ import { CryptoService } from '../crypto/crypto.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
+import { PruneRunnerService } from '../jobs/prune-runner.service';
 import { loadConfig } from '../config/configuration';
 import {
   Agent,
@@ -70,6 +71,7 @@ export class AgentsService {
     private readonly targets: TargetsService,
     private readonly notifications: NotificationsService,
     private readonly repositories: RepositoriesService,
+    private readonly pruneRunner: PruneRunnerService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -515,6 +517,7 @@ echo "Amber agent installed and started."
         'backup_jobs.paths',
       ])
       .where('backup_jobs.agent_id', '=', agentId)
+      .where('job_runs.kind', '=', 'backup')
       .where('job_runs.status', '=', 'queued')
       .execute();
 
@@ -629,7 +632,12 @@ echo "Amber agent installed and started."
     const run = await this.db
       .selectFrom('job_runs')
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
-      .select(['job_runs.id as id', 'backup_jobs.repository_id as repository_id'])
+      .select([
+        'job_runs.id as id',
+        'job_runs.job_id as job_id',
+        'job_runs.trigger as trigger',
+        'backup_jobs.repository_id as repository_id',
+      ])
       .where('job_runs.id', '=', taskId)
       .where('job_runs.agent_id', '=', agentId)
       .executeTakeFirst();
@@ -654,6 +662,22 @@ echo "Amber agent installed and started."
     // The repository just changed size — refresh its cached figures.
     if (dto.status === 'success') {
       this.repositories.refreshStatsInBackground(run.repository_id);
+    }
+
+    // The prune the agent ran after the backup is an activity of its own.
+    if (dto.prune) {
+      await this.pruneRunner.record({
+        jobId: run.job_id,
+        repositoryId: run.repository_id,
+        trigger: run.trigger,
+        parentRunId: taskId,
+        agentId,
+        status: dto.prune.status,
+        startedAt: new Date(dto.prune.startedAt),
+        finishedAt: new Date(dto.prune.finishedAt),
+        error: dto.prune.error ?? null,
+        log: dto.prune.log ?? null,
+      });
     }
 
     // Fire configured notifications for the now-terminal run (best-effort).

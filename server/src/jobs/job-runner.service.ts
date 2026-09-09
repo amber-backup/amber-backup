@@ -11,6 +11,7 @@ import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
+import { PruneRunnerService } from './prune-runner.service';
 import { ResticOptions, RunStats } from '../database/database.types';
 
 const execFileAsync = promisify(execFile);
@@ -19,9 +20,10 @@ const execFileAsync = promisify(execFile);
 const SCRIPT_TIMEOUT_MS = 300_000;
 
 /**
- * Executes local backup runs end-to-end: backup → forget/prune (§7) with live
- * progress written to job_runs. Agent-bound runs are left queued for the agent
- * to pick up on its next poll.
+ * Executes local backup runs end-to-end: backup → forget (§7) with live
+ * progress written to job_runs, followed by a prune recorded as an activity of
+ * its own when the retention asks for one. Agent-bound runs are left queued
+ * for the agent to pick up on its next poll.
  */
 @Injectable()
 export class JobRunnerService implements OnApplicationShutdown {
@@ -39,6 +41,7 @@ export class JobRunnerService implements OnApplicationShutdown {
     private readonly targets: TargetsService,
     private readonly notifications: NotificationsService,
     private readonly repositories: RepositoriesService,
+    private readonly pruneRunner: PruneRunnerService,
   ) {}
 
   /** Dispatches a queued run: run locally now, or leave it for an agent. */
@@ -76,7 +79,7 @@ export class JobRunnerService implements OnApplicationShutdown {
   async executeLocal(jobRunId: string): Promise<void> {
     const ctx = await this.loadRunContext(jobRunId);
     if (!ctx) return;
-    const { job, source, repo, repositoryId, options } = ctx;
+    const { job, trigger, source, repo, repositoryId, options } = ctx;
 
     const abort = new AbortController();
     this.running.set(jobRunId, abort);
@@ -133,12 +136,15 @@ export class JobRunnerService implements OnApplicationShutdown {
         abort.signal,
       );
 
-      // Retention as part of the run (§7).
+      // Retention as part of the run (§7). Only the (fast) forget happens
+      // here; the prune it may ask for runs afterwards as its own activity.
       let forgetResult: unknown = null;
       if (options.retention && this.hasRetention(options.retention)) {
-        const fr = await this.restic.forget(resticCtx, options.retention, {
-          onLog: appendLog,
-        });
+        const fr = await this.restic.forget(
+          resticCtx,
+          { ...options.retention, prune: false },
+          { onLog: appendLog },
+        );
         forgetResult = fr.raw;
         appendLog(`[forget] removed ${fr.removed} snapshot(s)`);
       }
@@ -177,6 +183,18 @@ export class JobRunnerService implements OnApplicationShutdown {
         .execute();
       // The repository just changed size — refresh its cached figures.
       this.repositories.refreshStatsInBackground(repositoryId);
+
+      // Prune after the backup is safely recorded. It is a separate activity
+      // with its own duration and outcome, so it never fails the backup.
+      if (options.retention?.prune) {
+        await this.pruneRunner.run({
+          jobId: job.id,
+          repositoryId,
+          trigger,
+          parentRunId: jobRunId,
+          ctx: resticCtx,
+        });
+      }
     } catch (err) {
       const aborted = abort.signal.aborted;
       appendLog(String(err));
@@ -281,6 +299,7 @@ export class JobRunnerService implements OnApplicationShutdown {
       .innerJoin('repositories', 'repositories.id', 'backup_jobs.repository_id')
       .select([
         'job_runs.id as run_id',
+        'job_runs.trigger',
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
         'repositories.id as repository_id',
@@ -305,6 +324,7 @@ export class JobRunnerService implements OnApplicationShutdown {
 
     return {
       job: { id: row.job_id, name: row.job_name },
+      trigger: row.trigger,
       source: { paths },
       repositoryId: row.repository_id,
       repo: {

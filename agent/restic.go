@@ -205,9 +205,8 @@ func forgetArgs(ret *Retention) []string {
 	for _, tag := range ret.KeepTags {
 		args = append(args, "--keep-tag", tag)
 	}
-	if ret.Prune {
-		args = append(args, "--prune")
-	}
+	// Never --prune here: the prune runs afterwards as a separate step with
+	// its own timing and outcome (see runPrune).
 	return args
 }
 

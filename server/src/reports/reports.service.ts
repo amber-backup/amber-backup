@@ -213,6 +213,7 @@ export class ReportsService {
         ])
         .select((eb) => eb.fn.countAll<number>().as('c'))
         .where('job_runs.job_id', 'in', jobIds)
+        .where('job_runs.kind', '=', 'backup')
         .where('job_runs.status', 'in', statuses)
         .where('job_runs.created_at', '>', cutoff)
         .groupBy(['job_runs.job_id', 'backup_jobs.name', 'job_runs.status'])

@@ -10,19 +10,21 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List backup runs (history + live)' })
+  @ApiOperation({ summary: 'List activities: backup and prune runs (history + live)' })
   list(
     @CurrentUser() user: RequestUser,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('jobId') jobId?: string,
     @Query('status') status?: string,
+    @Query('kind') kind?: string,
   ) {
     return this.runs.list(user, {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
       jobId,
       status,
+      kind,
     });
   }
 

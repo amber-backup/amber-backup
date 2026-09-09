@@ -4,6 +4,7 @@ import { AccessControlService } from '../common/access-control.service';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { JobsService } from '../jobs/jobs.service';
+import { PruneRunnerService } from '../jobs/prune-runner.service';
 
 /**
  * Live snapshot browsing (§10.1). Snapshots are read from the repository on
@@ -17,6 +18,7 @@ export class SnapshotsService {
     private readonly restic: ResticService,
     private readonly targets: TargetsService,
     private readonly jobs: JobsService,
+    private readonly pruneRunner: PruneRunnerService,
   ) {}
 
   async list(
@@ -37,7 +39,12 @@ export class SnapshotsService {
     return snaps;
   }
 
-  /** Permanently deletes a snapshot (requires 'manage' — this destroys data). */
+  /**
+   * Permanently deletes a snapshot (requires 'manage' — this destroys data).
+   * The forget itself is quick and happens before this returns; with `prune`,
+   * the slow storage reclaim is started as a prune activity of its own and its
+   * run id is returned so the caller can follow it.
+   */
   async remove(
     user: RequestUser,
     jobId: string,
@@ -45,8 +52,19 @@ export class SnapshotsService {
     prune = false,
   ) {
     await this.acl.assert(user, 'job', jobId, 'manage');
-    const ctx = await this.targets.resolveForJob(await this.jobs.getRow(jobId));
-    return this.restic.forgetSnapshots(ctx, [snapshotId], prune);
+    const job = await this.jobs.getRow(jobId);
+    const ctx = await this.targets.resolveForJob(job);
+    const result = await this.restic.forgetSnapshots(ctx, [snapshotId], false);
+    const pruneRunId = prune
+      ? await this.pruneRunner.start({
+          jobId,
+          repositoryId: job.repository_id,
+          trigger: 'manual',
+          parentRunId: null,
+          ctx,
+        })
+      : null;
+    return { ...result, pruneRunId };
   }
 
   async ls(user: RequestUser, jobId: string, snapshotId: string, path?: string) {

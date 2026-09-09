@@ -267,7 +267,7 @@ function Stats({ dash, agents }: { dash: DashboardData; agents: Agent[] }) {
         trendClass={dash.failedLastWeek > 0 ? 'down' : 'up'}
         icon="job"
       />
-      <StatCard label="Running backups" value={String(dash.running)} trend="active" trendClass="neutral" icon="play" />
+      <StatCard label="Running operations" value={String(dash.running)} trend="active" trendClass="neutral" icon="play" />
       <StatCard
         label="Agents online"
         value={
@@ -328,7 +328,20 @@ function RunRow({ run: r }: { run: Run }) {
   const duration = fmtDuration(runDurationMs(r));
 
   let meta: React.ReactNode;
-  if (r.status === 'running') {
+  if (r.kind === 'prune') {
+    // A prune has no progress or snapshot: outcome, duration and time.
+    meta = (
+      <div className="row-meta run-meta">
+        {r.status !== 'success' && <StatusBadge status={r.status} />}
+        {r.started_at && (
+          <span className="muted" title="Duration">
+            {duration}
+          </span>
+        )}
+        <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
+      </div>
+    );
+  } else if (r.status === 'running') {
     meta = (
       <div style={{ width: 130 }}>
         <div className="progress-track">
@@ -368,21 +381,32 @@ function RunRow({ run: r }: { run: Run }) {
   }
 
   // For failed/queued show the reason (or plain status) instead of a snapshot id;
-  // a running backup shows how long it has been going.
+  // a running activity shows how long it has been going.
   const sub =
     r.status === 'failed' && r.error
       ? r.error
       : r.status === 'running' && r.started_at
         ? `${statusLabel(r.status)} · ${duration}`
-        : r.snapshot_id
-          ? r.snapshot_id.slice(0, 12)
-          : statusLabel(r.status);
+        : r.kind === 'prune'
+          ? r.parent_run_id
+            ? 'prune after backup'
+            : 'manual prune'
+          : r.snapshot_id
+            ? r.snapshot_id.slice(0, 12)
+            : statusLabel(r.status);
 
   return (
     <div className="row compact" data-run-id={r.id}>
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
-        <div className="row-title">{r.job_name ?? 'Job'}</div>
+        <div className="row-title">
+          {r.job_name ?? 'Job'}
+          {r.kind === 'prune' && (
+            <span className="badge muted row-kind">
+              prune
+            </span>
+          )}
+        </div>
         <div className="row-sub">{sub}</div>
       </div>
       {meta}

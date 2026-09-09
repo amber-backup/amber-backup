@@ -104,8 +104,20 @@ type TaskResult struct {
 	SnapshotID   string         `json:"snapshotId,omitempty"`
 	Stats        map[string]any `json:"stats,omitempty"`
 	ForgetResult any            `json:"forgetResult,omitempty"`
-	Error        string         `json:"error,omitempty"`
-	Log          string         `json:"log,omitempty"`
+	// Outcome of the prune run after the backup when retention asks for one;
+	// the server records it as an activity of its own.
+	Prune *PruneResult `json:"prune,omitempty"`
+	Error string       `json:"error,omitempty"`
+	Log   string       `json:"log,omitempty"`
+}
+
+// PruneResult mirrors the server's PruneResultDto.
+type PruneResult struct {
+	Status     string `json:"status"`
+	StartedAt  string `json:"startedAt"`
+	FinishedAt string `json:"finishedAt"`
+	Error      string `json:"error,omitempty"`
+	Log        string `json:"log,omitempty"`
 }
 
 type State struct {

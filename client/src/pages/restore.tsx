@@ -205,7 +205,7 @@ function DeleteSnapshotDialog({
   const submit = async () => {
     try {
       await api.del(`/jobs/${jobId}/snapshots/${s.id}?prune=${prune}`);
-      toast(prune ? 'Snapshot deleted and pruned' : 'Snapshot deleted', 'success');
+      toast(prune ? 'Snapshot deleted — prune started, see recent activities' : 'Snapshot deleted', 'success');
       reload();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Delete failed', 'error');

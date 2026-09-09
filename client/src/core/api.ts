@@ -182,6 +182,10 @@ export interface Run {
   id: string;
   job_id: string;
   job_name?: string;
+  /** A backup, or a `restic prune` of the job's repository. */
+  kind: 'backup' | 'prune';
+  /** For a prune started by a backup's retention: that backup run. */
+  parent_run_id: string | null;
   trigger: string;
   status: string;
   agent_id: string | null;
