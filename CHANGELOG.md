@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/amber-backup/amber-backup/compare/v1.19.0...v1.20.0) (2026-09-09)
+
+
+### Features
+
+* **repositories:** show repository size and storage growth ([924f430](https://github.com/amber-backup/amber-backup/commit/924f4302cb34cbeb4e47d6c8867610adece1fc2e))
+
 # [1.19.0](https://github.com/amber-backup/amber-backup/compare/v1.18.0...v1.19.0) (2026-09-04)
 
 
