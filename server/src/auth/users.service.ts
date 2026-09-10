@@ -12,6 +12,7 @@ import * as argon2 from 'argon2';
 import { Db, KYSELY } from '../database/database.module';
 import { AuthSource, User } from '../database/database.types';
 import { loadConfig } from '../config/configuration';
+import { SettingsService } from '../settings/settings.service';
 import { CreateGrantDto, CreateUserDto, UpdateUserDto } from './dto/auth.dto';
 
 export type PublicUser = Omit<
@@ -37,7 +38,10 @@ function toPublic(user: User): PublicUser {
 export class UsersService implements OnModuleInit {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(@Inject(KYSELY) private readonly db: Db) {}
+  constructor(
+    @Inject(KYSELY) private readonly db: Db,
+    private readonly settings: SettingsService,
+  ) {}
 
   /** Creates the bootstrap admin on first start when no users exist. */
   async onModuleInit(): Promise<void> {
@@ -137,8 +141,39 @@ export class UsersService implements OnModuleInit {
     if (dto.displayName !== undefined) patch.display_name = dto.displayName;
     if (dto.isAdmin !== undefined) patch.is_admin = dto.isAdmin;
     if (dto.disabled !== undefined) patch.disabled = dto.disabled;
+
+    const wasLocal = user.auth_source === 'local';
+    const willBeLocal =
+      dto.authSource === undefined ? wasLocal : dto.authSource === 'local';
+
+    if (willBeLocal !== wasLocal) {
+      if (willBeLocal) {
+        // Without a password the account would have no way in at all.
+        if (!dto.password) {
+          throw new BadRequestException(
+            'A password is required to switch this account to local login',
+          );
+        }
+        patch.auth_source = 'local';
+      } else {
+        if (!(await this.settings.hasUsableSso())) {
+          throw new BadRequestException(
+            'Enable SSO with at least one fully configured provider before switching accounts to it',
+          );
+        }
+        patch.auth_source = 'sso';
+        patch.password_hash = null;
+        // The local second factors belong to the password, so they go with it —
+        // otherwise switching back later would resurrect a stale TOTP secret.
+        patch.totp_enabled = false;
+        patch.totp_secret_ciphertext = null;
+        patch.totp_secret_nonce = null;
+        patch.totp_recovery_codes = null;
+      }
+    }
+
     if (dto.password !== undefined) {
-      if (user.auth_source !== 'local') {
+      if (!willBeLocal) {
         throw new BadRequestException('Cannot set password on SSO account');
       }
       patch.password_hash = await argon2.hash(dto.password);
@@ -195,6 +230,46 @@ export class UsersService implements OnModuleInit {
       .deleteFrom('resource_grants')
       .where('id', '=', grantId)
       .where('user_id', '=', userId)
+      .execute();
+  }
+
+  // --- SSO identities -------------------------------------------------------
+
+  /** The user an SSO provider's subject is bound to, if any. */
+  async findBySsoIdentity(
+    providerId: string,
+    subject: string,
+  ): Promise<User | undefined> {
+    return this.db
+      .selectFrom('users')
+      .innerJoin('sso_identities', 'sso_identities.user_id', 'users.id')
+      .where('sso_identities.provider_id', '=', providerId)
+      .where('sso_identities.subject', '=', subject)
+      .selectAll('users')
+      .executeTakeFirst();
+  }
+
+  /** Binds a provider's subject to a user; re-linking is a no-op. */
+  async linkSsoIdentity(
+    userId: string,
+    providerId: string,
+    subject: string,
+  ): Promise<void> {
+    await this.db
+      .insertInto('sso_identities')
+      .values({ user_id: userId, provider_id: providerId, subject })
+      .onConflict((oc) =>
+        oc.columns(['provider_id', 'subject']).doUpdateSet({ user_id: userId }),
+      )
+      .execute();
+  }
+
+  async touchSsoIdentity(providerId: string, subject: string): Promise<void> {
+    await this.db
+      .updateTable('sso_identities')
+      .set({ last_login_at: new Date() })
+      .where('provider_id', '=', providerId)
+      .where('subject', '=', subject)
       .execute();
   }
 

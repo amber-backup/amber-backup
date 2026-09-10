@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { UsersService } from './users.service';
 import { TotpService } from './totp.service';
+import { SettingsService } from '../settings/settings.service';
 
 // Stub the TOTP module so the test doesn't pull in otplib's ESM (which Jest
 // doesn't transform under node_modules). The service is mocked per-test anyway.
@@ -16,6 +17,7 @@ describe('AuthService (session JWT)', () => {
     Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw'>
   >;
   let totp: jest.Mocked<Pick<TotpService, 'verifyLogin'>>;
+  let settings: jest.Mocked<Pick<SettingsService, 'getLocalLoginEnabled'>>;
   let service: AuthService;
 
   beforeEach(() => {
@@ -33,10 +35,14 @@ describe('AuthService (session JWT)', () => {
     totp = { verifyLogin: jest.fn() } as unknown as jest.Mocked<
       Pick<TotpService, 'verifyLogin'>
     >;
+    settings = {
+      getLocalLoginEnabled: jest.fn().mockResolvedValue(true),
+    } as unknown as jest.Mocked<Pick<SettingsService, 'getLocalLoginEnabled'>>;
     service = new AuthService(
       users as unknown as UsersService,
       jwt,
       totp as unknown as TotpService,
+      settings as unknown as SettingsService,
     );
   });
 
@@ -67,6 +73,31 @@ describe('AuthService (session JWT)', () => {
   });
 
   describe('login', () => {
+    it('rejects every password login while local login is disabled', async () => {
+      settings.getLocalLoginEnabled.mockResolvedValue(false);
+      users.findByEmailRaw.mockResolvedValue({
+        id: 'u1',
+        email: 'a@x.io',
+        auth_source: 'local',
+        disabled: false,
+      } as never);
+      users.verifyPassword.mockResolvedValue(true);
+
+      await expect(service.login('a@x.io', 'right')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      // Rejected before the credentials are even looked at.
+      expect(users.findByEmailRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects the second 2FA step while local login is disabled', async () => {
+      settings.getLocalLoginEnabled.mockResolvedValue(false);
+
+      await expect(service.loginTotp('any-token', '123456')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
     it('rejects when the password does not verify', async () => {
       users.findByEmailRaw.mockResolvedValue({
         id: 'u1',

@@ -1384,6 +1384,16 @@ input[type="checkbox"]:disabled {
     margin-bottom: 16px;
 }
 
+/* Why an SSO redirect came back without a session (pending approval, etc.). */
+.login-notice {
+    background: var(--info-bg);
+    color: var(--info);
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
 .sso-list {
     margin-top: 18px;
     padding-top: 18px;

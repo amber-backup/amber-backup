@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
@@ -118,6 +119,15 @@ export class UpdateUserDto {
   @IsString()
   @MinLength(8)
   password?: string;
+
+  @ApiPropertyOptional({
+    enum: ['local', 'sso'],
+    description:
+      'Switch how the account signs in. Moving to SSO clears its password and 2FA; moving to local requires `password` in the same request.',
+  })
+  @IsOptional()
+  @IsIn(['local', 'sso'])
+  authSource?: 'local' | 'sso';
 }
 
 export class CreateGrantDto {

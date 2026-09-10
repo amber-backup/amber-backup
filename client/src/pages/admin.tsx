@@ -26,6 +26,8 @@ interface SsoProviderView {
 
 interface SystemSettings {
   agentOfflineTimeoutSeconds: number;
+  /** Whether password and passkey logins are accepted at all. */
+  localLoginEnabled: boolean;
   sso: { enabled: boolean; providers: SsoProviderView[] };
   ssoRedirectUri: string;
 }
@@ -221,8 +223,69 @@ function SystemPanels() {
   return (
     <>
       <AgentPanel sys={data} />
+      <AuthPanel sys={data} />
       <SsoPanel sys={data} />
     </>
+  );
+}
+
+// --- Local login ------------------------------------------------------------
+
+/** Whether a provider has everything it needs to actually serve a login. */
+function providerUsable(p: SsoProviderView): boolean {
+  if (!p.clientId || !p.clientSecretSet) return false;
+  if (p.type === 'oidc') return !!p.issuerUrl;
+  if (p.type === 'entra') return !!p.tenantId;
+  return true;
+}
+
+function AuthPanel({ sys }: { sys: SystemSettings }) {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(sys.localLoginEnabled);
+  const [busy, setBusy] = useState(false);
+
+  // The server refuses to leave an instance with no way in; mirror that here so
+  // the checkbox explains itself instead of just failing.
+  const ssoUsable = sys.sso.enabled && sys.sso.providers.some(providerUsable);
+
+  const change = async (next: boolean) => {
+    setBusy(true);
+    try {
+      const updated = await api.patch<SystemSettings>('/settings/auth', {
+        localLoginEnabled: next,
+      });
+      setEnabled(updated.localLoginEnabled);
+      toast(next ? 'Local login enabled' : 'Local login disabled', 'success');
+    } catch (err) {
+      setEnabled(sys.localLoginEnabled);
+      toast(err instanceof Error ? err.message : 'Error', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>Authentication</h2>
+      </div>
+      <div style={BODY_STYLE}>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={busy || (enabled && !ssoUsable)}
+            onChange={(e) => void change(e.target.checked)}
+          />
+          Allow local login (password and passkeys)
+        </label>
+        <div className="help">
+          {enabled && !ssoUsable
+            ? 'Turning this off needs single sign-on enabled with at least one fully configured provider — otherwise nobody could sign in.'
+            : 'With this off, the password form and passkey button disappear from the login page and only single sign-on remains. API keys keep working.'}
+        </div>
+      </div>
+    </div>
   );
 }
 

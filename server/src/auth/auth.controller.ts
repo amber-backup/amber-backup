@@ -16,6 +16,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SESSION_COOKIE } from '../common/guards/auth.guard';
+import { SettingsService } from '../settings/settings.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';
@@ -78,6 +79,7 @@ export class AuthController {
     private readonly totp: TotpService,
     private readonly passkeys: PasskeysService,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
   ) {}
 
   @Public()
@@ -251,6 +253,7 @@ export class AuthController {
   @Post('passkeys/login/options')
   @ApiOperation({ summary: 'Begin a usernameless passkey login' })
   async passkeyLoginOptions(@Res({ passthrough: true }) res: Response) {
+    await this.auth.assertLocalLoginEnabled();
     const { options, challengeToken } =
       await this.passkeys.authenticationOptions();
     res.cookie(WEBAUTHN_AUTH_COOKIE, challengeToken, challengeCookieOptions());
@@ -268,6 +271,7 @@ export class AuthController {
     const ip = clientIp(req);
     const userAgent = (req.headers['user-agent'] as string) ?? null;
     try {
+      await this.auth.assertLocalLoginEnabled();
       const { userId } = await this.passkeys.verifyAuthentication(
         readCookie(req, WEBAUTHN_AUTH_COOKIE),
         dto.response as never,
@@ -335,9 +339,15 @@ export class AuthController {
 
   @Public()
   @Get('providers')
-  @ApiOperation({ summary: 'Enabled SSO providers' })
-  providers() {
-    return this.sso.listProviders();
+  @ApiOperation({
+    summary: 'Which login methods this instance offers (SSO providers + local)',
+  })
+  async providers() {
+    const [providers, localLogin] = await Promise.all([
+      this.sso.listProviders(),
+      this.settings.getLocalLoginEnabled(),
+    ]);
+    return { localLogin, providers };
   }
 
   @Public()
@@ -370,8 +380,8 @@ export class AuthController {
     const result = await this.sso.handleCallback(code, state, stateCookie);
     res.clearCookie(OIDC_STATE_COOKIE, { path: '/' });
 
-    if (result.userDisabled) {
-      res.redirect('/?sso=pending');
+    if (result.reason) {
+      res.redirect(`/?sso=${result.reason}`);
       return;
     }
     res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());

@@ -194,3 +194,84 @@ describe('SettingsService (SSO secret encryption)', () => {
     expect(resolved.providers[0].clientSecret).toBe('legacy');
   });
 });
+
+describe('SettingsService (local login)', () => {
+  let crypto: CryptoService;
+
+  beforeEach(() => {
+    process.env.MASTER_ENCRYPTION_KEY = TEST_MASTER_KEY;
+    crypto = new CryptoService();
+  });
+
+  /** Enables SSO with one provider that has everything it needs. */
+  async function withUsableSso(service: SettingsService) {
+    await service.updateSso({
+      enabled: true,
+      providers: [
+        {
+          type: 'oidc',
+          clientId: 'cid',
+          issuerUrl: 'https://issuer.example',
+          clientSecret: 'shh',
+        },
+      ],
+    });
+  }
+
+  it('accepts password logins until an admin says otherwise', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await expect(service.getLocalLoginEnabled()).resolves.toBe(true);
+  });
+
+  it('refuses to disable local login while SSO could not serve one', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+
+    await expect(service.setLocalLoginEnabled(false)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(service.getLocalLoginEnabled()).resolves.toBe(true);
+  });
+
+  it('refuses when SSO is enabled but the provider is incomplete', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.updateSso({
+      enabled: true,
+      // No issuer URL, so an OIDC login could never start.
+      providers: [{ type: 'oidc', clientId: 'cid', clientSecret: 'shh' }],
+    });
+
+    await expect(service.setLocalLoginEnabled(false)).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('disables local login once SSO can serve a login', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await withUsableSso(service);
+
+    await service.setLocalLoginEnabled(false);
+
+    await expect(service.getLocalLoginEnabled()).resolves.toBe(false);
+    await expect(service.getSystemView()).resolves.toMatchObject({
+      localLoginEnabled: false,
+    });
+  });
+
+  it('will not switch SSO off while it is the only way in', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await withUsableSso(service);
+    await service.setLocalLoginEnabled(false);
+
+    await expect(service.updateSso({ enabled: false })).rejects.toMatchObject({
+      status: 400,
+    });
+    // Re-enabling local login first releases the lock.
+    await service.setLocalLoginEnabled(true);
+    await expect(service.updateSso({ enabled: false })).resolves.toBeUndefined();
+  });
+});

@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { loadConfig } from '../config/configuration';
+import { SettingsService } from '../settings/settings.service';
 import { PublicUser, UsersService } from './users.service';
 import { TotpService } from './totp.service';
 
@@ -25,7 +26,18 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly totp: TotpService,
+    private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * Password and passkey logins can be switched off instance-wide, leaving SSO
+   * as the only way in. API keys are machine access and stay unaffected.
+   */
+  async assertLocalLoginEnabled(): Promise<void> {
+    if (!(await this.settings.getLocalLoginEnabled())) {
+      throw new UnauthorizedException('Local login is disabled');
+    }
+  }
 
   /**
    * Challenge tokens are signed with a key derived from — but distinct from —
@@ -37,6 +49,7 @@ export class AuthService {
   }
 
   async login(email: string, password: string): Promise<LoginOutcome> {
+    await this.assertLocalLoginEnabled();
     const user = await this.users.findByEmailRaw(email);
     if (!user || user.auth_source !== 'local') {
       throw new UnauthorizedException('Invalid credentials');
@@ -57,6 +70,7 @@ export class AuthService {
 
   /** Second step of a 2FA login: validate the challenge + code, then mint a session. */
   async loginTotp(challengeToken: string, code: string): Promise<AuthResult> {
+    await this.assertLocalLoginEnabled();
     let payload: ChallengePayload;
     try {
       payload = await this.jwt.verifyAsync<ChallengePayload>(challengeToken, {

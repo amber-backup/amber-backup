@@ -153,13 +153,16 @@ function CreateUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 
 function EditUser({ user: u, onClose, onSaved }: { user: User; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const wasLocal = u.auth_source === 'local';
   const [name, setName] = useState(u.display_name);
   const [password, setPassword] = useState('');
   const [admin, setAdmin] = useState(u.is_admin);
   const [disabled, setDisabled] = useState(u.disabled);
+  const [local, setLocal] = useState(wasLocal);
 
   const submit = async () => {
     const payload: Record<string, unknown> = { displayName: name, isAdmin: admin, disabled };
+    if (local !== wasLocal) payload.authSource = local ? 'local' : 'sso';
     if (password) payload.password = password;
     try {
       await api.patch(`/users/${u.id}`, payload);
@@ -177,10 +180,28 @@ function EditUser({ user: u, onClose, onSaved }: { user: User; onClose: () => vo
         <Field label="Display name">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        {u.auth_source === 'local' && (
-          <Field label="New password">
-            <input type="password" placeholder="(unchanged)" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Field label="Sign-in method">
+          <select value={local ? 'local' : 'sso'} onChange={(e) => setLocal(e.target.value === 'local')}>
+            <option value="local">Local password</option>
+            <option value="sso">Single sign-on only</option>
+          </select>
+        </Field>
+        {local && (
+          <Field label={wasLocal ? 'New password' : 'Password'}>
+            <input
+              type="password"
+              placeholder={wasLocal ? '(unchanged)' : 'Required to switch to local login'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </Field>
+        )}
+        {wasLocal && !local && (
+          <div className="help">
+            The password and any authenticator app on this account are removed. The
+            user then signs in through a configured identity provider, matched by
+            their e-mail address on first login.
+          </div>
         )}
         <label className="checkbox">
           <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />

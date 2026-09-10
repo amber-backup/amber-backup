@@ -21,7 +21,12 @@ type UpdatedAt = ColumnType<Date, Date | undefined, Date>;
 
 // Enums (kept as string unions; enforced in DB via CHECK constraints) --------
 
-export type AuthSource = 'local' | 'oidc' | 'entra';
+/**
+ * How an account authenticates. 'sso' is the generic value for accounts that
+ * sign in through an identity provider; 'oidc' and 'entra' predate it and mean
+ * the same thing (the SSO callback never recorded the provider).
+ */
+export type AuthSource = 'local' | 'oidc' | 'entra' | 'sso';
 export type ResourceType = 'target' | 'source' | 'job';
 export type AccessLevel = 'view' | 'operate' | 'manage';
 export type DeployMethod = 'binary' | 'docker';
@@ -514,6 +519,21 @@ export type WebauthnCredential = Selectable<WebauthnCredentialsTable>;
 export type NewWebauthnCredential = Insertable<WebauthnCredentialsTable>;
 export type WebauthnCredentialUpdate = Updateable<WebauthnCredentialsTable>;
 
+// --- sso_identities ---------------------------------------------------------
+
+/** The identity an SSO provider asserted for a user, bound by its subject id. */
+export interface SsoIdentitiesTable {
+  id: Generated<string>;
+  user_id: string;
+  /** Id of the provider entry in the SSO settings. */
+  provider_id: string;
+  /** Immutable subject claim (`sub`; GitHub's numeric user id). */
+  subject: string;
+  created_at: CreatedAt;
+  last_login_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+export type SsoIdentity = Selectable<SsoIdentitiesTable>;
+
 // --- audit_log --------------------------------------------------------------
 
 export type AuditOutcome = 'success' | 'failure';
@@ -570,5 +590,6 @@ export interface Database {
   notification_channels: NotificationChannelsTable;
   reports: ReportsTable;
   webauthn_credentials: WebauthnCredentialsTable;
+  sso_identities: SsoIdentitiesTable;
   audit_log: AuditLogTable;
 }

@@ -11,6 +11,19 @@ interface SsoProvider {
   label: string;
 }
 
+/** Which ways in this instance offers, from the public discovery endpoint. */
+interface LoginMethods {
+  localLogin: boolean;
+  providers: SsoProvider[];
+}
+
+/** Why a redirect back from an identity provider did not sign anyone in. */
+const SSO_MESSAGES: Record<string, string> = {
+  pending: 'Your account is waiting for an administrator to approve it.',
+  local_account:
+    'This account signs in with a password. An administrator has to switch it to SSO first.',
+};
+
 export function Login() {
   const { login, loginTotp, loginPasskey } = useAuth();
   const navigate = useNavigate();
@@ -19,15 +32,30 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<SsoProvider[]>([]);
+  const [localLogin, setLocalLogin] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
   const [step, setStep] = useState<'credentials' | 'totp'>('credentials');
   const [challengeToken, setChallengeToken] = useState('');
   const [code, setCode] = useState('');
 
   useEffect(() => {
     void api
-      .get<SsoProvider[]>('/auth/providers')
-      .then(setProviders)
+      .get<LoginMethods>('/auth/providers')
+      .then((m) => {
+        setProviders(m.providers);
+        setLocalLogin(m.localLogin);
+      })
       .catch(() => undefined);
+  }, []);
+
+  // The SSO callback redirects here with a reason when it could not sign the
+  // user in; the query sits before the hash route.
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get('sso');
+    if (!reason) return;
+    setNotice(SSO_MESSAGES[reason] ?? 'Single sign-on did not complete.');
+    const url = window.location.pathname + window.location.hash;
+    window.history.replaceState(null, '', url);
   }, []);
 
   const doLogin = async () => {
@@ -90,46 +118,58 @@ export function Login() {
         </div>
 
         {error && <div className="login-error">{error}</div>}
+        {notice && !error && <div className="login-notice">{notice}</div>}
 
         {step === 'credentials' ? (
           <>
-            <Field label="Email">
-              <input
-                type="email"
-                placeholder="admin@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </Field>
-            <Field label="Password">
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void doLogin();
-                }}
-              />
-            </Field>
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center', marginBottom: '15px' }}
-              disabled={busy}
-              onClick={() => void doLogin()}
-            >
-              Sign in
-            </button>
+            {localLogin && (
+              <>
+                <Field label="Email">
+                  <input
+                    type="email"
+                    placeholder="admin@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </Field>
+                <Field label="Password">
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void doLogin();
+                    }}
+                  />
+                </Field>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', marginBottom: '15px' }}
+                  disabled={busy}
+                  onClick={() => void doLogin()}
+                >
+                  Sign in
+                </button>
 
-            {passkeysSupported() && (
-              <button
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: 'center' }}
-                disabled={busy}
-                onClick={() => void doPasskey()}
-              >
-                Sign in with a passkey
-              </button>
+                {passkeysSupported() && (
+                  <button
+                    className="btn btn-ghost"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    disabled={busy}
+                    onClick={() => void doPasskey()}
+                  >
+                    Sign in with a passkey
+                  </button>
+                )}
+              </>
+            )}
+
+            {!localLogin && providers.length === 0 && (
+              <div className="help" style={{ textAlign: 'center' }}>
+                No sign-in method is available. An administrator has to enable
+                local login or configure single sign-on.
+              </div>
             )}
 
             {providers.length > 0 && (

@@ -21,6 +21,12 @@ export class UpdateAgentSettingsDto {
   offlineTimeoutSeconds!: number;
 }
 
+export class UpdateAuthSettingsDto {
+  @ApiProperty({ description: 'Accept password and passkey logins' })
+  @IsBoolean()
+  localLoginEnabled!: boolean;
+}
+
 export class SsoProviderDto {
   @ApiPropertyOptional({ description: 'Set when editing an existing provider' })
   @IsOptional()

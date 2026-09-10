@@ -4,10 +4,17 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { createHash, randomBytes } from 'crypto';
+import {
+  KeyObject,
+  constants as cryptoConstants,
+  createHash,
+  createPublicKey,
+  randomBytes,
+  verify as verifySignature,
+} from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { loadConfig } from '../config/configuration';
-import { AuthSource } from '../database/database.types';
+import { User } from '../database/database.types';
 import { AuthService } from './auth.service';
 import { UsersService } from './users.service';
 import {
@@ -17,10 +24,54 @@ import {
 } from '../settings/settings.service';
 
 interface OidcDiscovery {
+  issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
   userinfo_endpoint?: string;
   jwks_uri: string;
+}
+
+/** A JSON Web Key as published in a provider's JWKS. */
+interface Jwk {
+  kid?: string;
+  kty: string;
+  alg?: string;
+  use?: string;
+  [k: string]: unknown;
+}
+
+/** The identity a provider asserted about the person signing in. */
+interface SsoProfile {
+  /** Immutable identifier at the provider — the account is bound to this. */
+  subject: string;
+  email: string;
+  name: string;
+}
+
+/** id_token signature algorithms accepted, mapped to their digest. */
+const ID_TOKEN_ALGS: Record<string, string> = {
+  RS256: 'sha256',
+  RS384: 'sha384',
+  RS512: 'sha512',
+  PS256: 'sha256',
+  PS384: 'sha384',
+  PS512: 'sha512',
+  ES256: 'sha256',
+  ES384: 'sha384',
+  ES512: 'sha512',
+};
+
+/** Tolerance for clock drift between us and the provider, in seconds. */
+const CLOCK_SKEW = 60;
+
+/**
+ * Outcome of a callback. A `reason` means no session was issued: 'pending' is
+ * an account still awaiting admin approval, 'local_account' one that signs in
+ * with a password and must be switched to SSO by an admin first.
+ */
+export interface CallbackResult {
+  token: string;
+  reason: 'pending' | 'local_account' | null;
 }
 
 /** Default login-button labels per provider type. */
@@ -30,10 +81,6 @@ const DEFAULT_LABEL: Record<SsoProviderType, string> = {
   google: 'Google',
   github: 'GitHub',
 };
-
-/** Which AuthSource a provider maps to (only 'entra' is distinct). */
-const authSourceFor = (type: SsoProviderType): AuthSource =>
-  type === 'entra' ? 'entra' : 'oidc';
 
 /**
  * Multi-provider SSO. OIDC / Entra / Google use the OpenID Connect
@@ -45,6 +92,7 @@ const authSourceFor = (type: SsoProviderType): AuthSource =>
 export class SsoService {
   private readonly logger = new Logger(SsoService.name);
   private discoveryCache = new Map<string, OidcDiscovery>();
+  private jwksCache = new Map<string, Jwk[]>();
 
   constructor(
     private readonly users: UsersService,
@@ -117,9 +165,11 @@ export class SsoService {
     const verifier = randomBytes(32).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
     const state = randomBytes(16).toString('base64url');
+    // Binds the id_token to this authorization request; verified in the callback.
+    const nonce = randomBytes(16).toString('base64url');
 
     const stateCookie = await this.jwt.signAsync(
-      { providerId, state, verifier },
+      { providerId, state, verifier, nonce },
       { secret: loadConfig().jwtSecret, expiresIn: '10m' },
     );
 
@@ -143,6 +193,7 @@ export class SsoService {
       scope: 'openid email profile',
       redirect_uri: this.redirectUri(),
       state,
+      nonce,
       code_challenge: challenge,
       code_challenge_method: 'S256',
     });
@@ -157,9 +208,14 @@ export class SsoService {
     code: string,
     state: string,
     stateCookie: string | undefined,
-  ): Promise<{ token: string; userDisabled: boolean }> {
+  ): Promise<CallbackResult> {
     if (!stateCookie) throw new UnauthorizedException('Missing SSO state');
-    let parsed: { providerId: string; state: string; verifier: string };
+    let parsed: {
+      providerId: string;
+      state: string;
+      verifier: string;
+      nonce?: string;
+    };
     try {
       parsed = await this.jwt.verifyAsync(stateCookie, {
         secret: loadConfig().jwtSecret,
@@ -175,28 +231,60 @@ export class SsoService {
     const profile =
       provider.type === 'github'
         ? await this.githubProfile(provider, code)
-        : await this.oidcProfile(provider, code, parsed.verifier);
+        : await this.oidcProfile(provider, code, parsed.verifier, parsed.nonce);
 
+    if (!profile.subject) {
+      throw new UnauthorizedException('SSO response missing subject');
+    }
     if (!profile.email) {
       throw new UnauthorizedException('SSO response missing email');
     }
 
-    let user = await this.users.findByEmailRaw(profile.email);
-    if (!user) {
-      await this.users.create(
-        { email: profile.email, displayName: profile.name, password: '' },
-        authSourceFor(provider.type),
-      );
-      user = await this.users.findByEmailRaw(profile.email);
-    }
-    if (!user) throw new UnauthorizedException('Failed to provision user');
+    const user = await this.resolveUser(provider, profile);
+    if (user === 'local_account') return { token: '', reason: 'local_account' };
 
     if (user.disabled) {
       // Provisioned but not yet approved by an admin.
-      return { token: '', userDisabled: true };
+      return { token: '', reason: 'pending' };
     }
+    void this.users.touchSsoIdentity(provider.id, profile.subject);
     const result = await this.auth.issue(user.id, user.email, user.is_admin);
-    return { token: result.token, userDisabled: false };
+    return { token: result.token, reason: null };
+  }
+
+  /**
+   * Resolves the account behind an asserted identity.
+   *
+   * The provider's subject is the authority: once bound, that pair alone
+   * decides who signs in. An e-mail match only ever *creates* the binding, and
+   * never for a local account — otherwise any provider that claims an address
+   * could take over the password-protected account holding it.
+   */
+  private async resolveUser(
+    provider: ResolvedProvider,
+    profile: SsoProfile,
+  ): Promise<User | 'local_account'> {
+    const bound = await this.users.findBySsoIdentity(provider.id, profile.subject);
+    if (bound) {
+      // The account may have been switched back to local login since.
+      return bound.auth_source === 'local' ? 'local_account' : bound;
+    }
+
+    const byEmail = await this.users.findByEmailRaw(profile.email);
+    if (byEmail) {
+      if (byEmail.auth_source === 'local') return 'local_account';
+      await this.users.linkSsoIdentity(byEmail.id, provider.id, profile.subject);
+      return byEmail;
+    }
+
+    await this.users.create(
+      { email: profile.email, displayName: profile.name, password: '' },
+      'sso',
+    );
+    const created = await this.users.findByEmailRaw(profile.email);
+    if (!created) throw new UnauthorizedException('Failed to provision user');
+    await this.users.linkSsoIdentity(created.id, provider.id, profile.subject);
+    return created;
   }
 
   /** OIDC code exchange → id_token claims. */
@@ -204,7 +292,8 @@ export class SsoService {
     provider: ResolvedProvider,
     code: string,
     verifier: string,
-  ): Promise<{ email: string; name: string }> {
+    nonce: string | undefined,
+  ): Promise<SsoProfile> {
     const disco = await this.discover(this.issuerFor(provider));
     const tokenRes = await fetch(disco.token_endpoint, {
       method: 'POST',
@@ -223,17 +312,22 @@ export class SsoService {
       throw new UnauthorizedException('SSO token exchange failed');
     }
     const tokens = (await tokenRes.json()) as { id_token?: string };
-    const claims = this.decodeIdToken(tokens.id_token);
+    const claims = await this.verifyIdToken(
+      provider,
+      disco,
+      tokens.id_token,
+      nonce,
+    );
     const email = (claims.email ?? claims.preferred_username) as string;
     const name = (claims.name as string) ?? email;
-    return { email, name };
+    return { subject: String(claims.sub ?? ''), email, name };
   }
 
   /** GitHub OAuth2 code exchange → user profile (email may need a 2nd call). */
   private async githubProfile(
     provider: ResolvedProvider,
     code: string,
-  ): Promise<{ email: string; name: string }> {
+  ): Promise<SsoProfile> {
     const tokenRes = await fetch(
       'https://github.com/login/oauth/access_token',
       {
@@ -269,6 +363,7 @@ export class SsoService {
     });
     if (!userRes.ok) throw new UnauthorizedException('GitHub profile fetch failed');
     const gh = (await userRes.json()) as {
+      id?: number;
       email?: string | null;
       name?: string | null;
       login?: string;
@@ -291,13 +386,135 @@ export class SsoService {
           '';
       }
     }
-    return { email, name: gh.name || gh.login || email };
+    return {
+      // GitHub's numeric id is stable across renames, unlike the login.
+      subject: gh.id != null ? String(gh.id) : '',
+      email,
+      name: gh.name || gh.login || email,
+    };
   }
 
-  private decodeIdToken(idToken: string | undefined): Record<string, unknown> {
+  /**
+   * Verifies an id_token the way OIDC core §3.1.3.7 requires: the signature
+   * against the provider's published JWKS, then issuer, audience, expiry and
+   * the nonce from our own authorization request. The token arrives over TLS
+   * from the token endpoint, but that alone says nothing about who minted it.
+   */
+  private async verifyIdToken(
+    provider: ResolvedProvider,
+    disco: OidcDiscovery,
+    idToken: string | undefined,
+    nonce: string | undefined,
+  ): Promise<Record<string, unknown>> {
     if (!idToken) throw new UnauthorizedException('Missing id_token');
     const parts = idToken.split('.');
     if (parts.length !== 3) throw new UnauthorizedException('Malformed id_token');
-    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+
+    const header = parseSegment(parts[0]);
+    const alg = String(header.alg ?? '');
+    const digest = ID_TOKEN_ALGS[alg];
+    // 'none' and the HMAC family would let anyone who knows the client secret
+    // (or nobody at all) mint a token.
+    if (!digest) {
+      throw new UnauthorizedException(`Unsupported id_token algorithm: ${alg}`);
+    }
+
+    const signed = Buffer.from(`${parts[0]}.${parts[1]}`);
+    const signature = Buffer.from(parts[2], 'base64url');
+    const kid = typeof header.kid === 'string' ? header.kid : undefined;
+
+    // Signing keys rotate, so an unknown `kid` is worth one fresh fetch. A key
+    // we do know that simply fails to verify is a bad token, not a stale cache.
+    let keys = await this.jwks(disco.jwks_uri, false);
+    if (kid && !keys.some((k) => k.kid === kid)) {
+      keys = await this.jwks(disco.jwks_uri, true);
+    }
+    if (!verifyWithKeys(keys, kid, alg, digest, signed, signature)) {
+      throw new UnauthorizedException('id_token signature is not valid');
+    }
+
+    const claims = parseSegment(parts[1]);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (claims.iss !== disco.issuer) {
+      throw new UnauthorizedException('id_token issuer mismatch');
+    }
+    const aud = claims.aud;
+    const audienceOk = Array.isArray(aud)
+      ? aud.includes(provider.clientId)
+      : aud === provider.clientId;
+    if (!audienceOk) {
+      throw new UnauthorizedException('id_token audience mismatch');
+    }
+    if (typeof claims.exp !== 'number' || claims.exp + CLOCK_SKEW < now) {
+      throw new UnauthorizedException('id_token has expired');
+    }
+    if (typeof claims.nbf === 'number' && claims.nbf - CLOCK_SKEW > now) {
+      throw new UnauthorizedException('id_token is not valid yet');
+    }
+    // Older sessions started before nonces were sent carry none; only compare
+    // when we actually asked for one.
+    if (nonce && claims.nonce !== nonce) {
+      throw new UnauthorizedException('id_token nonce mismatch');
+    }
+    return claims;
+  }
+
+  private async jwks(uri: string, refresh: boolean): Promise<Jwk[]> {
+    if (!refresh) {
+      const cached = this.jwksCache.get(uri);
+      if (cached) return cached;
+    }
+    const res = await fetch(uri);
+    if (!res.ok) {
+      throw new UnauthorizedException('Could not fetch the provider signing keys');
+    }
+    const body = (await res.json()) as { keys?: Jwk[] };
+    const keys = body.keys ?? [];
+    this.jwksCache.set(uri, keys);
+    return keys;
+  }
+}
+
+/** True as soon as one candidate key verifies the signature. */
+function verifyWithKeys(
+  keys: Jwk[],
+  kid: string | undefined,
+  alg: string,
+  digest: string,
+  signed: Buffer,
+  signature: Buffer,
+): boolean {
+  const named = kid ? keys.filter((k) => k.kid === kid) : [];
+  for (const jwk of named.length ? named : keys) {
+    let key: KeyObject;
+    try {
+      key = createPublicKey({ key: jwk as never, format: 'jwk' });
+    } catch {
+      continue;
+    }
+    const options = alg.startsWith('PS')
+      ? {
+          key,
+          padding: cryptoConstants.RSA_PKCS1_PSS_PADDING,
+          saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST,
+        }
+      : alg.startsWith('ES')
+        ? { key, dsaEncoding: 'ieee-p1363' as const }
+        : { key };
+    try {
+      if (verifySignature(digest, signed, options, signature)) return true;
+    } catch {
+      /* wrong key type for this algorithm — try the next one */
+    }
+  }
+  return false;
+}
+
+function parseSegment(segment: string): Record<string, unknown> {
+  try {
+    return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
+  } catch {
+    throw new UnauthorizedException('Malformed id_token');
   }
 }

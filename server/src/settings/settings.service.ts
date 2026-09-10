@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Db, KYSELY } from '../database/database.module';
 import { CryptoService, EncryptedPayload } from '../crypto/crypto.service';
@@ -13,6 +13,7 @@ import { loadConfig } from '../config/configuration';
 export const SETTINGS_KEYS = {
   agentOfflineTimeout: 'agent_offline_timeout',
   sso: 'sso',
+  localLogin: 'local_login',
 } as const;
 
 const DEFAULT_OFFLINE_SECONDS = 120;
@@ -88,6 +89,8 @@ export interface SsoProviderView {
 /** Admin-facing view (secrets never leave the server — only a "set" flag). */
 export interface SystemSettingsView {
   agentOfflineTimeoutSeconds: number;
+  /** Whether password and passkey logins are accepted at all. */
+  localLoginEnabled: boolean;
   sso: {
     enabled: boolean;
     providers: SsoProviderView[];
@@ -139,6 +142,34 @@ export class SettingsService {
     await this.write(SETTINGS_KEYS.agentOfflineTimeout, { seconds });
   }
 
+  // --- Local login ----------------------------------------------------------
+
+  /** Password and passkey logins are accepted unless an admin turned them off. */
+  async getLocalLoginEnabled(): Promise<boolean> {
+    const v = await this.read<{ enabled: boolean }>(SETTINGS_KEYS.localLogin);
+    return v?.enabled ?? true;
+  }
+
+  /**
+   * Turning local login off leaves SSO as the only way in, so it is refused
+   * unless SSO can actually serve a login — otherwise the next request would
+   * lock every admin out with no way back short of a database edit.
+   */
+  async setLocalLoginEnabled(enabled: boolean): Promise<void> {
+    if (!enabled && !(await this.hasUsableSso())) {
+      throw new BadRequestException(
+        'Enable SSO with at least one fully configured provider before disabling local login',
+      );
+    }
+    await this.write(SETTINGS_KEYS.localLogin, { enabled });
+  }
+
+  /** True when SSO is enabled and at least one provider is complete. */
+  async hasUsableSso(): Promise<boolean> {
+    const sso = await this.readSso();
+    return sso.enabled && sso.providers.some(isProviderConfigured);
+  }
+
   // --- SSO ------------------------------------------------------------------
 
   private async readSso(): Promise<StoredSso> {
@@ -185,22 +216,35 @@ export class SettingsService {
             };
           });
 
-    await this.write(SETTINGS_KEYS.sso, {
+    const next: StoredSso = {
       enabled: update.enabled ?? cur.enabled,
       providers,
-    } satisfies StoredSso);
+    };
+    // Same lockout guard from the other side: SSO must stay usable while it is
+    // the only way in.
+    if (
+      !(next.enabled && next.providers.some(isProviderConfigured)) &&
+      !(await this.getLocalLoginEnabled())
+    ) {
+      throw new BadRequestException(
+        'Local login is disabled, so SSO must keep at least one fully configured provider',
+      );
+    }
+    await this.write(SETTINGS_KEYS.sso, next);
   }
 
   // --- Admin view -----------------------------------------------------------
 
   async getSystemView(): Promise<SystemSettingsView> {
-    const [timeout, sso] = await Promise.all([
+    const [timeout, sso, localLogin] = await Promise.all([
       this.getAgentOfflineTimeout(),
       this.readSso(),
+      this.getLocalLoginEnabled(),
     ]);
     const base = loadConfig().publicBaseUrl.replace(/\/$/, '');
     return {
       agentOfflineTimeoutSeconds: timeout,
+      localLoginEnabled: localLogin,
       sso: {
         enabled: sso.enabled,
         providers: sso.providers.map((p) => ({
@@ -256,6 +300,17 @@ function normalizeStored(raw: unknown): StoredSso {
     !!(obj.oidc as { enabled?: boolean } | undefined)?.enabled ||
     !!(obj.entra as { enabled?: boolean } | undefined)?.enabled;
   return { enabled: anyEnabled, providers };
+}
+
+/**
+ * A provider can serve a login once it has credentials and the field its kind
+ * needs to resolve an issuer.
+ */
+function isProviderConfigured(p: StoredProvider): boolean {
+  if (!p.clientId || !p.secret) return false;
+  if (p.type === 'oidc') return !!p.issuerUrl;
+  if (p.type === 'entra') return !!p.tenantId;
+  return true;
 }
 
 function coerceProvider(raw: unknown): StoredProvider | null {
