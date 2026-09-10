@@ -45,6 +45,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   const [agents, setAgents] = useState(agents0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [pageLoading, setPageLoading] = useState(false);
+  // Prunes are noise next to the backups they follow, so they stay hidden
+  // until asked for.
+  const [showPrunes, setShowPrunes] = useState(false);
 
   const seenRef = useRef<Set<string>>(new Set());
   const offsetRef = useRef(0);
@@ -52,24 +55,48 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   const doneRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // Bumped when the filter changes so a page still in flight for the previous
+  // filter is discarded instead of mixed into the list.
+  const genRef = useRef(0);
+  // The poll timer is installed once, so it reads the filter through a ref.
+  const showPrunesRef = useRef(showPrunes);
+  showPrunesRef.current = showPrunes;
 
   const loadMore = useCallback(async (): Promise<void> => {
     if (loadingRef.current || doneRef.current) return;
     loadingRef.current = true;
     setPageLoading(true);
+    const gen = genRef.current;
     try {
-      const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}`);
+      const kind = showPrunes ? '' : '&kind=backup';
+      const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}`);
+      if (gen !== genRef.current) return;
       const fresh = page.filter((r) => !seenRef.current.has(r.id));
       fresh.forEach((r) => seenRef.current.add(r.id));
       offsetRef.current += page.length;
       if (page.length < RUNS_PAGE) doneRef.current = true;
       if (fresh.length) setRuns((cur) => [...cur, ...fresh]);
     } catch {
-      doneRef.current = true;
+      if (gen === genRef.current) doneRef.current = true;
     } finally {
-      loadingRef.current = false;
-      setPageLoading(false);
+      if (gen === genRef.current) {
+        loadingRef.current = false;
+        setPageLoading(false);
+      }
     }
+  }, [showPrunes]);
+
+  // Toggling the filter starts the list over: the offset and the seen-ids set
+  // belong to the previous query. The load effect re-runs on the new filter.
+  const toggleShowPrunes = useCallback((next: boolean): void => {
+    genRef.current += 1;
+    seenRef.current = new Set();
+    offsetRef.current = 0;
+    loadingRef.current = false;
+    doneRef.current = false;
+    setRuns([]);
+    setPageLoading(false);
+    setShowPrunes(next);
   }, []);
 
   // Keep pulling pages until the scroller is filled (first page may be short).
@@ -117,9 +144,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       ]);
       if (ag) setAgents(ag);
       setDash(d);
+      // `recent` covers every activity, so drop the prunes while they're hidden.
+      const recent = showPrunesRef.current ? d.recent : d.recent.filter((r) => r.kind !== 'prune');
       setRuns((cur) => {
-        const updated = cur.map((r) => d.recent.find((x) => x.id === r.id) ?? r);
-        const fresh = d.recent.filter((r) => !seenRef.current.has(r.id));
+        const updated = cur.map((r) => recent.find((x) => x.id === r.id) ?? r);
+        const fresh = recent.filter((r) => !seenRef.current.has(r.id));
         fresh.forEach((r) => seenRef.current.add(r.id));
         return fresh.length ? [...fresh, ...updated] : updated;
       });
@@ -156,9 +185,19 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
           <div className="panel fill-col">
             <div className="panel-head">
               <h2>Recent activities</h2>
-              <span className="link" onClick={() => navigate('/jobs')}>
-                All jobs →
-              </span>
+              <div className="panel-head-actions">
+                <label className="checkbox sm">
+                  <input
+                    type="checkbox"
+                    checked={showPrunes}
+                    onChange={(e) => toggleShowPrunes(e.target.checked)}
+                  />
+                  Show prunes
+                </label>
+                <span className="link" onClick={() => navigate('/jobs')}>
+                  All jobs →
+                </span>
+              </div>
             </div>
             <div className="panel-scroll" ref={scrollRef}>
               <div>
@@ -211,7 +250,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
 /** Repository storage growth over a selectable window. */
 function StoragePanel() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(7);
   const { data, loading, error } = useAsync(
     () => api.get<RepositoryStatsHistory>(`/repositories/stats-history?days=${days}`),
     [days],
