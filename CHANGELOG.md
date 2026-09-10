@@ -1,3 +1,16 @@
+# [1.23.0](https://github.com/amber-backup/amber-backup/compare/v1.22.0...v1.23.0) (2026-09-10)
+
+
+### Bug Fixes
+
+* **client:** make the mobile layout fit the viewport ([b7750a3](https://github.com/amber-backup/amber-backup/commit/b7750a3c25e214ec43cb3bed9b2d1d2f7ed11d8f))
+
+
+### Features
+
+* **auth:** convert accounts to SSO and switch local login off ([690c05b](https://github.com/amber-backup/amber-backup/commit/690c05b1078c5525f390f51bb4a76c0531732b65))
+* **dashboard:** filter prunes out of the activity list ([a90d719](https://github.com/amber-backup/amber-backup/commit/a90d719f3c1b666280f9c0a42bc6b19654a6725a))
+
 # [1.22.0](https://github.com/amber-backup/amber-backup/compare/v1.21.1...v1.22.0) (2026-09-09)
 
 
