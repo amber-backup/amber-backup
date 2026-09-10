@@ -83,11 +83,11 @@ export function Agents() {
           <h2>Server fleet</h2>
         </div>
         {agents.length > 0 && (
-          <div className="table-head" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr 40px' }}>
+          <div className="table-head agents-grid">
             <span>Host</span>
-            <span>Agent</span>
+            <span className="agents-hide-mobile">Agent</span>
             <span>Last contact</span>
-            <span>Restic</span>
+            <span className="agents-hide-mobile">Restic</span>
             <span />
           </div>
         )}
@@ -106,7 +106,7 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
   const { confirmDialog } = useModal();
 
   return (
-    <div className="row" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1fr 40px', gap: 14 }}>
+    <div className="row agents-grid">
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
         <span className={`status-dot ${a.status}`} />
         <div style={{ minWidth: 0 }}>
@@ -114,13 +114,13 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
           <div className="row-sub">{`${a.hostname ?? '?'} · ${a.os ?? ''}`}</div>
         </div>
       </div>
-      <div className="mono" style={{ fontSize: 12.5, color: 'var(--text-2)' }}>
+      <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-2)' }}>
         {a.agent_version ? `v${a.agent_version}` : <span className="badge info">installing…</span>}
       </div>
       <div style={{ fontSize: 12.5, color: `var(--${a.status === 'offline' ? 'danger' : 'text-2'})` }}>
         {a.last_seen_at ? fmtRelative(a.last_seen_at) : 'never'}
       </div>
-      <div className="mono" style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
+      <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
         {a.restic_version ?? '—'}
       </div>
       <button

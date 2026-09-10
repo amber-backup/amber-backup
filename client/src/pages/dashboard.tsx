@@ -336,14 +336,11 @@ function RunRow({ run: r }: { run: Run }) {
     );
   } else if (r.status === 'running') {
     meta = (
-      <div style={{ width: 130 }}>
+      <div className="row-meta run-progress">
         <div className="progress-track">
           <div className="fill" style={{ width: `${pct}%` }} />
         </div>
-        <div
-          className="muted"
-          style={{ fontSize: 11, marginTop: 4, display: 'flex', justifyContent: 'space-between', gap: 8 }}
-        >
+        <div className="run-progress-labels">
           <span>{totalBytes != null ? `${fmtBytes(bytesDone ?? 0)} / ${fmtBytes(totalBytes)}` : ''}</span>
           <span>{pct}%</span>
         </div>
