@@ -1,3 +1,10 @@
+## [1.24.2](https://github.com/amber-backup/amber-backup/compare/v1.24.1...v1.24.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **dashboard:** align the progress figures with the bar, not the x ([684d3c7](https://github.com/amber-backup/amber-backup/commit/684d3c7a8a5a9f08d71f2fe57dc3902c1a3d134b))
+
 ## [1.24.1](https://github.com/amber-backup/amber-backup/compare/v1.24.0...v1.24.1) (2026-09-12)
 
 
