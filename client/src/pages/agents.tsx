@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, type Agent } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
@@ -49,12 +49,33 @@ function intro(method: string): string {
     : 'Run on the target server:';
 }
 
+/** A new agent enrolls from its own host, so the list is polled to show it (and live status). */
+const REFRESH_MS = 5000;
+
 export function Agents() {
   const { data, loading, reload } = useAsync(() => api.get<Agent[]>('/agents'));
   const { open } = useModal();
+  // Quiet background refresh; `reload()` would flash the loading screen each time.
+  const [live, setLive] = useState<Agent[] | null>(null);
+
+  // A fresh load (e.g. after removing an agent) supersedes the last poll.
+  useEffect(() => setLive(null), [data]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      api
+        .get<Agent[]>('/agents')
+        .then(setLive)
+        .catch(() => {
+          /* transient error — try again on the next tick */
+        });
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   if (loading || !data) return <Loading label="Loading…" />;
-  const agents = data;
+  const agents = live ?? data;
   const online = agents.filter((a) => a.status === 'online').length;
 
   const openEnroll = async (): Promise<void> => {
