@@ -449,11 +449,9 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   } else if (r.status === 'running') {
     meta = (
       <div className="row-meta run-progress">
-        <div className="run-progress-bar">
-          {cancelButton}
-          <div className="progress-track">
-            <div className="fill" style={{ width: `${pct}%` }} />
-          </div>
+        {cancelButton}
+        <div className="progress-track">
+          <div className="fill" style={{ width: `${pct}%` }} />
         </div>
         <div className="run-progress-labels">
           <span>{totalBytes != null ? `${fmtBytes(bytesDone ?? 0)} / ${fmtBytes(totalBytes)}` : ''}</span>

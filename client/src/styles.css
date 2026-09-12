@@ -759,15 +759,19 @@ input, select, textarea {
     color: var(--text-3);
 }
 
-/* Bare cancel icon on the progress bar's line (or before the status badge). */
-.run-progress-bar {
-    display: flex;
+/* Bare cancel icon on the progress bar's line (or before the status badge).
+   In a running row the x gets a column of its own, so the bar and the
+   figures below it start at the same edge. */
+.run-progress {
+    display: grid;
+    grid-template-columns: auto 1fr;
     align-items: center;
-    gap: 6px;
+    column-gap: 6px;
 }
 
-.run-progress-bar .progress-track {
-    flex: 1;
+.run-progress .progress-track,
+.run-progress .run-progress-labels {
+    grid-column: 2;
 }
 
 .run-cancel {
@@ -783,7 +787,8 @@ input, select, textarea {
     vertical-align: middle;
 }
 
-.run-progress-bar .run-cancel {
+.run-progress .run-cancel {
+    grid-row: 1;
     margin-right: 0;
 }
 
