@@ -364,12 +364,44 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
   const duration = fmtDuration(runDurationMs(r));
 
+  // Queued and running activities can be stopped; a hung one is force-cancelled
+  // server-side so it stops sitting in the list forever.
+  const cancellable = r.status === 'queued' || r.status === 'running';
+
+  const cancel = async () => {
+    setCancelling(true);
+    try {
+      await api.post(`/runs/${r.id}/cancel`);
+      toast('Activity cancelled', 'success');
+      onCancelled();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not cancel the activity', 'error');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const cancelButton = cancellable && (
+    <button
+      className="run-cancel"
+      title="Cancel this activity"
+      aria-label="Cancel this activity"
+      disabled={cancelling}
+      onClick={() => void cancel()}
+    >
+      <Icon name="x" size={12} />
+    </button>
+  );
+
   let meta: React.ReactNode;
   if (r.kind === 'prune') {
     // A prune has no progress or snapshot: outcome, duration and time.
     meta = (
       <div className="row-meta run-meta">
-        <span>{r.status !== 'success' && <StatusBadge status={r.status} />}</span>
+        <span>
+          {cancelButton}
+          {r.status !== 'success' && <StatusBadge status={r.status} />}
+        </span>
         <span className="muted" title="Duration">
           {r.started_at ? duration : ''}
         </span>
@@ -379,8 +411,11 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   } else if (r.status === 'running') {
     meta = (
       <div className="row-meta run-progress">
-        <div className="progress-track">
-          <div className="fill" style={{ width: `${pct}%` }} />
+        <div className="run-progress-bar">
+          {cancelButton}
+          <div className="progress-track">
+            <div className="fill" style={{ width: `${pct}%` }} />
+          </div>
         </div>
         <div className="run-progress-labels">
           <span>{totalBytes != null ? `${fmtBytes(bytesDone ?? 0)} / ${fmtBytes(totalBytes)}` : ''}</span>
@@ -402,6 +437,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
     meta = (
       <div className="row-meta run-meta">
         <span>
+          {cancelButton}
           <StatusBadge status={r.status} />
         </span>
         <span className="muted" title="Duration">
@@ -427,23 +463,6 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
             ? r.snapshot_id.slice(0, 12)
             : statusLabel(r.status);
 
-  // Queued and running activities can be stopped; a hung one is force-cancelled
-  // server-side so it stops sitting in the list forever.
-  const cancellable = r.status === 'queued' || r.status === 'running';
-
-  const cancel = async () => {
-    setCancelling(true);
-    try {
-      await api.post(`/runs/${r.id}/cancel`);
-      toast('Activity cancelled', 'success');
-      onCancelled();
-    } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not cancel the activity', 'error');
-    } finally {
-      setCancelling(false);
-    }
-  };
-
   return (
     <div className="row compact" data-run-id={r.id}>
       <span className={`status-dot ${r.status}`} />
@@ -458,23 +477,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
         </div>
         <div className="row-sub">{sub}</div>
       </div>
-      <div className="run-tail">
-        {cancellable ? (
-          <button
-            className="btn btn-ghost btn-icon run-cancel"
-            title="Cancel this activity"
-            aria-label="Cancel this activity"
-            disabled={cancelling}
-            onClick={() => void cancel()}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        ) : (
-          // Keeps the figures in the same column as the rows that do have a button.
-          <span className="run-cancel-slot" aria-hidden="true" />
-        )}
-        {meta}
-      </div>
+      {meta}
     </div>
   );
 }

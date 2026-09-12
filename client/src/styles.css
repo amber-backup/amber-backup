@@ -759,28 +759,41 @@ input, select, textarea {
     color: var(--text-3);
 }
 
-/* Cancel button and the activity figures sit side by side; a same-width
-   placeholder on finished rows keeps the figures in one column. */
-.run-tail {
+/* Bare cancel icon on the progress bar's line (or before the status badge). */
+.run-progress-bar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
+    gap: 6px;
+}
+
+.run-progress-bar .progress-track {
+    flex: 1;
 }
 
 .run-cancel {
-    padding: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-right: 4px;
+    background: none;
+    border: none;
     color: var(--text-3);
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.run-progress-bar .run-cancel {
+    margin-right: 0;
 }
 
 .run-cancel:hover:not(:disabled) {
-    background: var(--danger-bg);
-    border-color: transparent;
     color: var(--danger);
 }
 
-.run-cancel-slot {
-    width: 27px;
+.run-cancel:disabled {
+    opacity: 0.4;
+    cursor: default;
 }
 
 .row:hover {
@@ -1646,15 +1659,6 @@ input[type="checkbox"]:disabled {
     .row-meta {
         text-align: left;
         margin-right: auto;
-    }
-
-    .run-tail {
-        margin-right: auto;
-    }
-
-    /* No column alignment to preserve down here — drop the placeholder. */
-    .run-cancel-slot {
-        display: none;
     }
 
     /* On their own line the activity figures no longer need to line up as
