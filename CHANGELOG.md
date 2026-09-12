@@ -1,3 +1,11 @@
+# [1.24.0](https://github.com/amber-backup/amber-backup/compare/v1.23.0...v1.24.0) (2026-09-12)
+
+
+### Features
+
+* **dashboard:** show average daily growth in the storage summary ([54e910f](https://github.com/amber-backup/amber-backup/commit/54e910f10c4fde42ea10e292b77299fe7058ce6f))
+* **runs:** cancel activities from the recent activity list ([57a3ee2](https://github.com/amber-backup/amber-backup/commit/57a3ee2290bac760fd1344b60beafbc4777990e9))
+
 # [1.23.0](https://github.com/amber-backup/amber-backup/compare/v1.22.0...v1.23.0) (2026-09-10)
 
 
