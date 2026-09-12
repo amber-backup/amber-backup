@@ -62,6 +62,12 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   // The poll timer is installed once, so it reads the filter through a ref.
   const showPrunesRef = useRef(showPrunes);
   showPrunesRef.current = showPrunes;
+  // Same for the rows, so a poll can see which ones still need a live status.
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  // Runs cancelled from this page. A local abort settles its row a moment
+  // later, so until the server agrees, a stale `running` must not win.
+  const cancelledRef = useRef<Set<string>>(new Set());
 
   const loadMore = useCallback(async (): Promise<void> => {
     if (loadingRef.current || doneRef.current) return;
@@ -147,8 +153,31 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       setDash(d);
       // `recent` covers every activity, so drop the prunes while they're hidden.
       const recent = showPrunesRef.current ? d.recent : d.recent.filter((r) => r.kind !== 'prune');
+      // `recent` is only the newest few, so an older row that is still queued or
+      // running (typically a hung one) is fetched on its own to stay current.
+      const stale = runsRef.current.filter(
+        (r) => isActive(r.status) && !recent.some((x) => x.id === r.id),
+      );
+      const refetched = await Promise.all(
+        stale.map((r) =>
+          api
+            .get<Run & { log?: unknown }>(`/runs/${r.id}`)
+            .then(({ log: _log, ...fresh }) => ({ ...r, ...fresh }))
+            .catch(() => null),
+        ),
+      );
+      const latest = [...recent, ...refetched.filter((r): r is Run => r !== null)];
+      const merge = (r: Run): Run => {
+        const fresh = latest.find((x) => x.id === r.id);
+        if (!fresh) return r;
+        if (cancelledRef.current.has(r.id)) {
+          if (isActive(fresh.status)) return r;
+          cancelledRef.current.delete(r.id);
+        }
+        return fresh;
+      };
       setRuns((cur) => {
-        const updated = cur.map((r) => recent.find((x) => x.id === r.id) ?? r);
+        const updated = cur.map(merge);
         const fresh = recent.filter((r) => !seenRef.current.has(r.id));
         fresh.forEach((r) => seenRef.current.add(r.id));
         return fresh.length ? [...fresh, ...updated] : updated;
@@ -157,6 +186,15 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       /* transient error — try again on the next tick */
     }
   }, []);
+
+  const markCancelled = (id: string) => {
+    cancelledRef.current.add(id);
+    const now = new Date().toISOString();
+    setRuns((cur) =>
+      cur.map((r) => (r.id === id ? { ...r, status: 'cancelled', finished_at: r.finished_at ?? now } : r)),
+    );
+    void poll();
+  };
 
   const nextJobs = jobs
     .filter((j) => j.enabled && j.next_run)
@@ -203,7 +241,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
             <div className="panel-scroll" ref={scrollRef}>
               <div>
                 {runs.map((r) => (
-                  <RunRow key={r.id} run={r} onCancelled={() => void poll()} />
+                  <RunRow key={r.id} run={r} onCancelled={() => markCancelled(r.id)} />
                 ))}
                 {pageLoading && (
                   <div className="loading" style={{ padding: 16 }}>
@@ -366,7 +404,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
 
   // Queued and running activities can be stopped; a hung one is force-cancelled
   // server-side so it stops sitting in the list forever.
-  const cancellable = r.status === 'queued' || r.status === 'running';
+  const cancellable = isActive(r.status);
 
   const cancel = async () => {
     setCancelling(true);
@@ -480,6 +518,10 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       {meta}
     </div>
   );
+}
+
+function isActive(status: string): boolean {
+  return status === 'queued' || status === 'running';
 }
 
 function StatusBadge({ status }: { status: string }) {
