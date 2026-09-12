@@ -1,3 +1,12 @@
+## [1.24.1](https://github.com/amber-backup/amber-backup/compare/v1.24.0...v1.24.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **agents:** show newly enrolled agents without a reload ([d758d12](https://github.com/amber-backup/amber-backup/commit/d758d12115af74acef6ff31d7ff36d84b7baf278))
+* **dashboard:** make the cancel icon a small inline control ([13d9272](https://github.com/amber-backup/amber-backup/commit/13d9272501fde89d658631a71baeb97e42d2425f))
+* **dashboard:** refresh an activity's status right after cancelling it ([f2e0f53](https://github.com/amber-backup/amber-backup/commit/f2e0f5344ba7887e67ad9e0ddf8b0d90234c96f8))
+
 # [1.24.0](https://github.com/amber-backup/amber-backup/compare/v1.23.0...v1.24.0) (2026-09-12)
 
 
