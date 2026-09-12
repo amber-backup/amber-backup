@@ -191,20 +191,33 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
   );
 }
 
-/** Headline for the chart's panel: current total and the change over the window. */
+/** Byte delta with an explicit sign, e.g. "+1.2 GB". */
+function fmtDelta(bytes: number): string {
+  return `${bytes >= 0 ? '+' : '\u2212'}${fmtBytes(Math.round(Math.abs(bytes)))}`;
+}
+
+/** Below this much measured history an average per-day rate is too noisy to show. */
+const MIN_RATE_DAYS = 1;
+
+/**
+ * Headline for the chart's panel: current total, the change over the window and
+ * the average growth per day.
+ */
 export function StorageSummary({ history }: { history: RepositoryStatsHistory }) {
   const series = totalStorageSeries(history, Date.now());
   if (series.length === 0) return null;
-  const first = series[0].bytes;
-  const last = series[series.length - 1].bytes;
-  const delta = last - first;
+  const first = series[0];
+  const last = series[series.length - 1];
+  const delta = last.bytes - first.bytes;
+  // Averaged over the span that actually has readings, not the requested
+  // window: a few days of history inside a 90d window would dilute the rate.
+  const days = (last.t - first.t) / 86_400_000;
+  const perDay = days >= MIN_RATE_DAYS ? delta / days : null;
   return (
     <span className="chart-summary">
-      <strong>{fmtBytes(last)}</strong>
-      <span className="muted">
-        {delta >= 0 ? '+' : '−'}
-        {fmtBytes(Math.abs(delta))} in this window
-      </span>
+      <strong>{fmtBytes(last.bytes)}</strong>
+      <span className="muted">{fmtDelta(delta)} in this window</span>
+      {perDay !== null && <span className="muted">{fmtDelta(perDay)}/day avg</span>}
     </span>
   );
 }

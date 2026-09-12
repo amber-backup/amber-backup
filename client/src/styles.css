@@ -674,8 +674,12 @@ input, select, textarea {
 
 .chart-summary {
     display: inline-flex;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 2px 8px;
     font-size: 12px;
+}
+
+.chart-summary > span {
     white-space: nowrap;
 }
 
