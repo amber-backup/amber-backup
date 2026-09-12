@@ -75,6 +75,47 @@ describe('PruneRunnerService', () => {
     });
   });
 
+  describe('cancel', () => {
+    it('reports nothing to cancel for a prune that is not running here', () => {
+      const { service } = make();
+
+      expect(service.cancel('p1')).toBe(false);
+    });
+
+    it('aborts the restic process and marks the prune cancelled', async () => {
+      let abortSignal: AbortSignal | undefined;
+      const prune = jest.fn(
+        (_ctx: ResticContext, hooks: { signal?: AbortSignal }) =>
+          new Promise<void>((_resolve, reject) => {
+            abortSignal = hooks.signal;
+            hooks.signal?.addEventListener('abort', () =>
+              reject(new Error('restic prune exited 1')),
+            );
+          }),
+      );
+      const { service, update } = make(prune);
+
+      const id = await service.start(base);
+      // `start` returns before the prune finishes, so the abort hits a live run.
+      await Promise.resolve();
+      expect(service.cancel(id)).toBe(true);
+      expect(abortSignal?.aborted).toBe(true);
+      await new Promise((r) => setImmediate(r));
+
+      expect(update.set).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'cancelled', finished_at: expect.any(Date) }),
+      );
+    });
+
+    it('forgets the prune once it has finished', async () => {
+      const { service } = make();
+
+      const id = await service.run(base);
+
+      expect(service.cancel(id)).toBe(false);
+    });
+  });
+
   describe('record', () => {
     it('stores an agent-side prune as a finished activity and refreshes the repository', async () => {
       const { service, insert, repositories } = make();

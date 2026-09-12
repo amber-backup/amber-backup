@@ -339,11 +339,12 @@ export class ResticService {
    */
   async prune(
     ctx: ResticContext,
-    hooks: { onLog?: LogCallback } = {},
+    hooks: { onLog?: LogCallback; signal?: AbortSignal } = {},
   ): Promise<void> {
     const res = await this.run(ctx, ['prune'], {
       onStdoutLine: (line) => hooks.onLog?.(line),
       onStderrLine: (line) => hooks.onLog?.(line),
+      signal: hooks.signal,
     });
     if (res.code !== 0) {
       throw new Error(res.stderr.trim() || `restic prune exited ${res.code}`);

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
+import { api, ApiError, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative, runDurationMs, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
+import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
 
 interface DashboardData {
@@ -202,7 +203,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
             <div className="panel-scroll" ref={scrollRef}>
               <div>
                 {runs.map((r) => (
-                  <RunRow key={r.id} run={r} />
+                  <RunRow key={r.id} run={r} onCancelled={() => void poll()} />
                 ))}
                 {pageLoading && (
                   <div className="loading" style={{ padding: 16 }}>
@@ -345,7 +346,9 @@ function StatCard({
   );
 }
 
-function RunRow({ run: r }: { run: Run }) {
+function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) {
+  const toast = useToast();
+  const [cancelling, setCancelling] = useState(false);
   const bytes = (r.stats?.dataAdded as number) ?? null;
 
   const bytesDone = r.stats?.bytesDone as number | undefined;
@@ -424,6 +427,23 @@ function RunRow({ run: r }: { run: Run }) {
             ? r.snapshot_id.slice(0, 12)
             : statusLabel(r.status);
 
+  // Queued and running activities can be stopped; a hung one is force-cancelled
+  // server-side so it stops sitting in the list forever.
+  const cancellable = r.status === 'queued' || r.status === 'running';
+
+  const cancel = async () => {
+    setCancelling(true);
+    try {
+      await api.post(`/runs/${r.id}/cancel`);
+      toast('Activity cancelled', 'success');
+      onCancelled();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not cancel the activity', 'error');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <div className="row compact" data-run-id={r.id}>
       <span className={`status-dot ${r.status}`} />
@@ -438,7 +458,23 @@ function RunRow({ run: r }: { run: Run }) {
         </div>
         <div className="row-sub">{sub}</div>
       </div>
-      {meta}
+      <div className="run-tail">
+        {cancellable ? (
+          <button
+            className="btn btn-ghost btn-icon run-cancel"
+            title="Cancel this activity"
+            aria-label="Cancel this activity"
+            disabled={cancelling}
+            onClick={() => void cancel()}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        ) : (
+          // Keeps the figures in the same column as the rows that do have a button.
+          <span className="run-cancel-slot" aria-hidden="true" />
+        )}
+        {meta}
+      </div>
     </div>
   );
 }

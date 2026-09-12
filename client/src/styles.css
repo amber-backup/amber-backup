@@ -759,6 +759,30 @@ input, select, textarea {
     color: var(--text-3);
 }
 
+/* Cancel button and the activity figures sit side by side; a same-width
+   placeholder on finished rows keeps the figures in one column. */
+.run-tail {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.run-cancel {
+    padding: 5px;
+    color: var(--text-3);
+}
+
+.run-cancel:hover:not(:disabled) {
+    background: var(--danger-bg);
+    border-color: transparent;
+    color: var(--danger);
+}
+
+.run-cancel-slot {
+    width: 27px;
+}
+
 .row:hover {
     background: var(--bg-2);
 }
@@ -1622,6 +1646,15 @@ input[type="checkbox"]:disabled {
     .row-meta {
         text-align: left;
         margin-right: auto;
+    }
+
+    .run-tail {
+        margin-right: auto;
+    }
+
+    /* No column alignment to preserve down here — drop the placeholder. */
+    .run-cancel-slot {
+        display: none;
     }
 
     /* On their own line the activity figures no longer need to line up as

@@ -621,6 +621,8 @@ echo "Amber agent installed and started."
       .set({ stats: JSON.stringify(stats) })
       .where('id', '=', taskId)
       .where('agent_id', '=', agentId)
+      // A run cancelled on the server stays cancelled — don't revive it.
+      .where('status', '=', 'running')
       .execute();
   }
 
@@ -657,6 +659,9 @@ echo "Amber agent installed and started."
         log: dto.log ?? null,
       })
       .where('id', '=', taskId)
+      // The operator may have cancelled this run while the agent worked on it;
+      // that decision wins over a late result.
+      .where('status', '=', 'running')
       .execute();
 
     // The repository just changed size — refresh its cached figures.
@@ -696,6 +701,7 @@ echo "Amber agent installed and started."
       .set({ stats: JSON.stringify(stats) })
       .where('id', '=', taskId)
       .where('agent_id', '=', agentId)
+      .where('status', '=', 'running')
       .execute();
   }
 
@@ -722,6 +728,7 @@ echo "Amber agent installed and started."
         log: dto.log ?? null,
       })
       .where('id', '=', taskId)
+      .where('status', '=', 'running')
       .execute();
   }
 

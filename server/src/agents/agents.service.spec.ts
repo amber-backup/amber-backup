@@ -333,4 +333,60 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+  describe('task results for a cancelled run', () => {
+    /** The agent posts against a run the operator has meanwhile cancelled. */
+    function makeService(updateTable: ReturnType<typeof chain>) {
+      const { db } = createDbMock({
+        selectFrom: chain({ executeTakeFirst: { id: 'run-1', job_id: 'j1', trigger: 'manual', repository_id: 'repo-1' } }),
+        updateTable,
+      });
+      const repos = { refreshStatsInBackground: jest.fn() } as unknown as RepositoriesService;
+      const notify = {
+        notifyJobRun: jest.fn(async () => undefined),
+      } as unknown as NotificationsService;
+      return new AgentsService(db, crypto, targets, notify, repos, pruneRunner);
+    }
+
+    it('only writes a backup result while the run is still running', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+
+      await service.submitBackupResult('agent-1', 'run-1', {
+        status: 'success',
+        snapshotId: 'snap-1',
+      } as never);
+
+      // Without this guard a cancelled run would flip back to success.
+      expect(update.where).toHaveBeenCalledWith('status', '=', 'running');
+    });
+
+    it('only writes backup progress while the run is still running', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+
+      await service.backupProgress('agent-1', 'run-1', { percentDone: 0.5 });
+
+      expect(update.where).toHaveBeenCalledWith('status', '=', 'running');
+    });
+
+    it('only writes a restore result while the run is still running', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+
+      await service.submitRestoreResult('agent-1', 'run-1', {
+        status: 'success',
+      } as never);
+
+      expect(update.where).toHaveBeenCalledWith('status', '=', 'running');
+    });
+
+    it('only writes restore progress while the run is still running', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+
+      await service.restoreProgress('agent-1', 'run-1', { percentDone: 0.5 });
+
+      expect(update.where).toHaveBeenCalledWith('status', '=', 'running');
+    });
+  });
 });

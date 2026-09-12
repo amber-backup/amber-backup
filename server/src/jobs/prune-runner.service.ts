@@ -41,11 +41,26 @@ export interface PruneOutcome {
 export class PruneRunnerService {
   private readonly logger = new Logger(PruneRunnerService.name);
 
+  /** Prunes currently executing in this process, keyed by their run id. */
+  private readonly running = new Map<string, AbortController>();
+
   constructor(
     @Inject(KYSELY) private readonly db: Db,
     private readonly restic: ResticService,
     private readonly repositories: RepositoriesService,
   ) {}
+
+  /**
+   * Aborts a prune this process is running. Returns false when the run is
+   * unknown here (already finished, or executed by an agent) — the caller then
+   * has to settle the row itself.
+   */
+  cancel(runId: string): boolean {
+    const ctrl = this.running.get(runId);
+    if (!ctrl) return false;
+    ctrl.abort();
+    return true;
+  }
 
   /**
    * Creates the prune activity and runs it to completion. Never rejects — the
@@ -110,8 +125,10 @@ export class PruneRunnerService {
       logLines.push(line);
       if (logLines.length > MAX_LOG_LINES) logLines.shift();
     };
+    const abort = new AbortController();
+    this.running.set(id, abort);
     try {
-      await this.restic.prune(opts.ctx, { onLog });
+      await this.restic.prune(opts.ctx, { onLog, signal: abort.signal });
       await this.db
         .updateTable('job_runs')
         .set({ status: 'success', finished_at: new Date(), log: logLines.join('\n') })
@@ -121,11 +138,12 @@ export class PruneRunnerService {
       this.repositories.refreshStatsInBackground(opts.repositoryId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Prune ${id} failed: ${message}`);
+      const aborted = abort.signal.aborted;
+      this.logger.warn(`Prune ${id} ${aborted ? 'cancelled' : 'failed'}: ${message}`);
       await this.db
         .updateTable('job_runs')
         .set({
-          status: 'failed',
+          status: aborted ? 'cancelled' : 'failed',
           finished_at: new Date(),
           error: message,
           log: logLines.join('\n'),
@@ -133,6 +151,8 @@ export class PruneRunnerService {
         .where('id', '=', id)
         .execute()
         .catch(() => undefined);
+    } finally {
+      this.running.delete(id);
     }
   }
 }

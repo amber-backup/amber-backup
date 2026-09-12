@@ -1,8 +1,14 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
 import { JobRunnerService } from '../jobs/job-runner.service';
+import { PruneRunnerService } from '../jobs/prune-runner.service';
 
 @Injectable()
 export class RunsService {
@@ -10,6 +16,7 @@ export class RunsService {
     @Inject(KYSELY) private readonly db: Db,
     private readonly acl: AccessControlService,
     private readonly runner: JobRunnerService,
+    private readonly pruneRunner: PruneRunnerService,
   ) {}
 
   private baseQuery() {
@@ -76,17 +83,36 @@ export class RunsService {
     return run;
   }
 
+  /**
+   * Stops a queued or running activity. When the run belongs to a process this
+   * server owns, the runner aborts it and settles the row itself. Otherwise —
+   * a queued run, one handed to an agent, or one left `running` by a restart —
+   * the row is force-cancelled here so the activity stops hanging in the UI.
+   */
   async cancel(user: RequestUser, id: string) {
     const run = await this.get(user, id);
     await this.acl.assert(user, 'job', run.job_id, 'operate');
-    const killed = this.runner.cancel(id);
-    if (!killed && run.status === 'queued') {
-      await this.db
-        .updateTable('job_runs')
-        .set({ status: 'cancelled', finished_at: new Date() })
-        .where('id', '=', id)
-        .execute();
+    if (run.status !== 'queued' && run.status !== 'running') {
+      throw new BadRequestException(`Run is already ${run.status}`);
     }
+
+    if (this.runner.cancel(id) || this.pruneRunner.cancel(id)) {
+      return { cancelled: true };
+    }
+
+    // No local process to kill: settle the row. A remote run may well carry on
+    // its host, so say so rather than implying restic was stopped.
+    const error =
+      run.status === 'queued'
+        ? null
+        : run.agent_id
+          ? 'Cancelled on the server — the agent may still be running this task.'
+          : 'Cancelled — no running process found.';
+    await this.db
+      .updateTable('job_runs')
+      .set({ status: 'cancelled', finished_at: new Date(), error })
+      .where('id', '=', id)
+      .execute();
     return { cancelled: true };
   }
 
