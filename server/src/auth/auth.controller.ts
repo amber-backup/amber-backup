@@ -343,12 +343,18 @@ export class AuthController {
   async changePassword(
     @CurrentUser() user: RequestUser,
     @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
     await this.users.changePassword(
       user.id,
       dto.currentPassword,
       dto.newPassword,
     );
+    // The password change bumped the session epoch, invalidating every existing
+    // token — including this request's. Re-issue a fresh session so the current
+    // browser stays signed in while other sessions are revoked.
+    const result = await this.auth.issueForUser(user.id);
+    res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
     return { ok: true };
   }
 

@@ -26,6 +26,8 @@ interface JwtPayload {
   sub: string;
   email: string;
   isAdmin: boolean;
+  /** Session generation the token was minted at (see users.session_epoch). */
+  se?: number;
 }
 
 /**
@@ -134,11 +136,17 @@ export class AuthGuard implements CanActivate {
     }
     const user = await this.db
       .selectFrom('users')
-      .select(['id', 'email', 'is_admin', 'disabled'])
+      .select(['id', 'email', 'is_admin', 'disabled', 'session_epoch'])
       .where('id', '=', payload.sub)
       .executeTakeFirst();
     if (!user || user.disabled) {
       throw new UnauthorizedException('Account disabled or missing');
+    }
+    // Reject tokens minted before the user's current session generation (e.g.
+    // after a password change). Tokens issued before this field existed carry
+    // no `se` and are accepted until they expire.
+    if (typeof payload.se === 'number' && payload.se !== user.session_epoch) {
+      throw new UnauthorizedException('Session expired — sign in again');
     }
     return {
       id: user.id,

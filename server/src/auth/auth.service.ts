@@ -162,7 +162,13 @@ export class AuthService {
       secret: config.jwtSecret,
       expiresIn: config.jwtExpiresIn,
     } as Parameters<JwtService['signAsync']>[1];
-    const token = await this.jwt.signAsync({ sub: id, email, isAdmin }, signOptions);
+    // The session epoch pins the token to the user's current credential
+    // generation; a password change bumps it and invalidates this token.
+    const epoch = await this.users.sessionEpoch(id);
+    const token = await this.jwt.signAsync(
+      { sub: id, email, isAdmin, se: epoch },
+      signOptions,
+    );
     const user = await this.users.findById(id);
     return { token, user };
   }

@@ -14,7 +14,7 @@ const JWT_SECRET = 'test-jwt-secret-value';
 describe('AuthService (session JWT)', () => {
   let jwt: JwtService;
   let users: jest.Mocked<
-    Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw'>
+    Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw' | 'sessionEpoch'>
   >;
   let totp: jest.Mocked<Pick<TotpService, 'verifyLogin'>>;
   let settings: jest.Mocked<Pick<SettingsService, 'getLocalLoginEnabled'>>;
@@ -29,8 +29,9 @@ describe('AuthService (session JWT)', () => {
       verifyPassword: jest.fn(),
       findById: jest.fn(),
       findByIdRaw: jest.fn(),
+      sessionEpoch: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<
-      Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw'>
+      Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw' | 'sessionEpoch'>
     >;
     totp = { verifyLogin: jest.fn() } as unknown as jest.Mocked<
       Pick<TotpService, 'verifyLogin'>

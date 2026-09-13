@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { sql } from 'kysely';
 import { Db, KYSELY } from '../database/database.module';
 import { AuthSource, User } from '../database/database.types';
 import { loadConfig } from '../config/configuration';
@@ -179,6 +180,12 @@ export class UsersService implements OnModuleInit {
       patch.password_hash = await argon2.hash(dto.password);
     }
 
+    // Any credential change (admin password reset, or switching auth source)
+    // revokes the user's existing sessions.
+    if ('password_hash' in patch || 'auth_source' in patch) {
+      patch.session_epoch = sql`session_epoch + 1`;
+    }
+
     const updated = await this.db
       .updateTable('users')
       .set(patch)
@@ -304,8 +311,23 @@ export class UsersService implements OnModuleInit {
     }
     await this.db
       .updateTable('users')
-      .set({ password_hash: await argon2.hash(newPassword), updated_at: new Date() })
+      .set({
+        password_hash: await argon2.hash(newPassword),
+        updated_at: new Date(),
+        // Revoke every other outstanding session for this user.
+        session_epoch: sql`session_epoch + 1`,
+      })
       .where('id', '=', userId)
       .execute();
+  }
+
+  /** Current session generation for a user (0 if unknown). */
+  async sessionEpoch(userId: string): Promise<number> {
+    const row = await this.db
+      .selectFrom('users')
+      .select('session_epoch')
+      .where('id', '=', userId)
+      .executeTakeFirst();
+    return row?.session_epoch ?? 0;
   }
 }
