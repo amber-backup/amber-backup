@@ -27,6 +27,9 @@ type UpdatedAt = ColumnType<Date, Date | undefined, Date>;
  * the same thing (the SSO callback never recorded the provider).
  */
 export type AuthSource = 'local' | 'oidc' | 'entra' | 'sso';
+
+export const USER_LOCALES = ['en', 'de'] as const;
+export type UserLocale = (typeof USER_LOCALES)[number];
 export type ResourceType = 'target' | 'source' | 'job';
 export type AccessLevel = 'view' | 'operate' | 'manage';
 export type DeployMethod = 'binary' | 'docker';
@@ -82,6 +85,8 @@ export interface UsersTable {
   totp_enabled: ColumnType<boolean, boolean | undefined, boolean>;
   /** argon2 hashes of unused recovery codes; consumed on use. */
   totp_recovery_codes: JSONColumnType<string[] | null, string | null, string | null>;
+  /** Preferred UI language; null follows the browser. */
+  locale: UserLocale | null;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }

@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -33,6 +34,7 @@ import {
   LoginTotpDto,
   PasskeyLoginDto,
   PasskeyRegisterDto,
+  UpdatePreferencesDto,
 } from './dto/auth.dto';
 
 /**
@@ -336,6 +338,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Current authenticated user' })
   async me(@CurrentUser() user: RequestUser) {
     return this.users.findById(user.id);
+  }
+
+  @Patch('me/preferences')
+  @ApiOperation({ summary: 'Update the current user preferences (e.g. UI language)' })
+  async updatePreferences(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdatePreferencesDto,
+  ) {
+    return this.users.updatePreferences(user.id, dto);
   }
 
   @Post('change-password')

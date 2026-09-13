@@ -52,6 +52,45 @@ describe('UsersService (password hashing with Argon2)', () => {
     });
   });
 
+  describe('updatePreferences', () => {
+    it('stores the chosen locale and returns the public user', async () => {
+      const update = chain();
+      const select = chain({
+        executeTakeFirst: makeUser({ id: 'u1', locale: 'de', password_hash: 'h' }),
+      });
+      const { db } = createDbMock({ selectFrom: select, updateTable: update });
+      const service = new UsersService(db, settingsStub());
+
+      const result = await service.updatePreferences('u1', { locale: 'de' });
+
+      expect(update.set.mock.calls[0][0]).toMatchObject({ locale: 'de' });
+      expect(result.locale).toBe('de');
+      expect(result).not.toHaveProperty('password_hash');
+    });
+
+    it('resets to browser language with null', async () => {
+      const update = chain();
+      const select = chain({ executeTakeFirst: makeUser({ id: 'u1' }) });
+      const { db } = createDbMock({ selectFrom: select, updateTable: update });
+      const service = new UsersService(db, settingsStub());
+
+      await service.updatePreferences('u1', { locale: null });
+
+      expect(update.set.mock.calls[0][0]).toMatchObject({ locale: null });
+    });
+
+    it('leaves the row untouched when nothing is given', async () => {
+      const update = chain();
+      const select = chain({ executeTakeFirst: makeUser({ id: 'u1' }) });
+      const { db, updateTable } = createDbMock({ selectFrom: select, updateTable: update });
+      const service = new UsersService(db, settingsStub());
+
+      await service.updatePreferences('u1', {});
+
+      expect(updateTable).not.toHaveBeenCalled();
+    });
+  });
+
   describe('create', () => {
     it('stores a verifiable Argon2 hash, never the plaintext password', async () => {
       const select = chain({ executeTakeFirst: undefined }); // no existing email

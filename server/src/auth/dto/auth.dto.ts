@@ -14,6 +14,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { USER_LOCALES, UserLocale } from '../../database/database.types';
 
 export class LoginDto {
   @ApiProperty({ example: 'admin@example.com' })
@@ -36,6 +37,17 @@ export class ChangePasswordDto {
   @IsString()
   @MinLength(8)
   newPassword!: string;
+}
+
+export class UpdatePreferencesDto {
+  @ApiPropertyOptional({
+    enum: USER_LOCALES,
+    nullable: true,
+    description: 'UI language; null follows the browser',
+  })
+  @IsOptional()
+  @IsIn(USER_LOCALES)
+  locale?: UserLocale | null;
 }
 
 export class LoginTotpDto {

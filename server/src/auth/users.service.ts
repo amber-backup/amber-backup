@@ -14,7 +14,12 @@ import { Db, KYSELY } from '../database/database.module';
 import { AuthSource, User } from '../database/database.types';
 import { loadConfig } from '../config/configuration';
 import { SettingsService } from '../settings/settings.service';
-import { CreateGrantDto, CreateUserDto, UpdateUserDto } from './dto/auth.dto';
+import {
+  CreateGrantDto,
+  CreateUserDto,
+  UpdatePreferencesDto,
+  UpdateUserDto,
+} from './dto/auth.dto';
 
 export type PublicUser = Omit<
   User,
@@ -84,6 +89,21 @@ export class UsersService implements OnModuleInit {
       .executeTakeFirst();
     if (!user) throw new NotFoundException('User not found');
     return toPublic(user);
+  }
+
+  /** Self-service settings a user may change on their own account. */
+  async updatePreferences(
+    id: string,
+    dto: UpdatePreferencesDto,
+  ): Promise<PublicUser> {
+    if (dto.locale !== undefined) {
+      await this.db
+        .updateTable('users')
+        .set({ locale: dto.locale, updated_at: new Date() })
+        .where('id', '=', id)
+        .execute();
+    }
+    return this.findById(id);
   }
 
   async findByEmailRaw(email: string): Promise<User | undefined> {
