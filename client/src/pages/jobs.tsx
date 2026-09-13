@@ -98,18 +98,30 @@ function JobRow({
 
   const tgt = targets.find((t) => t.id === j.target_id);
   const agent = agents.find((a) => a.id === j.agent_id);
-  const where = j.location === 'agent' ? `Agent: ${agent?.name ?? 'unknown'}` : 'Local';
-  // A null target is a local-filesystem repository; show its path instead.
-  const repoName = j.target_id
-    ? (tgt?.name ?? '?')
-    : `Local: ${(j.repo_config?.path as string | undefined) ?? '?'}`;
+  const agentName = j.location === 'agent' ? (agent?.name ?? 'unknown') : 'Server';
+  // A null target is a local-filesystem repository.
+  const targetName = j.target_id ? (tgt?.name ?? '?') : 'Local filesystem';
+  // The repository is identified by the job-scoped fields (bucket, prefix, path…),
+  // joined in the order the backend declares them.
+  const repoConfig = j.repo_config ?? {};
+  const repoFieldNames = j.target_id
+    ? (backends.find((b) => b.type === tgt?.backend_type)?.fields ?? [])
+        .filter((f) => f.scope === 'job')
+        .map((f) => f.name)
+    : ['path'];
+  const repoName =
+    repoFieldNames
+      .map((n) => repoConfig[n])
+      .filter((v) => v != null && v !== '')
+      .map(String)
+      .join('/') || '—';
 
   return (
     <div className="row">
       <span className={`status-dot ${j.enabled ? 'online' : 'offline'}`} />
       <div className="row-main">
         <div className="row-title">{j.name}</div>
-        <div className="row-sub">{`${where} · ${j.paths.join(', ')} → ${repoName} · ${j.cron_expr}`}</div>
+        <div className="row-sub">{`Agent: ${agentName} · Target: ${targetName} · Repository: ${repoName}`}</div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         {j.enabled && j.next_run ? (
