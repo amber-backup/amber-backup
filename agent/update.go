@@ -25,6 +25,18 @@ func (a *agent) maybeSelfUpdate(latest string) {
 	if latest == "" || !versionGreater(latest, agentVersion) {
 		return
 	}
+	// The agent runs as root and would execute whatever binary this download
+	// yields. Over plain HTTP a network attacker could substitute it, so only
+	// auto-update when the server URL is HTTPS (TLS authenticates the server and
+	// protects the binary in transit). Over HTTP, skip and keep the current one.
+	if !strings.HasPrefix(strings.ToLower(a.baseURL), "https://") {
+		log.Printf(
+			"agent update %s available but auto-update is disabled over plain HTTP "+
+				"(set an https:// server URL to enable); staying on %s",
+			latest, agentVersion,
+		)
+		return
+	}
 	log.Printf("agent update available: %s -> %s", agentVersion, latest)
 	if err := a.selfUpdate(latest); err != nil {
 		log.Printf("self-update failed, staying on %s: %v", agentVersion, err)
