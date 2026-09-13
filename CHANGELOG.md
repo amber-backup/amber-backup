@@ -1,3 +1,10 @@
+# [1.26.0](https://github.com/amber-backup/amber-backup/compare/v1.25.1...v1.26.0) (2026-09-13)
+
+
+### Features
+
+* **integrity:** restic integrity checks on the Snapshots page ([149506c](https://github.com/amber-backup/amber-backup/commit/149506c344780c55586e0f33b413cc682203df1d))
+
 ## [1.25.1](https://github.com/amber-backup/amber-backup/compare/v1.25.0...v1.25.1) (2026-09-13)
 
 
