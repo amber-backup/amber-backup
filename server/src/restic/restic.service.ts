@@ -194,7 +194,9 @@ export class ResticService {
     // Passing a directory (defaulting to the snapshot root '/') and omitting
     // --recursive limits the output to that directory's immediate children.
     const target = dir && dir !== '' ? dir : '/';
-    const args = ['ls', snapshotId, target, '--json'];
+    // `--` terminates option parsing so a snapshot id / path beginning with `-`
+    // cannot be smuggled in as a restic flag (e.g. --password-command=…).
+    const args = ['ls', '--json', '--', snapshotId, target];
     const entries: ResticLsEntry[] = [];
     const res = await this.run(ctx, args, {
       onStdoutLine: (line) => {
@@ -228,7 +230,7 @@ export class ResticService {
     hooks: { onProgress?: ProgressCallback; onLog?: LogCallback } = {},
     signal?: AbortSignal,
   ): Promise<BackupResult> {
-    const args = ['backup', '--json', ...paths];
+    const args = ['backup', '--json'];
     for (const tag of options.tags ?? []) args.push('--tag', tag);
     for (const ex of options.exclude ?? []) args.push('--exclude', ex);
     for (const ex of options.iexclude ?? []) args.push('--iexclude', ex);
@@ -240,6 +242,9 @@ export class ResticService {
     if (options.compression) args.push('--compression', options.compression);
     if (options.readConcurrency)
       args.push('--read-concurrency', String(options.readConcurrency));
+    // `--` terminates option parsing: a source path beginning with `-` is then
+    // treated as a path, never as a restic flag (e.g. --password-command=…).
+    args.push('--', ...paths);
 
     let stats: RunStats = {};
     let snapshotId: string | null = null;
@@ -363,8 +368,11 @@ export class ResticService {
     hooks: { onLog?: LogCallback } = {},
   ): Promise<ForgetResult> {
     if (snapshotIds.length === 0) return { removed: 0, raw: [] };
-    const args = ['forget', '--json', ...snapshotIds];
+    const args = ['forget', '--json'];
     if (prune) args.push('--prune');
+    // `--` terminates option parsing so a snapshot id beginning with `-` cannot
+    // be interpreted as a restic flag.
+    args.push('--', ...snapshotIds);
     const res = await this.run(ctx, args, {
       onStderrLine: (line) => hooks.onLog?.(line),
     });
@@ -395,13 +403,16 @@ export class ResticService {
     hooks: { onProgress?: ProgressCallback; onLog?: LogCallback } = {},
     signal?: AbortSignal,
   ): Promise<RunStats> {
-    const args = ['restore', snapshotId, '--json', '--target', target];
+    const args = ['restore', '--json', '--target', target];
     for (const inc of options.include ?? []) args.push('--include', inc);
     for (const ex of options.exclude ?? []) args.push('--exclude', ex);
     if (options.overwrite) args.push('--overwrite', options.overwrite);
     if (options.verify) args.push('--verify');
     if (options.delete) args.push('--delete');
     if (options.dryRun) args.push('--dry-run');
+    // `--` terminates option parsing so a snapshot id beginning with `-` cannot
+    // be interpreted as a restic flag.
+    args.push('--', snapshotId);
 
     let stats: RunStats = {};
     const res = await this.run(ctx, args, {

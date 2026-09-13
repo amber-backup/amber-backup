@@ -155,7 +155,6 @@ func (r *resticRunner) ensureInitialized(t *Task) error {
 
 func backupArgs(t *Task) []string {
 	args := []string{"backup", "--json"}
-	args = append(args, t.Paths...)
 	o := t.Options
 	if o != nil {
 		for _, tag := range o.Tags {
@@ -183,6 +182,10 @@ func backupArgs(t *Task) []string {
 			args = append(args, "--read-concurrency", strconv.Itoa(o.ReadConcurrency))
 		}
 	}
+	// `--` terminates option parsing: a source path beginning with `-` is then
+	// treated as a path, never as a restic flag (e.g. --password-command=…).
+	args = append(args, "--")
+	args = append(args, t.Paths...)
 	return args
 }
 
@@ -211,7 +214,7 @@ func forgetArgs(ret *Retention) []string {
 }
 
 func restoreArgs(t *Task) []string {
-	args := []string{"restore", t.SnapshotID, "--json", "--target", t.TargetPath}
+	args := []string{"restore", "--json", "--target", t.TargetPath}
 	includes := t.IncludedPaths
 	o := t.RestoreOptions
 	if o != nil {
@@ -237,6 +240,9 @@ func restoreArgs(t *Task) []string {
 	for _, inc := range includes {
 		args = append(args, "--include", inc)
 	}
+	// `--` terminates option parsing so a snapshot id beginning with `-` cannot
+	// be interpreted as a restic flag.
+	args = append(args, "--", t.SnapshotID)
 	return args
 }
 
