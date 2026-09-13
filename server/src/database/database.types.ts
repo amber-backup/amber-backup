@@ -60,6 +60,11 @@ export interface UsersTable {
   password_hash: string | null;
   is_admin: ColumnType<boolean, boolean | undefined, boolean>;
   disabled: ColumnType<boolean, boolean | undefined, boolean>;
+  /**
+   * Monotonic session generation. Embedded in each session JWT and checked per
+   * request; bumping it (on password change/reset) revokes all live sessions.
+   */
+  session_epoch: ColumnType<number, number | undefined, number>;
   /** Envelope-encrypted TOTP secret (Base32); null when 2FA is not configured. */
   totp_secret_ciphertext: string | null;
   totp_secret_nonce: string | null;

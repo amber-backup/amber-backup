@@ -9,7 +9,9 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -17,6 +19,7 @@ export class CreateEnrollmentTokenDto {
   @ApiPropertyOptional({ description: 'Suggested agent name' })
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   intendedAgentName?: string;
 
   @ApiPropertyOptional({ description: 'Token lifetime in minutes', default: 60 })
@@ -45,6 +48,8 @@ export class UpdateAgentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MinLength(1)
+  @MaxLength(128)
   name?: string;
 
   @ApiPropertyOptional()
@@ -60,30 +65,37 @@ export class UpdateAgentDto {
 export class EnrollDto {
   @ApiProperty()
   @IsString()
+  @MaxLength(512)
   token!: string;
 
   @ApiProperty()
   @IsString()
+  @MinLength(1)
+  @MaxLength(128)
   agentName!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   hostname?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   os?: string;
 
   @ApiPropertyOptional({ description: 'Agent public key (base64)' })
   @IsOptional()
   @IsString()
+  @MaxLength(8192)
   pubkey?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   agentVersion?: string;
 }
 
@@ -91,11 +103,13 @@ export class PollDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   resticVersion?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   agentVersion?: string;
 }
 
@@ -126,11 +140,13 @@ export class PruneResultDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(20_000)
   error?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(200_000)
   log?: string;
 }
 
@@ -142,6 +158,7 @@ export class TaskResultDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   snapshotId?: string;
 
   @ApiPropertyOptional({ type: Object })
@@ -161,10 +178,12 @@ export class TaskResultDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(20_000)
   error?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(200_000)
   log?: string;
 }

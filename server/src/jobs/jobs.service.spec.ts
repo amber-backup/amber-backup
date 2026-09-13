@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { JobsService } from './jobs.service';
 import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
@@ -115,9 +115,36 @@ describe('JobsService credential overrides', () => {
         service.create(user, { ...createDto, repoCredentials: { url: 'https://evil' } }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
+
+    it('forbids a non-admin from creating a job (host-filesystem access)', async () => {
+      const { service } = make();
+      const nonAdmin = { id: 'u2', isAdmin: false } as RequestUser;
+
+      await expect(service.create(nonAdmin, createDto)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
   });
 
   describe('update', () => {
+    it('forbids a non-admin from changing paths/location/scripts', async () => {
+      const { service } = make();
+      const nonAdmin = { id: 'u2', isAdmin: false } as RequestUser;
+
+      await expect(
+        service.update(nonAdmin, 'job-1', { paths: ['/etc'] }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a non-admin manager edit non-host fields', async () => {
+      const { service } = make();
+      const nonAdmin = { id: 'u2', isAdmin: false } as RequestUser;
+
+      await expect(
+        service.update(nonAdmin, 'job-1', { enabled: false }),
+      ).resolves.toBeDefined();
+    });
+
     it('merges a partial override into the existing secret', async () => {
       const { service, secrets } = make({ credential_secret_id: 'sec-old' });
 

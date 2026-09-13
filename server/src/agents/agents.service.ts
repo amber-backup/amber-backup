@@ -283,19 +283,30 @@ if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/ambe
 fi
 chmod +x "$INSTALL_DIR/amber-agent.new"
 
+# The enrollment token is a credential. Keep it out of the world-readable unit
+# file (0644) in a root-only environment file so an unprivileged local user
+# cannot read it and enroll a rogue agent.
+umask 077
+cat > "$INSTALL_DIR/agent.env" <<EOF
+AMBER_URL=$AMBER_URL
+AMBER_TOKEN=$AMBER_TOKEN
+AMBER_NAME=$AMBER_NAME
+INSTALL_DIR=$INSTALL_DIR
+EOF
+chmod 600 "$INSTALL_DIR/agent.env"
+
 cat > /etc/systemd/system/amber-agent.service <<EOF
 [Unit]
 Description=Amber Backup Agent
 After=network-online.target
 
 [Service]
-Environment=AMBER_URL=$AMBER_URL
-Environment=AMBER_TOKEN=$AMBER_TOKEN
-Environment=AMBER_NAME=$AMBER_NAME
-Environment=INSTALL_DIR=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/agent.env
 ExecStart=$INSTALL_DIR/amber-agent
 Restart=always
 RestartSec=10
+# Hardening: the agent never needs to gain privileges beyond those it starts with.
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
@@ -422,6 +433,21 @@ echo "Amber agent installed and started."
       throw new BadRequestException('Agent name is required for enrollment');
     }
 
+    // Consume a one-time token atomically *before* creating the agent: the
+    // conditional UPDATE marks it used only if it is still unused, so two
+    // concurrent enrollments with the same token cannot both succeed.
+    if (oneTimeTokenId) {
+      const claim = await this.db
+        .updateTable('enrollment_tokens')
+        .set({ used_at: new Date() })
+        .where('id', '=', oneTimeTokenId)
+        .where('used_at', 'is', null)
+        .executeTakeFirst();
+      if (Number(claim.numUpdatedRows ?? 0) === 0) {
+        throw new ForbiddenException('Token already used');
+      }
+    }
+
     // Server keypair for signing task payloads (integrity verification).
     const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
       publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -446,15 +472,8 @@ echo "Amber agent installed and started."
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    // One-time tokens are consumed; the global token stays valid for the fleet.
-    if (oneTimeTokenId) {
-      await this.db
-        .updateTable('enrollment_tokens')
-        .set({ used_at: new Date() })
-        .where('id', '=', oneTimeTokenId)
-        .execute();
-    }
-
+    // (The one-time token was already consumed atomically above; the global
+    // token stays valid for the fleet.)
     this.logger.log(
       `Agent enrolled: ${agent.name} (${agent.id})${viaGlobal ? ' [self-registered]' : ''}`,
     );

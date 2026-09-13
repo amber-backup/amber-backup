@@ -6,6 +6,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { loadConfig } from '../config/configuration';
 import { substituteCredentialPaths } from '../targets/backend-registry';
+import { sanitizedChildEnv } from '../common/child-env';
 import { RunStats, ResticOptions } from '../database/database.types';
 import {
   BackupResult,
@@ -31,6 +32,19 @@ interface RunOutcome {
 }
 
 /**
+ * Redacts credentials embedded in a URL's userinfo (e.g. the REST backend's
+ * `rest:https://user:pass@host/…`). restic echoes the repository URL in error
+ * messages, which are surfaced to API clients and stored in run logs, so this
+ * runs over everything restic emits.
+ */
+export function scrubSecretsInText(text: string): string {
+  return text.replace(
+    /([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi,
+    (_m, scheme: string) => `${scheme}***:***@`,
+  );
+}
+
+/**
  * Low-level restic process executor. Prepares the environment (repository,
  * password, backend credentials, temp credential files), streams JSON output,
  * and cleans up transient secrets afterwards. Used for local runs; the agent
@@ -50,7 +64,7 @@ export class ResticService {
   ): Promise<RunOutcome> {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-restic-'));
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...sanitizedChildEnv(),
       RESTIC_REPOSITORY: ctx.repository,
       RESTIC_PASSWORD: ctx.password,
       RESTIC_CACHE_DIR: this.cacheDir,
@@ -109,7 +123,8 @@ export class ResticService {
         }
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
+        // Scrub credentials before they reach logs, thrown errors or API clients.
+        const text = scrubSecretsInText(chunk.toString());
         stderr += text;
         stderrBuf += text;
         let idx: number;
@@ -194,7 +209,9 @@ export class ResticService {
     // Passing a directory (defaulting to the snapshot root '/') and omitting
     // --recursive limits the output to that directory's immediate children.
     const target = dir && dir !== '' ? dir : '/';
-    const args = ['ls', snapshotId, target, '--json'];
+    // `--` terminates option parsing so a snapshot id / path beginning with `-`
+    // cannot be smuggled in as a restic flag (e.g. --password-command=…).
+    const args = ['ls', '--json', '--', snapshotId, target];
     const entries: ResticLsEntry[] = [];
     const res = await this.run(ctx, args, {
       onStdoutLine: (line) => {
@@ -228,7 +245,7 @@ export class ResticService {
     hooks: { onProgress?: ProgressCallback; onLog?: LogCallback } = {},
     signal?: AbortSignal,
   ): Promise<BackupResult> {
-    const args = ['backup', '--json', ...paths];
+    const args = ['backup', '--json'];
     for (const tag of options.tags ?? []) args.push('--tag', tag);
     for (const ex of options.exclude ?? []) args.push('--exclude', ex);
     for (const ex of options.iexclude ?? []) args.push('--iexclude', ex);
@@ -240,12 +257,26 @@ export class ResticService {
     if (options.compression) args.push('--compression', options.compression);
     if (options.readConcurrency)
       args.push('--read-concurrency', String(options.readConcurrency));
+    // `--` terminates option parsing: a source path beginning with `-` is then
+    // treated as a path, never as a restic flag (e.g. --password-command=…).
+    args.push('--', ...paths);
 
     let stats: RunStats = {};
     let snapshotId: string | null = null;
 
+    // Enforce the job's optional time limit: abort the restic process when it
+    // is exceeded, so a hung backend cannot hold a run (and its slot) forever.
+    // Combined with any cancellation signal the caller passed.
+    const limit = options.timeLimitSeconds;
+    const effectiveSignal =
+      limit && limit > 0
+        ? signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(limit * 1000)])
+          : AbortSignal.timeout(limit * 1000)
+        : signal;
+
     const res = await this.run(ctx, args, {
-      signal,
+      signal: effectiveSignal,
       onStdoutLine: (line) => {
         try {
           const msg = JSON.parse(line);
@@ -277,7 +308,7 @@ export class ResticService {
             hooks.onProgress?.(stats);
           }
         } catch {
-          hooks.onLog?.(line);
+          hooks.onLog?.(scrubSecretsInText(line));
         }
       },
       onStderrLine: (line) => hooks.onLog?.(line),
@@ -342,7 +373,7 @@ export class ResticService {
     hooks: { onLog?: LogCallback; signal?: AbortSignal } = {},
   ): Promise<void> {
     const res = await this.run(ctx, ['prune'], {
-      onStdoutLine: (line) => hooks.onLog?.(line),
+      onStdoutLine: (line) => hooks.onLog?.(scrubSecretsInText(line)),
       onStderrLine: (line) => hooks.onLog?.(line),
       signal: hooks.signal,
     });
@@ -363,8 +394,11 @@ export class ResticService {
     hooks: { onLog?: LogCallback } = {},
   ): Promise<ForgetResult> {
     if (snapshotIds.length === 0) return { removed: 0, raw: [] };
-    const args = ['forget', '--json', ...snapshotIds];
+    const args = ['forget', '--json'];
     if (prune) args.push('--prune');
+    // `--` terminates option parsing so a snapshot id beginning with `-` cannot
+    // be interpreted as a restic flag.
+    args.push('--', ...snapshotIds);
     const res = await this.run(ctx, args, {
       onStderrLine: (line) => hooks.onLog?.(line),
     });
@@ -395,13 +429,16 @@ export class ResticService {
     hooks: { onProgress?: ProgressCallback; onLog?: LogCallback } = {},
     signal?: AbortSignal,
   ): Promise<RunStats> {
-    const args = ['restore', snapshotId, '--json', '--target', target];
+    const args = ['restore', '--json', '--target', target];
     for (const inc of options.include ?? []) args.push('--include', inc);
     for (const ex of options.exclude ?? []) args.push('--exclude', ex);
     if (options.overwrite) args.push('--overwrite', options.overwrite);
     if (options.verify) args.push('--verify');
     if (options.delete) args.push('--delete');
     if (options.dryRun) args.push('--dry-run');
+    // `--` terminates option parsing so a snapshot id beginning with `-` cannot
+    // be interpreted as a restic flag.
+    args.push('--', snapshotId);
 
     let stats: RunStats = {};
     const res = await this.run(ctx, args, {
@@ -421,7 +458,7 @@ export class ResticService {
             hooks.onProgress?.(stats);
           }
         } catch {
-          hooks.onLog?.(line);
+          hooks.onLog?.(scrubSecretsInText(line));
         }
       },
       onStderrLine: (line) => hooks.onLog?.(line),
@@ -434,7 +471,7 @@ export class ResticService {
 
   async version(): Promise<string> {
     try {
-      const res = await this.spawn(['version'], process.env, {});
+      const res = await this.spawn(['version'], sanitizedChildEnv(), {});
       const match = res.stdout.match(/restic\s+([\d.]+)/);
       return match ? match[1] : res.stdout.trim();
     } catch {

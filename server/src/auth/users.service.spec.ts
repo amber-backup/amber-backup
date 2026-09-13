@@ -206,4 +206,63 @@ describe('UsersService (password hashing with Argon2)', () => {
       await expect(argon2.verify(patch.password_hash, 'brandnewpw')).resolves.toBe(true);
     });
   });
+
+  describe('last-admin protection', () => {
+    const admin = { id: 'a1', is_admin: true, disabled: false };
+    // db mock whose selectFrom returns each configured result in order.
+    function dbReturning(results: unknown[]) {
+      let call = 0;
+      const db = {
+        selectFrom: jest.fn(() =>
+          chain({ executeTakeFirst: results[Math.min(call++, results.length - 1)] }),
+        ),
+        updateTable: jest.fn(() =>
+          chain({
+            execute: [],
+            executeTakeFirstOrThrow: { id: 'a1', is_admin: false, disabled: false },
+          }),
+        ),
+        deleteFrom: jest.fn(() => chain({ execute: [] })),
+      };
+      return db as unknown as import('../database/database.module').Db;
+    }
+
+    // update() selects: user load, then isLastActiveAdmin's target + others.
+    it('refuses to demote the last remaining admin', async () => {
+      const service = new UsersService(
+        dbReturning([admin, admin, undefined]),
+        settingsStub(),
+      );
+      await expect(
+        service.update('a1', { isAdmin: false }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('refuses to disable the last remaining admin', async () => {
+      const service = new UsersService(
+        dbReturning([admin, admin, undefined]),
+        settingsStub(),
+      );
+      await expect(
+        service.update('a1', { disabled: true }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    // remove() selects: isLastActiveAdmin's target + others.
+    it('refuses to delete the last remaining admin', async () => {
+      const service = new UsersService(
+        dbReturning([admin, undefined]),
+        settingsStub(),
+      );
+      await expect(service.remove('a1')).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('allows demoting an admin when another active admin exists', async () => {
+      const service = new UsersService(
+        dbReturning([admin, admin, { id: 'a2' }]),
+        settingsStub(),
+      );
+      await expect(service.update('a1', { isAdmin: false })).resolves.toBeDefined();
+    });
+  });
 });

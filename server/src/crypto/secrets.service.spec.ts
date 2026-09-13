@@ -23,6 +23,7 @@ describe('SecretsService (envelope encryption at rest)', () => {
 
     expect(id).toBe('sec-1');
     const stored = insert.values.mock.calls[0][0] as {
+      id: string;
       type: string;
       ciphertext: string;
       nonce: string;
@@ -31,8 +32,10 @@ describe('SecretsService (envelope encryption at rest)', () => {
     // The stored row must not contain the plaintext anywhere.
     expect(stored.ciphertext).not.toContain('hunter2');
     expect(stored.nonce).toBeTruthy();
-    // …but must decrypt back to it.
-    expect(crypto.decrypt(stored)).toBe('hunter2');
+    // …but must decrypt back to it, bound to its own row id via AAD.
+    expect(crypto.decrypt(stored, `secret:${stored.id}`)).toBe('hunter2');
+    // Decrypting under a different row's AAD (a swapped ciphertext) must fail.
+    expect(() => crypto.decrypt(stored, 'secret:other-row')).toThrow();
   });
 
   it('reveal() decrypts the stored ciphertext', async () => {
@@ -74,6 +77,16 @@ describe('SecretsService (envelope encryption at rest)', () => {
       nonce: string;
     };
     expect(stored.ciphertext).not.toContain('rotated-secret');
-    expect(crypto.decrypt(stored)).toBe('rotated-secret');
+    expect(crypto.decrypt(stored, 'secret:sec-1')).toBe('rotated-secret');
+  });
+
+  it('reveal() still decrypts a legacy secret written without AAD', async () => {
+    // Pre-AAD ciphertext carries no associated data.
+    const payload = crypto.encrypt('legacy-secret');
+    const select = chain({ executeTakeFirst: payload });
+    const { db } = createDbMock({ selectFrom: select });
+    const service = new SecretsService(db, crypto);
+
+    await expect(service.reveal('sec-1')).resolves.toBe('legacy-secret');
   });
 });

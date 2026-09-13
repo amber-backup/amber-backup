@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { sql } from 'kysely';
 import { Db, KYSELY } from '../database/database.module';
 import { AuthSource, User } from '../database/database.types';
 import { loadConfig } from '../config/configuration';
@@ -137,6 +138,16 @@ export class UsersService implements OnModuleInit {
       .executeTakeFirst();
     if (!user) throw new NotFoundException('User not found');
 
+    // Don't let the last usable admin be demoted or disabled — that would lock
+    // everyone out with no recovery short of editing the database.
+    const losesAdmin =
+      user.is_admin && (dto.isAdmin === false || dto.disabled === true);
+    if (losesAdmin && (await this.isLastActiveAdmin(id))) {
+      throw new BadRequestException(
+        'Cannot demote or disable the last remaining administrator',
+      );
+    }
+
     const patch: Record<string, unknown> = { updated_at: new Date() };
     if (dto.displayName !== undefined) patch.display_name = dto.displayName;
     if (dto.isAdmin !== undefined) patch.is_admin = dto.isAdmin;
@@ -169,6 +180,13 @@ export class UsersService implements OnModuleInit {
         patch.totp_secret_ciphertext = null;
         patch.totp_secret_nonce = null;
         patch.totp_recovery_codes = null;
+        // Passkeys are a local factor too; leaving them would let the holder
+        // keep signing in with a passkey after the account is moved to SSO
+        // (bypassing the IdP). Remove them.
+        await this.db
+          .deleteFrom('webauthn_credentials')
+          .where('user_id', '=', id)
+          .execute();
       }
     }
 
@@ -177,6 +195,12 @@ export class UsersService implements OnModuleInit {
         throw new BadRequestException('Cannot set password on SSO account');
       }
       patch.password_hash = await argon2.hash(dto.password);
+    }
+
+    // Any credential change (admin password reset, or switching auth source)
+    // revokes the user's existing sessions.
+    if ('password_hash' in patch || 'auth_source' in patch) {
+      patch.session_epoch = sql`session_epoch + 1`;
     }
 
     const updated = await this.db
@@ -193,7 +217,30 @@ export class UsersService implements OnModuleInit {
   }
 
   async remove(id: string): Promise<void> {
+    if (await this.isLastActiveAdmin(id)) {
+      throw new BadRequestException(
+        'Cannot delete the last remaining administrator',
+      );
+    }
     await this.db.deleteFrom('users').where('id', '=', id).execute();
+  }
+
+  /** True when `id` is an enabled admin and no other enabled admin exists. */
+  private async isLastActiveAdmin(id: string): Promise<boolean> {
+    const target = await this.db
+      .selectFrom('users')
+      .select(['is_admin', 'disabled'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!target || !target.is_admin || target.disabled) return false;
+    const others = await this.db
+      .selectFrom('users')
+      .select('id')
+      .where('is_admin', '=', true)
+      .where('disabled', '=', false)
+      .where('id', '!=', id)
+      .executeTakeFirst();
+    return !others;
   }
 
   // --- Grants ---------------------------------------------------------------
@@ -304,8 +351,23 @@ export class UsersService implements OnModuleInit {
     }
     await this.db
       .updateTable('users')
-      .set({ password_hash: await argon2.hash(newPassword), updated_at: new Date() })
+      .set({
+        password_hash: await argon2.hash(newPassword),
+        updated_at: new Date(),
+        // Revoke every other outstanding session for this user.
+        session_epoch: sql`session_epoch + 1`,
+      })
       .where('id', '=', userId)
       .execute();
+  }
+
+  /** Current session generation for a user (0 if unknown). */
+  async sessionEpoch(userId: string): Promise<number> {
+    const row = await this.db
+      .selectFrom('users')
+      .select('session_epoch')
+      .where('id', '=', userId)
+      .executeTakeFirst();
+    return row?.session_epoch ?? 0;
   }
 }

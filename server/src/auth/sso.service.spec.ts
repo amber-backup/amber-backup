@@ -39,6 +39,7 @@ interface TokenOverrides {
   nonce?: string | null;
   sub?: string;
   email?: string;
+  emailVerified?: boolean;
   key?: typeof privateKey;
 }
 
@@ -51,6 +52,7 @@ function idToken(nonce: string, o: TokenOverrides = {}): string {
     aud: o.aud ?? CLIENT_ID,
     sub: o.sub ?? 'subject-1',
     email: o.email ?? 'person@example.com',
+    email_verified: o.emailVerified ?? true,
     name: 'A Person',
     iat: now,
     exp: o.exp ?? now + 300,
@@ -203,6 +205,17 @@ describe('SsoService (callback)', () => {
         'sso',
       );
       expect(result).toEqual({ token: '', reason: 'pending' });
+    });
+
+    it('refuses to link or provision when the email is not verified', async () => {
+      users.findBySsoIdentity.mockResolvedValue(undefined);
+      users.findByEmailRaw.mockResolvedValue(undefined);
+
+      await expect(
+        callback((n) => idToken(n, { emailVerified: false })),
+      ).rejects.toMatchObject({ status: 401 });
+      expect(users.linkSsoIdentity).not.toHaveBeenCalled();
+      expect(users.create).not.toHaveBeenCalled();
     });
   });
 

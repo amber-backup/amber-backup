@@ -8,8 +8,10 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { loadConfig } from '../config/configuration';
 import { Public } from '../common/decorators/public.decorator';
@@ -33,10 +35,12 @@ import {
   PasskeyRegisterDto,
 } from './dto/auth.dto';
 
-/** Best-effort client IP for audit entries. */
+/**
+ * Client IP for audit entries. Uses Express's `req.ip`, which honours
+ * X-Forwarded-For only according to the configured `trust proxy` setting — so
+ * a caller cannot forge the recorded IP by sending its own header.
+ */
 function clientIp(req: Request): string | null {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   return req.ip ?? req.socket?.remoteAddress ?? null;
 }
 
@@ -83,6 +87,8 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   @ApiOperation({ summary: 'Local email/password login' })
   async login(
@@ -114,7 +120,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorEmail: dto.email,
@@ -134,6 +141,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('login/totp')
   @ApiOperation({ summary: 'Complete a 2FA login with a TOTP or recovery code' })
   async loginTotp(
@@ -160,7 +169,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorType: 'session',
@@ -250,6 +260,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('passkeys/login/options')
   @ApiOperation({ summary: 'Begin a usernameless passkey login' })
   async passkeyLoginOptions(@Res({ passthrough: true }) res: Response) {
@@ -261,6 +273,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('passkeys/login/verify')
   @ApiOperation({ summary: 'Complete a passkey login and start a session' })
   async passkeyLoginVerify(
@@ -293,7 +307,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorType: 'session',
@@ -328,12 +343,18 @@ export class AuthController {
   async changePassword(
     @CurrentUser() user: RequestUser,
     @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
     await this.users.changePassword(
       user.id,
       dto.currentPassword,
       dto.newPassword,
     );
+    // The password change bumped the session epoch, invalidating every existing
+    // token — including this request's. Re-issue a fresh session so the current
+    // browser stays signed in while other sessions are revoked.
+    const result = await this.auth.issueForUser(user.id);
+    res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
     return { ok: true };
   }
 

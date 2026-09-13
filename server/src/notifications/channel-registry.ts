@@ -1,4 +1,5 @@
 import * as nodemailer from 'nodemailer';
+import { assertSafeFetchUrl, assertSafeHost } from '../common/net-guard';
 
 /**
  * Registry of supported notification providers. Each definition declares its
@@ -69,10 +70,15 @@ async function postJson(
   payload: unknown,
   headers: Record<string, string> = {},
 ): Promise<void> {
+  // SSRF guard: reject before connecting if the (possibly user-configured) URL
+  // targets loopback/link-local/metadata. `redirect: 'manual'` stops a 30x from
+  // bouncing a vetted host to an internal one.
+  await assertSafeFetchUrl(url);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(payload),
+    redirect: 'manual',
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -89,6 +95,15 @@ function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Slack mrkdwn only reserves `&`, `<`, `>`; escaping them stops job names or
+ * restic error text from injecting `<http://evil|link>` links or breaking the
+ * message structure. (Slack's documented escaping — do not escape anything else.)
+ */
+function slackEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
@@ -322,6 +337,9 @@ export const CHANNELS: ChannelDefinition[] = [
     send: async (config, secrets, message) => {
       const port = Number(str(config.port)) || 587;
       const security = str(config.security) || 'starttls';
+      // SSRF guard: don't let a channel point the SMTP client at localhost or a
+      // link-local address on the server's own network.
+      await assertSafeHost(str(config.host));
       const transport = nodemailer.createTransport({
         host: str(config.host),
         port,
@@ -387,7 +405,9 @@ export const CHANNELS: ChannelDefinition[] = [
     send: async (_config, secrets, message) => {
       const emoji = message.status === 'success' ? ':white_check_mark:' : ':x:';
       await postJson(secrets.webhookUrl, {
-        text: `${emoji} *${message.title}*\n${message.body}\n<${message.url}|Open Amber Backup>`,
+        text: `${emoji} *${slackEscape(message.title)}*\n${slackEscape(
+          message.body,
+        )}\n<${message.url}|Open Amber Backup>`,
       });
     },
   },
@@ -423,6 +443,9 @@ export const CHANNELS: ChannelDefinition[] = [
     ],
     send: async (_config, secrets, message) => {
       await postJson(secrets.webhookUrl, {
+        // Disable all mentions so job names / error text cannot @everyone/@here
+        // or ping roles in the target channel.
+        allowed_mentions: { parse: [] },
         embeds: [
           {
             title: message.title,
@@ -520,6 +543,15 @@ export function getChannel(type: string): ChannelDefinition {
 /** Field schemas exposed to the client for dynamic form generation. */
 export function channelCatalog() {
   return CHANNELS.map((c) => ({ type: c.type, label: c.label, fields: c.fields }));
+}
+
+/** Every field name any channel marks as secret (used to redact audit bodies). */
+export function secretChannelFieldNames(): string[] {
+  const names = new Set<string>();
+  for (const c of CHANNELS) {
+    for (const f of c.fields) if (f.secret) names.add(f.name);
+  }
+  return [...names];
 }
 
 /** Splits a flat form payload into non-secret config and secret credentials. */

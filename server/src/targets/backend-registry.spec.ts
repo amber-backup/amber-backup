@@ -1,4 +1,5 @@
 import {
+  assertSafeSftpConfig,
   getBackend,
   overridableFields,
   requiredJobFields,
@@ -6,6 +7,35 @@ import {
 } from './backend-registry';
 
 describe('backend-registry', () => {
+  describe('sftp', () => {
+    const build = (config: Record<string, unknown>) =>
+      getBackend('sftp').build(config, { privateKey: 'KEY' }, { path: '/b' });
+
+    it('builds an ssh sftp.command for a plain host/user', () => {
+      const res = build({ host: 'backup.example.com', user: 'restic', port: '22' });
+      expect(res.repository).toBe('sftp:restic@backup.example.com:/b');
+      expect(res.extraArgs).toEqual([
+        '-o',
+        expect.stringContaining('sftp.command=ssh restic@backup.example.com -p 22'),
+      ]);
+    });
+
+    it('accepts a bracketed IPv6 host', () => {
+      expect(() => assertSafeSftpConfig({ host: '[2001:db8::1]', user: 'r' })).not.toThrow();
+    });
+
+    it.each([
+      { host: '127.0.0.1 -oProxyCommand=touch${IFS}/pwn', user: 'r' },
+      { host: 'ok', user: '-oProxyCommand=x' },
+      { host: 'has space', user: 'r' },
+      { host: '-leadingdash', user: 'r' },
+      { host: 'ok', user: 'r', port: '22; rm -rf /' },
+    ])('rejects ssh-option injection via %o', (config) => {
+      expect(() => assertSafeSftpConfig(config)).toThrow();
+      expect(() => build(config)).toThrow();
+    });
+  });
+
   describe('rest', () => {
     const build = (
       config: Record<string, unknown>,

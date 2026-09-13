@@ -15,6 +15,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
 import { PruneRunnerService } from './prune-runner.service';
 import { ResticOptions, RunStats } from '../database/database.types';
+import { sanitizedChildEnv } from '../common/child-env';
 
 const execFileAsync = promisify(execFile);
 
@@ -290,7 +291,9 @@ export class JobRunnerService implements OnApplicationShutdown {
     extra: Record<string, string>,
   ): NodeJS.ProcessEnv {
     return {
-      ...process.env,
+      // Strip the server's own secrets so a job script cannot read the master
+      // key / JWT secret / DB URL from its environment.
+      ...sanitizedChildEnv(),
       AMBER_JOB_ID: job.id,
       AMBER_JOB_NAME: job.name,
       AMBER_RUN_ID: runId,

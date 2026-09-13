@@ -26,10 +26,14 @@ export class RestoreService {
     // Restore is an 'operate' action on the job whose repository we read (§10.6).
     await this.acl.assert(user, 'job', dto.jobId, 'operate');
 
-    // Restoring onto an agent host reaches into agent territory → admin-only.
-    if (dto.destination?.agentId && !user.isAdmin) {
+    // 'original' and 'alternate_path' write restored files to a host filesystem
+    // as the restic process user — the server's own filesystem (local) or an
+    // agent host — which the grant model does not cover, so both require admin.
+    // 'download' only fills a managed, per-run temp dir the caller streams back,
+    // so it stays an operate-level action.
+    if (dto.mode !== 'download' && !user.isAdmin) {
       throw new ForbiddenException(
-        'Restoring onto an agent host requires administrator access',
+        'Restoring to a filesystem path requires administrator access',
       );
     }
 

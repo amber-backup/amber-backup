@@ -14,7 +14,7 @@ const JWT_SECRET = 'test-jwt-secret-value';
 describe('AuthService (session JWT)', () => {
   let jwt: JwtService;
   let users: jest.Mocked<
-    Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw'>
+    Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw' | 'sessionEpoch'>
   >;
   let totp: jest.Mocked<Pick<TotpService, 'verifyLogin'>>;
   let settings: jest.Mocked<Pick<SettingsService, 'getLocalLoginEnabled'>>;
@@ -29,8 +29,9 @@ describe('AuthService (session JWT)', () => {
       verifyPassword: jest.fn(),
       findById: jest.fn(),
       findByIdRaw: jest.fn(),
+      sessionEpoch: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<
-      Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw'>
+      Pick<UsersService, 'findByEmailRaw' | 'verifyPassword' | 'findById' | 'findByIdRaw' | 'sessionEpoch'>
     >;
     totp = { verifyLogin: jest.fn() } as unknown as jest.Mocked<
       Pick<TotpService, 'verifyLogin'>
@@ -228,6 +229,67 @@ describe('AuthService (session JWT)', () => {
       await expect(
         service.loginTotp('not-a-valid-token', '123456'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('caps brute-force guesses against a single challenge', async () => {
+      users.findByEmailRaw.mockResolvedValue({
+        id: 'u1',
+        email: 'a@x.io',
+        auth_source: 'local',
+        disabled: false,
+        is_admin: false,
+        totp_enabled: true,
+      } as never);
+      users.verifyPassword.mockResolvedValue(true);
+      const challenge = await service.login('a@x.io', 'good');
+      if (challenge.status !== '2fa_required') throw new Error('expected challenge');
+
+      users.findByIdRaw.mockResolvedValue({
+        id: 'u1',
+        disabled: false,
+        totp_enabled: true,
+      } as never);
+      totp.verifyLogin.mockResolvedValue(false);
+
+      // Five wrong guesses are answered "invalid code"; the sixth is refused
+      // because the challenge is spent — regardless of the code supplied.
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          service.loginTotp(challenge.challengeToken, '000000'),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+      totp.verifyLogin.mockResolvedValue(true);
+      await expect(
+        service.loginTotp(challenge.challengeToken, '123456'),
+      ).rejects.toThrow(/expired/);
+      expect(totp.verifyLogin).toHaveBeenCalledTimes(5);
+    });
+
+    it('burns a challenge after a successful login (no token reuse)', async () => {
+      users.findByEmailRaw.mockResolvedValue({
+        id: 'u1',
+        email: 'a@x.io',
+        auth_source: 'local',
+        disabled: false,
+        is_admin: false,
+        totp_enabled: true,
+      } as never);
+      users.verifyPassword.mockResolvedValue(true);
+      const challenge = await service.login('a@x.io', 'good');
+      if (challenge.status !== '2fa_required') throw new Error('expected challenge');
+
+      users.findByIdRaw.mockResolvedValue({
+        id: 'u1',
+        disabled: false,
+        totp_enabled: true,
+      } as never);
+      users.findById.mockResolvedValue({ id: 'u1', email: 'a@x.io' } as never);
+      totp.verifyLogin.mockResolvedValue(true);
+
+      await service.loginTotp(challenge.challengeToken, '123456');
+      await expect(
+        service.loginTotp(challenge.challengeToken, '123456'),
+      ).rejects.toThrow(/expired/);
     });
   });
 });

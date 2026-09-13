@@ -187,7 +187,8 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       const insert = chain({
         executeTakeFirstOrThrow: { id: 'agent-1', poll_interval_seconds: 30 },
       });
-      const update = chain({ execute: [] });
+      // The atomic one-time-token claim reports one row updated.
+      const update = chain({ execute: [], executeTakeFirst: { numUpdatedRows: 1 } });
       const { db, updateTable } = createDbMock({
         selectFrom: noGlobal(select),
         insertInto: insert,
@@ -230,6 +231,28 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       // The token is burned after a successful enrollment.
       expect(updateTable).toHaveBeenCalledWith('enrollment_tokens');
       expect(update.set.mock.calls[0][0]).toHaveProperty('used_at');
+    });
+
+    it('rejects a concurrent second enrollment that loses the atomic claim', async () => {
+      const select = chain({ executeTakeFirst: validTokenRow() });
+      const insert = chain({
+        executeTakeFirstOrThrow: { id: 'agent-1', poll_interval_seconds: 30 },
+      });
+      // The conditional UPDATE ... WHERE used_at IS NULL matched no row: another
+      // enrollment already consumed the token.
+      const update = chain({ execute: [], executeTakeFirst: { numUpdatedRows: 0 } });
+      const { db } = createDbMock({
+        selectFrom: noGlobal(select),
+        insertInto: insert,
+        updateTable: update,
+      });
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner);
+
+      await expect(
+        service.enroll({ token: 't', agentName: 'web-1' } as never),
+      ).rejects.toThrow(/already used/);
+      // The agent must not be created when the claim is lost.
+      expect(insert.executeTakeFirstOrThrow).not.toHaveBeenCalled();
     });
   });
 

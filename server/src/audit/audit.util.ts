@@ -1,8 +1,23 @@
 import { Request } from 'express';
+import { secretFieldNames } from '../targets/backend-registry';
+import { secretChannelFieldNames } from '../notifications/channel-registry';
 
 /** Object keys whose values are secrets and must never be persisted. */
 export const SECRET_KEY_RE =
   /pass(word)?|secret|token|credential|priv.?key|api.?key|access.?key|webhook/i;
+
+/**
+ * Field names the backend/channel registries declare as secret but whose names
+ * the regex above does not catch (e.g. accountKey, accountId, serviceAccountJson,
+ * authUrl, region, headerValue) — plus one-time codes. Backend/channel config is
+ * submitted flat inside the request body before the service splits out the
+ * encrypted secret, so without this the plaintext would land in the audit log.
+ */
+const EXPLICIT_SECRET_FIELDS = new Set(
+  [...secretFieldNames(), ...secretChannelFieldNames(), 'code'].map((n) =>
+    n.toLowerCase(),
+  ),
+);
 
 /** Verb overrides for action-style sub-routes (e.g. POST /jobs/:id/run). */
 const ACTION_VERBS: Record<string, string> = {
@@ -106,16 +121,20 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SECRET_KEY_RE.test(k) ? '[redacted]' : redactSecrets(v, depth + 1);
+      const secret =
+        SECRET_KEY_RE.test(k) || EXPLICIT_SECRET_FIELDS.has(k.toLowerCase());
+      out[k] = secret ? '[redacted]' : redactSecrets(v, depth + 1);
     }
     return out;
   }
   return value;
 }
 
-/** Best-effort client IP, honoring a reverse proxy's X-Forwarded-For. */
+/**
+ * Client IP for audit entries. Relies on Express's `req.ip`, which honours
+ * X-Forwarded-For only per the configured `trust proxy` setting — so a caller
+ * cannot spoof the recorded IP by sending its own header.
+ */
 export function clientIp(req: Request): string | null {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   return req.ip ?? req.socket?.remoteAddress ?? null;
 }

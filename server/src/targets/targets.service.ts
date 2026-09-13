@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -11,6 +12,7 @@ import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
 import { Repository, RestoreRun, Target } from '../database/database.types';
 import {
+  assertSafeSftpConfig,
   CredentialFile,
   getBackend,
   splitConfig,
@@ -100,6 +102,13 @@ export class TargetsService {
       dto.config,
       'target',
     );
+    if (dto.backendType === 'sftp') {
+      try {
+        assertSafeSftpConfig(config);
+      } catch (e) {
+        throw new BadRequestException((e as Error).message);
+      }
+    }
 
     // SFTP authenticates with a server-generated key pair: keep the private key
     // in the encrypted credential secret and expose the public key (non-secret)
@@ -173,6 +182,11 @@ export class TargetsService {
       // carry it (and thereby its key pair) across an edit. The private key in
       // the credential secret is untouched because SFTP has no secret fields.
       if (target.backend_type === 'sftp') {
+        try {
+          assertSafeSftpConfig(config);
+        } catch (e) {
+          throw new BadRequestException((e as Error).message);
+        }
         const existing = this.parseConfig(target.config);
         if (existing?.publicKey) config.publicKey = existing.publicKey;
       }
