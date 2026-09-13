@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Icon, BRAND_MARK_SRC } from '../core/icons';
 import { useAuth } from '../core/auth';
+import { useUpdateCheck } from '../hooks/useUpdateCheck';
 
 interface NavEntry {
   path: string;
@@ -39,6 +40,7 @@ function BrandName() {
 export function Shell() {
   const { user, isAdmin, logout } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
+  const update = useUpdateCheck();
   const closeNav = () => setNavOpen(false);
 
   const navItems = NAV.filter((n) => !n.adminOnly || isAdmin).map((n) => (
@@ -94,7 +96,21 @@ export function Shell() {
               <Icon name="logout" />
             </button>
           </div>
-          <div className="app-version">{`v${__APP_VERSION__}`}</div>
+          <div className="app-version">
+            {`v${__APP_VERSION__}`}
+            {update && (
+              <a
+                className="app-update"
+                href={update.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Version ${update.version} available`}
+                aria-label={`Version ${update.version} available`}
+              >
+                <Icon name="upgrade" />
+              </a>
+            )}
+          </div>
         </div>
       </aside>
 

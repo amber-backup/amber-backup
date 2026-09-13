@@ -56,6 +56,13 @@ export interface User {
   totp_enabled: boolean;
 }
 
+/** Newest published release as last seen by the server's update check. */
+export interface UpdateStatus {
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  checkedAt: string | null;
+}
+
 export interface Target {
   id: string;
   name: string;

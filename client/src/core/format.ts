@@ -69,3 +69,14 @@ export function statusLabel(status: string): string {
   };
   return map[status] ?? status;
 }
+
+/** True when semver `candidate` (e.g. "1.29.0") is newer than `current`. */
+export function isNewerVersion(candidate: string, current: string): boolean {
+  const parse = (v: string) => v.replace(/^v/, '').split(/[.+-]/, 3).map((n) => Number.parseInt(n, 10) || 0);
+  const a = parse(candidate);
+  const b = parse(current);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
