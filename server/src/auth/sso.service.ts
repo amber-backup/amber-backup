@@ -46,6 +46,8 @@ interface SsoProfile {
   subject: string;
   email: string;
   name: string;
+  /** Whether the provider asserts the email is verified. */
+  emailVerified: boolean;
 }
 
 /** id_token signature algorithms accepted, mapped to their digest. */
@@ -270,6 +272,16 @@ export class SsoService {
       return bound.auth_source === 'local' ? 'local_account' : bound;
     }
 
+    // Email-based linking/provisioning is only safe for a verified address:
+    // otherwise a user at one provider could set their email to a victim's and
+    // be bound to that account (takeover), or provision an account under an
+    // address they do not control.
+    if (!profile.emailVerified) {
+      throw new UnauthorizedException(
+        'The identity provider did not confirm a verified email address',
+      );
+    }
+
     const byEmail = await this.users.findByEmailRaw(profile.email);
     if (byEmail) {
       if (byEmail.auth_source === 'local') return 'local_account';
@@ -318,9 +330,14 @@ export class SsoService {
       tokens.id_token,
       nonce,
     );
-    const email = (claims.email ?? claims.preferred_username) as string;
-    const name = (claims.name as string) ?? email;
-    return { subject: String(claims.sub ?? ''), email, name };
+    // Only the `email` claim is an email; `preferred_username` is a display
+    // handle the user can often set freely, so it must never stand in as an
+    // account key. `email_verified` gates any account linking downstream.
+    const email = typeof claims.email === 'string' ? claims.email : '';
+    const emailVerified = claims.email_verified === true;
+    const name =
+      (claims.name as string) ?? (claims.preferred_username as string) ?? email;
+    return { subject: String(claims.sub ?? ''), email, name, emailVerified };
   }
 
   /** GitHub OAuth2 code exchange → user profile (email may need a 2nd call). */
@@ -391,6 +408,8 @@ export class SsoService {
       subject: gh.id != null ? String(gh.id) : '',
       email,
       name: gh.name || gh.login || email,
+      // GitHub only ever yields a primary/verified address above.
+      emailVerified: !!email,
     };
   }
 
