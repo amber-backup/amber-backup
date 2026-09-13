@@ -1,3 +1,15 @@
+# [1.27.0](https://github.com/amber-backup/amber-backup/compare/v1.26.0...v1.27.0) (2026-09-13)
+
+
+### Bug Fixes
+
+* **snapshots:** move the back button above the page header ([56847bd](https://github.com/amber-backup/amber-backup/commit/56847bd4951e0cf5728dae181c749a9168182cee))
+
+
+### Features
+
+* **snapshots:** open jobs by clicking the row, with a chevron hint ([4c9def6](https://github.com/amber-backup/amber-backup/commit/4c9def6a08f8f2a80fd953e3d71a6a3c8ae01b95))
+
 # [1.26.0](https://github.com/amber-backup/amber-backup/compare/v1.25.1...v1.26.0) (2026-09-13)
 
 
