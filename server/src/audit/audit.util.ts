@@ -31,6 +31,7 @@ const ACTION_VERBS: Record<string, string> = {
   test: 'Test',
   resend: 'Resend',
   duplicate: 'Duplicate',
+  check: 'Check integrity of',
 };
 
 const METHOD_VERBS: Record<string, string> = {

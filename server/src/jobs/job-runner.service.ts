@@ -71,27 +71,37 @@ export class JobRunnerService implements OnApplicationShutdown {
   }
 
   /**
-   * Fails backup runs that sat in the queue for longer than the configured
-   * timeout without being picked up — normally because the job's agent is
-   * offline. Each one is notified like any other failed run.
+   * Fails backup and check runs that sat in the queue for longer than the
+   * configured timeout without being picked up — normally because the job's
+   * agent is offline (or, for a check, predates integrity checks). Each one is
+   * notified like any other failed run.
    */
   @Interval(30_000)
   async failStaleQueuedRuns(): Promise<void> {
     const timeoutSeconds = loadConfig().runQueueTimeoutSeconds;
     if (timeoutSeconds <= 0) return;
     const minutes = Math.round(timeoutSeconds / 60);
-    const stale = await this.db
-      .updateTable('job_runs')
-      .set({
-        status: 'failed',
-        finished_at: new Date(),
-        error: `Not picked up within ${minutes} min — is the agent offline?`,
-      })
-      .where('kind', '=', 'backup')
-      .where('status', '=', 'queued')
-      .where('created_at', '<', new Date(Date.now() - timeoutSeconds * 1000))
-      .returning('id')
-      .execute();
+    const staleBefore = new Date(Date.now() - timeoutSeconds * 1000);
+    const reasons = {
+      backup: 'is the agent offline?',
+      check: 'is the agent offline or too old for integrity checks?',
+    } as const;
+    const stale: { id: string }[] = [];
+    for (const [kind, reason] of Object.entries(reasons)) {
+      const rows = await this.db
+        .updateTable('job_runs')
+        .set({
+          status: 'failed',
+          finished_at: new Date(),
+          error: `Not picked up within ${minutes} min — ${reason}`,
+        })
+        .where('kind', '=', kind as keyof typeof reasons)
+        .where('status', '=', 'queued')
+        .where('created_at', '<', staleBefore)
+        .returning('id')
+        .execute();
+      stale.push(...rows);
+    }
     for (const run of stale) {
       this.logger.warn(`Run ${run.id} timed out in the queue`);
       void this.notifications

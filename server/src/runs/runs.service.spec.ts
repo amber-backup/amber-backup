@@ -4,6 +4,7 @@ import { RunsService } from './runs.service';
 import { AccessControlService } from '../common/access-control.service';
 import { JobRunnerService } from '../jobs/job-runner.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
+import { CheckRunnerService } from '../jobs/check-runner.service';
 import { RequestUser } from '../common/auth/request-user';
 
 const user = { id: 'u1', isAdmin: true } as RequestUser;
@@ -20,7 +21,10 @@ interface Row {
   agent_id?: string | null;
 }
 
-function setup(run: Row, runners: { job?: boolean; prune?: boolean } = {}) {
+function setup(
+  run: Row,
+  runners: { job?: boolean; prune?: boolean; check?: boolean } = {},
+) {
   const select = chain({ executeTakeFirst: run });
   const update = chain({ execute: [] });
   const { db } = createDbMock({ selectFrom: select, updateTable: update });
@@ -30,9 +34,12 @@ function setup(run: Row, runners: { job?: boolean; prune?: boolean } = {}) {
   const pruneRunner = {
     cancel: jest.fn(() => runners.prune ?? false),
   } as unknown as PruneRunnerService;
+  const checkRunner = {
+    cancel: jest.fn(() => runners.check ?? false),
+  } as unknown as CheckRunnerService;
   const acl = allowAll();
-  const service = new RunsService(db, acl, jobRunner, pruneRunner);
-  return { service, update, jobRunner, pruneRunner, acl };
+  const service = new RunsService(db, acl, jobRunner, pruneRunner, checkRunner);
+  return { service, update, jobRunner, pruneRunner, checkRunner, acl };
 }
 
 describe('RunsService.cancel', () => {

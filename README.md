@@ -10,7 +10,8 @@ one place. Remote hosts are covered by a lightweight Go agent.
 - **Targets** — every restic backend (local, SFTP, REST, S3, B2, Azure, GCS, Swift, rclone) via a dynamic, schema-driven form, with a connection test.
 - **Sources** — local (server) or agent-bound path sets.
 - **Jobs** — cron-scheduled backups with full restic options and integrated retention (`forget`/`prune`).
-- **Restore** — live snapshot browsing (`snapshots` + `ls`), selective or full restore in three modes (original / alternate path / download archive), dry-run and overwrite safety.
+- **Snapshots** — live snapshot browsing (`snapshots` + `ls`), selective or full restore in three modes (original / alternate path / download archive), dry-run and overwrite safety.
+- **Integrity checks** — `restic check` per job, by hand or on a schedule, at three levels (structure only, a rotating part of the data per run, all data); the verdict, when all data was last read back and the check history are shown on the Snapshots page, and damage triggers the job's failure notifications.
 - **Agents** — enrollment tokens + install command, poll-based task dispatch, heartbeat/offline detection, reported restic version.
 - **Notifications** — per-job success/failure alerts via Email (SMTP), generic webhook, Slack, Microsoft Teams, Discord, Telegram, Gotify and ntfy.
 - **Auth & RBAC** — local login (Argon2), session JWT, API keys with restrictable scopes, per-resource grants (view/operate/manage), and SSO with admin approval for new users: enable single sign-on and add any number of providers (generic OIDC, Microsoft Entra ID, Google, GitHub).
@@ -90,7 +91,7 @@ docker run -d --restart unless-stopped \
   devpatf/amber-backup-agent:latest
 ```
 
-The agent enrolls, then polls for backup/restore tasks and runs restic locally.
+The agent enrolls, then polls for backup, restore and integrity check tasks and runs restic locally.
 Binary agents use the host's system restic; the Docker agent bundles a pinned one.
 
 Build the agent locally:

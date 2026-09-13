@@ -211,6 +211,7 @@ func (a *agent) poll() ([]Task, int, string, error) {
 	req := PollRequest{
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
+		Capabilities:  []string{"check"},
 	}
 	var resp PollResponse
 	if err := a.post("/api/agents/me/poll", a.state.AgentKey, req, &resp); err != nil {
@@ -228,6 +229,8 @@ func (a *agent) runTask(t *Task) {
 		a.runBackup(t)
 	case "restore":
 		a.runRestore(t)
+	case "check":
+		a.runCheck(t)
 	default:
 		log.Printf("unknown task type: %s", t.Type)
 	}
@@ -358,6 +361,31 @@ func (a *agent) runRestore(t *Task) {
 	result.Log = logBuf.String()
 	a.postResult(t.TaskID, result)
 	log.Printf("restore task %s complete", t.TaskID)
+}
+
+// runCheck verifies the repository. Damage found by restic is reported as a
+// failed result flagged Damaged; any other non-zero exit means the check could
+// not run (lock, backend, password) and is reported as a plain failure.
+func (a *agent) runCheck(t *Task) {
+	var logBuf strings.Builder
+	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+
+	code, err := a.runner.run(t, checkArgs(t), nil, appendLog)
+	switch {
+	case err == nil && code == 0:
+		a.postResult(t.TaskID, TaskResult{Status: "success", Log: logBuf.String()})
+		log.Printf("check task %s passed", t.TaskID)
+	case err == nil && isDamagedCheckOutput(logBuf.String()):
+		a.postResult(t.TaskID, TaskResult{
+			Status:  "failed",
+			Damaged: true,
+			Error:   "Integrity errors found — the log lists the damaged data and how to repair it",
+			Log:     logBuf.String(),
+		})
+		log.Printf("check task %s found integrity errors", t.TaskID)
+	default:
+		a.failTask(t, fmt.Sprintf("check exited %d: %v", code, err), logBuf.String())
+	}
 }
 
 func (a *agent) failTask(t *Task, msg, logStr string) {

@@ -27,7 +27,7 @@ describe('JobRunnerService', () => {
   });
 
   describe('failStaleQueuedRuns', () => {
-    it('fails queued backups older than the timeout and notifies for each', async () => {
+    it('fails queued backups and checks older than the timeout and notifies for each', async () => {
       process.env.RUN_QUEUE_TIMEOUT_SECONDS = '300';
       const { service, update, notifications } = make(['r1', 'r2']);
 
@@ -41,10 +41,15 @@ describe('JobRunnerService', () => {
         }),
       );
       expect(update.where).toHaveBeenCalledWith('kind', '=', 'backup');
+      expect(update.where).toHaveBeenCalledWith('kind', '=', 'check');
+      expect(update.set).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.stringContaining('too old for integrity checks') }),
+      );
       expect(update.where).toHaveBeenCalledWith('status', '=', 'queued');
       const cutoff = update.where.mock.calls.find((c) => c[0] === 'created_at')![2] as Date;
       expect(Date.now() - cutoff.getTime()).toBeGreaterThanOrEqual(300_000);
-      expect(notifications.notifyJobRun).toHaveBeenCalledTimes(2);
+      // The stub returns the same rows for both kinds.
+      expect(notifications.notifyJobRun).toHaveBeenCalledTimes(4);
       expect(notifications.notifyJobRun).toHaveBeenCalledWith('r1');
       expect(notifications.notifyJobRun).toHaveBeenCalledWith('r2');
     });

@@ -21,6 +21,9 @@ type EnrollResponse struct {
 type PollRequest struct {
 	ResticVersion string `json:"resticVersion,omitempty"`
 	AgentVersion  string `json:"agentVersion,omitempty"`
+	// Task types supported beyond backup/restore; the server only hands out
+	// tasks of a type the agent announces here.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type CredentialFile struct {
@@ -79,7 +82,7 @@ type Task struct {
 	// SFTP -o sftp.command=...). May reference credential file paths via a
 	// {{credentialFile:<filename>}} placeholder.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
-	// backup
+	// backup, check
 	JobID   string         `json:"jobId,omitempty"`
 	JobName string         `json:"jobName,omitempty"`
 	Paths   []string       `json:"paths,omitempty"`
@@ -89,6 +92,9 @@ type Task struct {
 	TargetPath     string          `json:"targetPath,omitempty"`
 	IncludedPaths  []string        `json:"includedPaths,omitempty"`
 	RestoreOptions *RestoreOptions `json:"restoreOptions,omitempty"`
+	// check: "quick", "rotating" or "full"; CheckSubset is "part/parts" for rotating.
+	CheckLevel  string `json:"checkLevel,omitempty"`
+	CheckSubset string `json:"checkSubset,omitempty"`
 }
 
 type PollResponse struct {
@@ -107,8 +113,10 @@ type TaskResult struct {
 	// Outcome of the prune run after the backup when retention asks for one;
 	// the server records it as an activity of its own.
 	Prune *PruneResult `json:"prune,omitempty"`
-	Error string       `json:"error,omitempty"`
-	Log   string       `json:"log,omitempty"`
+	// For a check: restic reported integrity errors (Status is then "failed").
+	Damaged bool   `json:"damaged,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Log     string `json:"log,omitempty"`
 }
 
 // PruneResult mirrors the server's PruneResultDto.

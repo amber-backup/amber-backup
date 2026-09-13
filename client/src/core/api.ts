@@ -96,6 +96,30 @@ export interface JobNotify {
   onFailure?: boolean;
 }
 
+/**
+ * How much of a repository an integrity check verifies: 'quick' checks the
+ * structure only, 'rotating' also reads the next part of the data, 'full'
+ * reads all of it.
+ */
+export type IntegrityLevel = 'quick' | 'rotating' | 'full';
+
+/** A job's integrity check schedule. */
+export interface IntegrityCheckConfig {
+  enabled?: boolean;
+  cronExpr?: string;
+  level?: IntegrityLevel;
+  /** For 'rotating': number of parts the data is split into, one per run. */
+  subsetParts?: number;
+}
+
+/** What a check run verified and, once finished, whether it found damage. */
+export interface CheckInfo {
+  level: IntegrityLevel;
+  part?: number;
+  parts?: number;
+  damaged?: boolean;
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -119,6 +143,20 @@ export interface Job {
   repo_stats_at?: string | null;
   /** Last refresh failure (figures then reflect the previous read), if any. */
   repo_stats_error?: string | null;
+  /** Verdict of the repository's last finished integrity check; null ⇒ never checked. */
+  repo_check_status?: 'passed' | 'damaged' | null;
+  repo_check_at?: string | null;
+  repo_check_level?: IntegrityLevel | null;
+  /** Why the most recent check could not finish; cleared by the next verdict. */
+  repo_check_error?: string | null;
+  /** When all data was last read back (full check or completed rotation). */
+  repo_data_verified_at?: string | null;
+  /** Part the next rotating check reads, of `repo_check_subset_parts`. */
+  repo_check_subset_next?: number;
+  repo_check_subset_parts?: number | null;
+  integrity_check?: IntegrityCheckConfig;
+  /** Next scheduled integrity check, if a schedule is on. */
+  next_check?: string | null;
   cron_expr: string;
   restic_options: Record<string, unknown>;
   notify?: JobNotify;
@@ -182,10 +220,12 @@ export interface Run {
   id: string;
   job_id: string;
   job_name?: string;
-  /** A backup, or a `restic prune` of the job's repository. */
-  kind: 'backup' | 'prune';
+  /** A backup, or a `restic prune` / `restic check` of the job's repository. */
+  kind: 'backup' | 'prune' | 'check';
   /** For a prune started by a backup's retention: that backup run. */
   parent_run_id: string | null;
+  /** For a check: what it verified and whether it found damage. */
+  check_info?: CheckInfo | null;
   trigger: string;
   status: string;
   agent_id: string | null;

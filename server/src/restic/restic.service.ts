@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { loadConfig } from '../config/configuration';
 import { substituteCredentialPaths } from '../targets/backend-registry';
 import { sanitizedChildEnv } from '../common/child-env';
-import { RunStats, ResticOptions } from '../database/database.types';
+import { CheckInfo, RunStats, ResticOptions } from '../database/database.types';
 import {
   BackupResult,
   ForgetResult,
@@ -42,6 +42,24 @@ export function scrubSecretsInText(text: string): string {
     /([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi,
     (_m, scheme: string) => `${scheme}***:***@`,
   );
+}
+
+/** `restic check` arguments for an integrity check level (mirrored by the agent). */
+export function checkArgs(info: Pick<CheckInfo, 'level' | 'part' | 'parts'>): string[] {
+  if (info.level === 'full') return ['check', '--read-data'];
+  if (info.level === 'rotating' && info.part && info.parts) {
+    return ['check', `--read-data-subset=${info.part}/${info.parts}`];
+  }
+  return ['check'];
+}
+
+/**
+ * Whether a failed `restic check` reported damage, as opposed to not being
+ * able to check at all. restic ends a check that found errors with
+ * "Fatal: repository contains errors" (stable across versions).
+ */
+export function isDamagedCheckOutput(output: string): boolean {
+  return /repository contains errors/i.test(output);
 }
 
 /**
@@ -380,6 +398,29 @@ export class ResticService {
     if (res.code !== 0) {
       throw new Error(res.stderr.trim() || `restic prune exited ${res.code}`);
     }
+  }
+
+  /**
+   * Verifies the repository (`restic check`). Resolves with `damaged: true`
+   * when restic found integrity errors; rejects when the check could not run
+   * to a verdict (lock held, backend unreachable, wrong password…). Checks
+   * take an exclusive repository lock in current restic versions.
+   */
+  async check(
+    ctx: ResticContext,
+    info: Pick<CheckInfo, 'level' | 'part' | 'parts'>,
+    hooks: { onLog?: LogCallback; signal?: AbortSignal } = {},
+  ): Promise<{ damaged: boolean }> {
+    const res = await this.run(ctx, checkArgs(info), {
+      onStdoutLine: (line) => hooks.onLog?.(scrubSecretsInText(line)),
+      onStderrLine: (line) => hooks.onLog?.(line),
+      signal: hooks.signal,
+    });
+    if (res.code === 0) return { damaged: false };
+    if (isDamagedCheckOutput(`${res.stdout}\n${res.stderr}`)) {
+      return { damaged: true };
+    }
+    throw new Error(res.stderr.trim() || `restic check exited ${res.code}`);
   }
 
   /**

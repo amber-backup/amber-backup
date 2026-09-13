@@ -7,6 +7,7 @@ import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
 import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
+import { checkLevelLabel } from '../ui/integrity';
 
 interface DashboardData {
   recent: Run[];
@@ -46,9 +47,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   const [agents, setAgents] = useState(agents0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [pageLoading, setPageLoading] = useState(false);
-  // Prunes are noise next to the backups they follow, so they stay hidden
-  // until asked for.
-  const [showPrunes, setShowPrunes] = useState(false);
+  // Maintenance (prunes, integrity checks) is noise next to the backups, so it
+  // stays hidden until asked for.
+  const [showMaintenance, setShowMaintenance] = useState(false);
 
   const seenRef = useRef<Set<string>>(new Set());
   const offsetRef = useRef(0);
@@ -60,8 +61,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   // filter is discarded instead of mixed into the list.
   const genRef = useRef(0);
   // The poll timer is installed once, so it reads the filter through a ref.
-  const showPrunesRef = useRef(showPrunes);
-  showPrunesRef.current = showPrunes;
+  const showMaintenanceRef = useRef(showMaintenance);
+  showMaintenanceRef.current = showMaintenance;
   // Same for the rows, so a poll can see which ones still need a live status.
   const runsRef = useRef(runs);
   runsRef.current = runs;
@@ -75,7 +76,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     setPageLoading(true);
     const gen = genRef.current;
     try {
-      const kind = showPrunes ? '' : '&kind=backup';
+      const kind = showMaintenance ? '' : '&kind=backup';
       const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}`);
       if (gen !== genRef.current) return;
       const fresh = page.filter((r) => !seenRef.current.has(r.id));
@@ -91,11 +92,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         setPageLoading(false);
       }
     }
-  }, [showPrunes]);
+  }, [showMaintenance]);
 
   // Toggling the filter starts the list over: the offset and the seen-ids set
   // belong to the previous query. The load effect re-runs on the new filter.
-  const toggleShowPrunes = useCallback((next: boolean): void => {
+  const toggleShowMaintenance = useCallback((next: boolean): void => {
     genRef.current += 1;
     seenRef.current = new Set();
     offsetRef.current = 0;
@@ -103,7 +104,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     doneRef.current = false;
     setRuns([]);
     setPageLoading(false);
-    setShowPrunes(next);
+    setShowMaintenance(next);
   }, []);
 
   // Keep pulling pages until the scroller is filled (first page may be short).
@@ -151,8 +152,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       ]);
       if (ag) setAgents(ag);
       setDash(d);
-      // `recent` covers every activity, so drop the prunes while they're hidden.
-      const recent = showPrunesRef.current ? d.recent : d.recent.filter((r) => r.kind !== 'prune');
+      // `recent` covers every activity, so drop maintenance while it's hidden.
+      const recent = showMaintenanceRef.current ? d.recent : d.recent.filter((r) => r.kind === 'backup');
       // `recent` is only the newest few, so an older row that is still queued or
       // running (typically a hung one) is fetched on its own to stay current.
       const stale = runsRef.current.filter(
@@ -228,10 +229,10 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                 <label className="checkbox sm">
                   <input
                     type="checkbox"
-                    checked={showPrunes}
-                    onChange={(e) => toggleShowPrunes(e.target.checked)}
+                    checked={showMaintenance}
+                    onChange={(e) => toggleShowMaintenance(e.target.checked)}
                   />
-                  Show prunes
+                  Show prunes &amp; checks
                 </label>
                 <span className="link" onClick={() => navigate('/jobs')}>
                   All jobs →
@@ -432,8 +433,8 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   );
 
   let meta: React.ReactNode;
-  if (r.kind === 'prune') {
-    // A prune has no progress or snapshot: outcome, duration and time.
+  if (r.kind !== 'backup') {
+    // A prune or check has no progress or snapshot: outcome, duration and time.
     meta = (
       <div className="row-meta run-meta">
         <span>
@@ -491,13 +492,15 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       ? r.error
       : r.status === 'running' && r.started_at
         ? `${statusLabel(r.status)} · ${duration}`
-        : r.kind === 'prune'
-          ? r.parent_run_id
-            ? 'prune after backup'
-            : 'manual prune'
-          : r.snapshot_id
-            ? r.snapshot_id.slice(0, 12)
-            : statusLabel(r.status);
+        : r.kind === 'check'
+          ? checkSub(r)
+          : r.kind === 'prune'
+            ? r.parent_run_id
+              ? 'prune after backup'
+              : 'manual prune'
+            : r.snapshot_id
+              ? r.snapshot_id.slice(0, 12)
+              : statusLabel(r.status);
 
   return (
     <div className="row compact" data-run-id={r.id}>
@@ -505,9 +508,9 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       <div className="row-main">
         <div className="row-title">
           {r.job_name ?? 'Job'}
-          {r.kind === 'prune' && (
-            <span className="badge muted row-kind">
-              prune
+          {r.kind !== 'backup' && (
+            <span className={`badge ${r.check_info?.damaged ? 'danger' : 'muted'} row-kind`}>
+              {r.kind}
             </span>
           )}
         </div>
@@ -516,6 +519,14 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       {meta}
     </div>
   );
+}
+
+/** Sub line of a finished or queued check: what it read and what it found. */
+function checkSub(r: Run): string {
+  const what = checkLevelLabel(r.check_info).toLowerCase();
+  if (r.check_info?.damaged) return `${what} — integrity errors found`;
+  if (r.status === 'success') return `${what} — no errors`;
+  return `${what} — ${statusLabel(r.status)}`;
 }
 
 function isActive(status: string): boolean {

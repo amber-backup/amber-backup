@@ -2,6 +2,7 @@ import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
+import { CheckRunnerService } from './check-runner.service';
 import { TargetsService } from '../targets/targets.service';
 import { ResticService } from '../restic/restic.service';
 import { SlugResolverService } from '../common/slug-resolver.service';
@@ -33,6 +34,7 @@ describe('JobsController', () => {
       jobs as unknown as JobsService,
       {} as SchedulerService,
       {} as JobRunnerService,
+      {} as CheckRunnerService,
       targets as unknown as TargetsService,
       restic as unknown as ResticService,
       slugs as unknown as SlugResolverService,

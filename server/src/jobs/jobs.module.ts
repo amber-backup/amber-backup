@@ -6,12 +6,25 @@ import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { JobRunnerService } from './job-runner.service';
 import { PruneRunnerService } from './prune-runner.service';
+import { CheckRunnerService } from './check-runner.service';
 import { SchedulerService } from './scheduler.service';
 
 @Module({
   imports: [TargetsModule, NotificationsModule, RepositoriesModule],
   controllers: [JobsController],
-  providers: [JobsService, JobRunnerService, PruneRunnerService, SchedulerService],
-  exports: [JobsService, JobRunnerService, PruneRunnerService, SchedulerService],
+  providers: [
+    JobsService,
+    JobRunnerService,
+    PruneRunnerService,
+    CheckRunnerService,
+    SchedulerService,
+  ],
+  exports: [
+    JobsService,
+    JobRunnerService,
+    PruneRunnerService,
+    CheckRunnerService,
+    SchedulerService,
+  ],
 })
 export class JobsModule {}

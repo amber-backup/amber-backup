@@ -15,7 +15,7 @@ const NAV: NavEntry[] = [
   { path: '/agents', label: 'Agents', iconName: 'agent', adminOnly: true },
   { path: '/targets', label: 'Targets', iconName: 'target' },
   { path: '/jobs', label: 'Jobs', iconName: 'job' },
-  { path: '/restore', label: 'Restore', iconName: 'restore' },
+  { path: '/snapshots', label: 'Snapshots', iconName: 'snapshot' },
   { path: '/notifications', label: 'Notifications', iconName: 'bell', adminOnly: true },
   { path: '/reports', label: 'Reports', iconName: 'chart', adminOnly: true },
   { path: '/users', label: 'Users', iconName: 'users', adminOnly: true },
