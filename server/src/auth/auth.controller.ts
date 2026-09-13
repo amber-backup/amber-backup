@@ -8,8 +8,10 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { loadConfig } from '../config/configuration';
 import { Public } from '../common/decorators/public.decorator';
@@ -85,6 +87,8 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   @ApiOperation({ summary: 'Local email/password login' })
   async login(
@@ -136,6 +140,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('login/totp')
   @ApiOperation({ summary: 'Complete a 2FA login with a TOTP or recovery code' })
   async loginTotp(
@@ -252,6 +258,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('passkeys/login/options')
   @ApiOperation({ summary: 'Begin a usernameless passkey login' })
   async passkeyLoginOptions(@Res({ passthrough: true }) res: Response) {
@@ -263,6 +271,8 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('passkeys/login/verify')
   @ApiOperation({ summary: 'Complete a passkey login and start a session' })
   async passkeyLoginVerify(

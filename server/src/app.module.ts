@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from './database/database.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { CommonModule } from './common/common.module';
@@ -20,6 +21,10 @@ import { StaticModule } from './static.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // Rate-limit storage/config, available app-wide. ThrottlerGuard is applied
+    // selectively (the sensitive auth endpoints) rather than globally, so agent
+    // polling and normal API traffic are unaffected.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 10 }]),
     DatabaseModule,
     CryptoModule,
     CommonModule,
