@@ -332,9 +332,10 @@ export class RepositoriesService {
 
   /**
    * Resolves the decrypted credentials needed to run restic directly against a
-   * repository (the `ambb repo use` CLI wrapper). Requires `operate` on the
-   * owning job — the same level as running the job — because it exposes the repo
-   * password and backend credentials to the caller.
+   * repository (the `ambb repo use` CLI wrapper). Requires `manage` on the
+   * owning job because it hands the caller the repository password and the
+   * backend's plaintext credentials — a secret-disclosure operation, above the
+   * 'operate' level that merely runs the job server-side.
    *
    * Only repositories on a shared connection can be reached from another host; a
    * local filesystem repository lives on the server and is rejected.
@@ -344,7 +345,7 @@ export class RepositoriesService {
       .where('r.id', '=', id)
       .executeTakeFirst();
     if (!row) throw new NotFoundException('Repository not found');
-    await this.acl.assert(user, 'job', row.job_id, 'operate');
+    await this.acl.assert(user, 'job', row.job_id, 'manage');
 
     if (row.target_id == null) {
       throw new BadRequestException(
