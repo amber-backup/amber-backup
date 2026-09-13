@@ -1,4 +1,5 @@
-import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { useEffect } from 'react';
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './core/auth';
 import { ToastProvider } from './ui/toast';
 import { ModalProvider } from './ui/modal';
@@ -16,6 +17,8 @@ import { Reports } from './pages/reports';
 import { Admin } from './pages/admin';
 import { AuditLog } from './pages/audit';
 import { Settings } from './pages/settings';
+import { DeviceLogin } from './pages/device';
+import { postLoginPath, rememberDeviceCode } from './core/device-login';
 
 /** Forwards the former `/restore/:jobId` URL to the Snapshots page. */
 function RestoreRedirect() {
@@ -25,6 +28,22 @@ function RestoreRedirect() {
 
 function Gate() {
   const { user, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // A CLI pairing link opened while signed out must survive the sign-in, which
+  // lands on '/' (login form) or reloads the app (SSO).
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      if (location.pathname === '/device') {
+        rememberDeviceCode(new URLSearchParams(location.search).get('code'));
+      }
+      return;
+    }
+    const next = postLoginPath();
+    if (next !== '/' && location.pathname !== '/device') navigate(next, { replace: true });
+  }, [loading, user, location.pathname, location.search, navigate]);
 
   if (loading) {
     return (
@@ -54,6 +73,7 @@ function Gate() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/audit" element={<AuditLog />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/device" element={<DeviceLogin />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

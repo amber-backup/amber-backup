@@ -1897,3 +1897,45 @@ input[type="checkbox"]:disabled {
         padding: 14px 16px;
     }
 }
+
+/* ---------- Device login (ambb login approval) ---------- */
+.device-panel {
+    max-width: 640px;
+}
+
+.device-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px 20px;
+}
+
+.device-code {
+    align-self: flex-start;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--amber-light);
+}
+
+.device-code-input {
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.device-facts {
+    padding: 0;
+}
+
+.device-ua {
+    overflow-wrap: anywhere;
+}
+
+.device-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}

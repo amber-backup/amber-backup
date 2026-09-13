@@ -5,6 +5,7 @@ import { api } from '../core/api';
 import { useAuth } from '../core/auth';
 import { passkeysSupported } from '../core/passkeys';
 import { Field } from '../ui/primitives';
+import { postLoginPath } from '../core/device-login';
 
 interface SsoProvider {
   id: string;
@@ -71,7 +72,7 @@ export function Login() {
         setBusy(false);
         return;
       }
-      navigate('/', { replace: true });
+      navigate(postLoginPath(), { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed');
       setBusy(false);
@@ -83,7 +84,7 @@ export function Login() {
     setBusy(true);
     try {
       await loginTotp(challengeToken, code.trim());
-      navigate('/', { replace: true });
+      navigate(postLoginPath(), { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Verification failed');
       setBusy(false);
@@ -95,7 +96,7 @@ export function Login() {
     setBusy(true);
     try {
       await loginPasskey();
-      navigate('/', { replace: true });
+      navigate(postLoginPath(), { replace: true });
     } catch (e) {
       // A user dismissing the native passkey prompt isn't a real error.
       if (e && typeof e === 'object' && 'name' in e && (e as { name: string }).name === 'NotAllowedError') {
