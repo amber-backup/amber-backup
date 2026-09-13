@@ -29,7 +29,25 @@ async function bootstrap(): Promise<void> {
   // Access log for every HTTP request (before guards/routing so 401/403 and 404
   // are logged too). Disable with HTTP_LOGGING=false.
   if (config.httpLogging) app.use(httpLogger);
-  app.enableCors({ origin: true, credentials: true });
+  // Same-origin SPA needs no cross-origin access; a reflected `origin: true`
+  // with credentials would let any site read authenticated responses. Allow
+  // only the configured public URL and any explicit WebAuthn origins (e.g. the
+  // Vite dev origin), so credentialed cross-origin reads are impossible.
+  const allowedOrigins = Array.from(
+    new Set(
+      [
+        (() => {
+          try {
+            return new URL(config.publicBaseUrl).origin;
+          } catch {
+            return undefined;
+          }
+        })(),
+        ...config.webauthnOrigins,
+      ].filter((o): o is string => !!o),
+    ),
+  );
+  app.enableCors({ origin: allowedOrigins, credentials: true });
 
   app.useGlobalPipes(
     new ValidationPipe({
