@@ -1,3 +1,11 @@
+# [1.30.0](https://github.com/amber-backup/amber-backup/compare/v1.29.0...v1.30.0) (2026-09-13)
+
+
+### Features
+
+* **auth:** per-user UI language preference ([018094c](https://github.com/amber-backup/amber-backup/commit/018094c1e486f25a666c2e44c738b3590944dd88))
+* **client:** German translation with language switch in settings ([5fa8f4d](https://github.com/amber-backup/amber-backup/commit/5fa8f4dd52e06a90907667b4aa446367881fd5a2))
+
 # [1.29.0](https://github.com/amber-backup/amber-backup/compare/v1.28.0...v1.29.0) (2026-09-13)
 
 
