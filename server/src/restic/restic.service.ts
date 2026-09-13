@@ -31,6 +31,19 @@ interface RunOutcome {
 }
 
 /**
+ * Redacts credentials embedded in a URL's userinfo (e.g. the REST backend's
+ * `rest:https://user:pass@host/…`). restic echoes the repository URL in error
+ * messages, which are surfaced to API clients and stored in run logs, so this
+ * runs over everything restic emits.
+ */
+export function scrubSecretsInText(text: string): string {
+  return text.replace(
+    /([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi,
+    (_m, scheme: string) => `${scheme}***:***@`,
+  );
+}
+
+/**
  * Low-level restic process executor. Prepares the environment (repository,
  * password, backend credentials, temp credential files), streams JSON output,
  * and cleans up transient secrets afterwards. Used for local runs; the agent
@@ -109,7 +122,8 @@ export class ResticService {
         }
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
+        // Scrub credentials before they reach logs, thrown errors or API clients.
+        const text = scrubSecretsInText(chunk.toString());
         stderr += text;
         stderrBuf += text;
         let idx: number;
@@ -282,7 +296,7 @@ export class ResticService {
             hooks.onProgress?.(stats);
           }
         } catch {
-          hooks.onLog?.(line);
+          hooks.onLog?.(scrubSecretsInText(line));
         }
       },
       onStderrLine: (line) => hooks.onLog?.(line),
@@ -347,7 +361,7 @@ export class ResticService {
     hooks: { onLog?: LogCallback; signal?: AbortSignal } = {},
   ): Promise<void> {
     const res = await this.run(ctx, ['prune'], {
-      onStdoutLine: (line) => hooks.onLog?.(line),
+      onStdoutLine: (line) => hooks.onLog?.(scrubSecretsInText(line)),
       onStderrLine: (line) => hooks.onLog?.(line),
       signal: hooks.signal,
     });
@@ -432,7 +446,7 @@ export class ResticService {
             hooks.onProgress?.(stats);
           }
         } catch {
-          hooks.onLog?.(line);
+          hooks.onLog?.(scrubSecretsInText(line));
         }
       },
       onStderrLine: (line) => hooks.onLog?.(line),
