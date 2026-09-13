@@ -98,6 +98,15 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * Slack mrkdwn only reserves `&`, `<`, `>`; escaping them stops job names or
+ * restic error text from injecting `<http://evil|link>` links or breaking the
+ * message structure. (Slack's documented escaping — do not escape anything else.)
+ */
+function slackEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
  * Renders a NotificationMessage as a branded, email-client-safe HTML document:
  * table-based layout, inline styles, no external assets. Uses structured
  * `meta`/`table` when present and falls back to the plain-text `body`.
@@ -396,7 +405,9 @@ export const CHANNELS: ChannelDefinition[] = [
     send: async (_config, secrets, message) => {
       const emoji = message.status === 'success' ? ':white_check_mark:' : ':x:';
       await postJson(secrets.webhookUrl, {
-        text: `${emoji} *${message.title}*\n${message.body}\n<${message.url}|Open Amber Backup>`,
+        text: `${emoji} *${slackEscape(message.title)}*\n${slackEscape(
+          message.body,
+        )}\n<${message.url}|Open Amber Backup>`,
       });
     },
   },
@@ -432,6 +443,9 @@ export const CHANNELS: ChannelDefinition[] = [
     ],
     send: async (_config, secrets, message) => {
       await postJson(secrets.webhookUrl, {
+        // Disable all mentions so job names / error text cannot @everyone/@here
+        // or ping roles in the target channel.
+        allowed_mentions: { parse: [] },
         embeds: [
           {
             title: message.title,
