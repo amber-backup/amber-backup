@@ -20,11 +20,16 @@ ARG TARGETARCH
 # openssh-client provides ssh, which restic's sftp backend shells out to for
 # SFTP jobs dispatched to this agent.
 RUN apk add --no-cache bzip2 ca-certificates openssh-client \
-  && wget -qO /tmp/restic.bz2 \
-     "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
-  && bunzip2 /tmp/restic.bz2 \
-  && mv /tmp/restic /usr/local/bin/restic \
-  && chmod +x /usr/local/bin/restic
+  && cd /tmp \
+  && ASSET="restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
+  && wget -q "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/${ASSET}" \
+  && wget -q "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/SHA256SUMS" \
+  # Verify against the release checksums before trusting the binary.
+  && grep " ${ASSET}\$" SHA256SUMS | sha256sum -c - \
+  && bunzip2 "${ASSET}" \
+  && mv "restic_${RESTIC_VERSION}_linux_${TARGETARCH}" /usr/local/bin/restic \
+  && chmod +x /usr/local/bin/restic \
+  && rm -f SHA256SUMS
 
 COPY --from=build /amber-agent /usr/local/bin/amber-agent
 ENV RESTIC_BINARY=/usr/local/bin/restic

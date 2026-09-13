@@ -8,7 +8,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: amber
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-amber}
+      # Required — do not ship a default DB password. Generate with: openssl rand -base64 24
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: amber
     volumes:
       - amber-pgdata:/var/lib/postgresql/data
@@ -24,14 +25,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgres://amber:${POSTGRES_PASSWORD:-amber}@db:5432/amber
+      DATABASE_URL: postgres://amber:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/amber
       # Required — generate with: openssl rand -base64 32  (must decode to 32 bytes)
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?set MASTER_ENCRYPTION_KEY in .env}
       # Required — generate with: openssl rand -base64 48
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
+      # Required — never ship a default admin password on an internet-reachable app.
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in .env}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
