@@ -302,6 +302,11 @@ input, select, textarea {
     margin-top: 2px;
 }
 
+/* Back to the parent list, above a detail page's header. */
+.page-back {
+    margin-bottom: 12px;
+}
+
 .topbar-actions {
     display: flex;
     align-items: center;

@@ -26,6 +26,12 @@ export function Snapshots() {
 
   return (
     <div>
+      {jobId && (
+        <button className="btn btn-ghost btn-sm page-back" onClick={() => navigate('/snapshots')}>
+          <Icon name="arrow-left" />
+          Back
+        </button>
+      )}
       <PageHeader
         title="Snapshots"
         subtitle={
@@ -38,7 +44,7 @@ export function Snapshots() {
         <>
           <IntegrityPanel job={job} onChanged={reload} />
           <div className="section-gap">
-            <SnapshotsPanel job={job} onBack={() => navigate('/snapshots')} reloadHistory={history.reload} />
+            <SnapshotsPanel job={job} reloadHistory={history.reload} />
           </div>
           <HistoryPanel runs={history.data} />
         </>
@@ -100,15 +106,7 @@ function repoSizeLabel(j: Job): string {
   return `${fmtBytes(j.repo_size_bytes)} · ${j.repo_snapshot_count ?? '?'} snapshots`;
 }
 
-function SnapshotsPanel({
-  job,
-  onBack,
-  reloadHistory,
-}: {
-  job: Job;
-  onBack: () => void;
-  reloadHistory: () => void;
-}) {
+function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () => void }) {
   const { data: snaps, loading, error, reload } = useAsync<Snapshot[]>(
     () => api.get<Snapshot[]>(`/jobs/${job.id}/snapshots`),
     [job.id],
@@ -135,13 +133,7 @@ function SnapshotsPanel({
   return (
     <div className="panel">
       <div className="panel-head">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button className="btn btn-ghost btn-sm" onClick={onBack}>
-            <Icon name="arrow-left" />
-            Back
-          </button>
-          <h2>{`${job.name} — Snapshots${snaps ? ` (${snaps.length})` : ''}`}</h2>
-        </div>
+        <h2>{`${job.name} — Snapshots${snaps ? ` (${snaps.length})` : ''}`}</h2>
       </div>
       {body}
     </div>
