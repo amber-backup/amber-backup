@@ -35,8 +35,11 @@ export type AgentStatus = 'enrolled' | 'online' | 'offline' | 'error';
 export type TargetStatus = 'online' | 'offline' | 'unknown';
 export type SourceLocation = 'local' | 'agent';
 export type RunTrigger = 'schedule' | 'manual';
-/** What a job_runs row records: a backup, or a `restic prune` of the job's repository. */
-export type RunKind = 'backup' | 'prune';
+/**
+ * What a job_runs row records: a backup, a `restic prune` or a `restic check`
+ * of the job's repository.
+ */
+export type RunKind = 'backup' | 'prune' | 'check';
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -49,6 +52,14 @@ export type SecretType =
   | 'backend_credential'
   | 'notification_credential';
 export type TaskType = 'backup' | 'restore' | 'snapshots' | 'ls' | 'check';
+/**
+ * How much of a repository an integrity check verifies: 'quick' checks the
+ * structure only (`restic check`), 'rotating' also reads one part of the pack
+ * data per run (`--read-data-subset=n/parts`), 'full' reads all of it.
+ */
+export type IntegrityLevel = 'quick' | 'rotating' | 'full';
+/** Verdict of the last integrity check that finished. */
+export type CheckStatus = 'passed' | 'damaged';
 
 // --- users ------------------------------------------------------------------
 
@@ -185,6 +196,20 @@ export interface RepositoriesTable {
   stats_at: ColumnType<Date | null, Date | null, Date | null>;
   /** Last refresh failure (figures then reflect the previous read), if any. */
   stats_error: string | null;
+  /** Verdict of the last integrity check that finished; null ⇒ never checked. */
+  check_status: CheckStatus | null;
+  /** When that verdict was reached. */
+  check_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** Level of that check. */
+  check_level: IntegrityLevel | null;
+  /** Why the most recent check could not finish; cleared by the next verdict. */
+  check_error: string | null;
+  /** When all pack data was last read back successfully (full check or completed rotation). */
+  data_verified_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** Part a rotating check reads next (1-based). */
+  check_subset_next: ColumnType<number, number | undefined, number>;
+  /** Number of parts the rotation in progress splits the data into. */
+  check_subset_parts: number | null;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -297,6 +322,15 @@ export interface ResticOptions {
   timeLimitSeconds?: number;
 }
 
+/** A job's integrity check schedule (`backup_jobs.integrity_check`). */
+export interface IntegrityCheckConfig {
+  enabled?: boolean;
+  cronExpr?: string;
+  level?: IntegrityLevel;
+  /** For 'rotating': how many parts the data is split into (one per run). */
+  subsetParts?: number;
+}
+
 /** Which notification channels a job fires, and on which outcomes. */
 export interface JobNotifyConfig {
   channelIds?: string[];
@@ -318,6 +352,7 @@ export interface BackupJobsTable {
   cron_expr: string;
   restic_options: JSONColumnType<ResticOptions>;
   notify: JSONColumnType<JobNotifyConfig>;
+  integrity_check: ColumnType<IntegrityCheckConfig, string | undefined, string>;
   enabled: ColumnType<boolean, boolean | undefined, boolean>;
   owner_id: string;
   created_at: CreatedAt;
@@ -345,6 +380,14 @@ export type BackupJobRow = BackupJob &
     repo_snapshot_count: number | null;
     repo_stats_at: Date | null;
     repo_stats_error: string | null;
+    /** Integrity check state of the repository (see RepositoriesTable). */
+    repo_check_status: CheckStatus | null;
+    repo_check_at: Date | null;
+    repo_check_level: IntegrityLevel | null;
+    repo_check_error: string | null;
+    repo_data_verified_at: Date | null;
+    repo_check_subset_next: number;
+    repo_check_subset_parts: number | null;
   };
 
 // --- job_runs ---------------------------------------------------------------
@@ -366,12 +409,24 @@ export interface RunStats {
   totalFiles?: number;
 }
 
+/** What an integrity check run verified (`job_runs.check_info`). */
+export interface CheckInfo {
+  level: IntegrityLevel;
+  /** For a rotating check: the part of the data read by this run. */
+  part?: number;
+  parts?: number;
+  /** Set once finished: true when restic reported repository errors. */
+  damaged?: boolean;
+}
+
 export interface JobRunsTable {
   id: Generated<string>;
   job_id: string;
   kind: ColumnType<RunKind, RunKind | undefined, RunKind>;
   /** For a prune started by a backup's retention: that backup run. */
   parent_run_id: string | null;
+  /** For a check: what it verified and whether it found damage. */
+  check_info: ColumnType<CheckInfo | null, string | null | undefined, string | null>;
   trigger: RunTrigger;
   status: ColumnType<RunStatus, RunStatus | undefined, RunStatus>;
   /** Set when dispatched to an agent; null for local runs. */

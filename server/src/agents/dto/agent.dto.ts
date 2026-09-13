@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsIn,
@@ -111,6 +113,17 @@ export class PollDto {
   @IsString()
   @MaxLength(64)
   agentVersion?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: "Task types the agent supports beyond backup/restore, e.g. ['check']",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(16)
+  @IsString({ each: true })
+  @MaxLength(32, { each: true })
+  capabilities?: string[];
 }
 
 export class TaskProgressDto {
@@ -174,6 +187,13 @@ export class TaskResultDto {
   @ValidateNested()
   @Type(() => PruneResultDto)
   prune?: PruneResultDto;
+
+  @ApiPropertyOptional({
+    description: 'For a check: restic reported integrity errors (status is then failed)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  damaged?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()

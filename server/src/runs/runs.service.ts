@@ -9,6 +9,7 @@ import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
 import { JobRunnerService } from '../jobs/job-runner.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
+import { CheckRunnerService } from '../jobs/check-runner.service';
 
 @Injectable()
 export class RunsService {
@@ -17,6 +18,7 @@ export class RunsService {
     private readonly acl: AccessControlService,
     private readonly runner: JobRunnerService,
     private readonly pruneRunner: PruneRunnerService,
+    private readonly checkRunner: CheckRunnerService,
   ) {}
 
   private baseQuery() {
@@ -29,6 +31,7 @@ export class RunsService {
         'job_runs.job_id',
         'job_runs.kind',
         'job_runs.parent_run_id',
+        'job_runs.check_info',
         'job_runs.trigger',
         'job_runs.status',
         'job_runs.agent_id',
@@ -96,7 +99,11 @@ export class RunsService {
       throw new BadRequestException(`Run is already ${run.status}`);
     }
 
-    if (this.runner.cancel(id) || this.pruneRunner.cancel(id)) {
+    if (
+      this.runner.cancel(id) ||
+      this.pruneRunner.cancel(id) ||
+      this.checkRunner.cancel(id)
+    ) {
       return { cancelled: true };
     }
 
@@ -118,7 +125,7 @@ export class RunsService {
 
   /**
    * Aggregate figures for the dashboard, scoped to what the user can see.
-   * `recent` and `running` cover every activity (backups and prunes); the
+   * `recent` and `running` cover every activity (backups, prunes, checks); the
    * success/failure counters are about backups only.
    */
   async dashboard(user: RequestUser) {

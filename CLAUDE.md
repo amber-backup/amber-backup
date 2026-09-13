@@ -99,11 +99,14 @@ Key cross-cutting flows to understand before editing:
   `agent/restic.go`.
 
 - **Agent dispatch is poll-based.** Agents enroll with a token, then poll
-  `agent-api.controller.ts` for `AgentTask`s (backup/restore). The server hands
+  `agent-api.controller.ts` for `AgentTask`s (backup/restore/check). The server hands
   over decrypted repository credentials only over the authenticated agent
   channel. Offline detection is a scheduled `@Interval` in `agents.service.ts`
   driven by `AGENT_OFFLINE_TIMEOUT_SECONDS`. `AgentTask` in `agents.service.ts`
   is the shared contract between server and Go agent.
+  Task types added later are gated by `PollDto.capabilities` (the agent
+  announces e.g. `check`), so an older agent is never handed a task it would
+  drop.
 
 - **Auth & RBAC.** Cookie/JWT session auth. `common/guards/auth.guard.ts`
   protects human/API-key requests; `agent-auth.guard.ts` protects the agent

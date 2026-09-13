@@ -17,10 +17,13 @@ import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
+import { CheckRunnerService } from '../jobs/check-runner.service';
 import { loadConfig } from '../config/configuration';
 import {
   Agent,
+  CheckInfo,
   GlobalEnrollmentValue,
+  IntegrityLevel,
   ResticOptions,
   RestoreOptions,
   RestoreDestination,
@@ -39,15 +42,22 @@ import {
 /** Placeholder swapped for the operator-chosen agent name in rollout commands. */
 const NAME_PLACEHOLDER = '__AGENT_NAME__';
 
+/**
+ * Task types an agent announces in its poll beyond the original backup and
+ * restore. Agents that predate a type never announce it and are not handed
+ * such tasks (they would drop them as unknown).
+ */
+export const AGENT_CAPABILITY_CHECK = 'check';
+
 export interface AgentTask {
-  type: 'backup' | 'restore';
+  type: 'backup' | 'restore' | 'check';
   taskId: string;
   repository: string;
   password: string;
   env: Record<string, string>;
   credentialFiles: { envVar: string; filename: string; content: string }[];
   extraArgs?: string[];
-  // backup
+  // backup, check
   jobId?: string;
   jobName?: string;
   paths?: string[];
@@ -57,6 +67,10 @@ export interface AgentTask {
   targetPath?: string;
   includedPaths?: string[] | null;
   restoreOptions?: RestoreOptions;
+  // check
+  checkLevel?: IntegrityLevel;
+  /** For a rotating check: the part to read, as `part/parts` (`--read-data-subset`). */
+  checkSubset?: string;
 }
 
 export type PublicAgent = Omit<Agent, 'agent_key_hash' | 'server_privkey'>;
@@ -72,6 +86,7 @@ export class AgentsService {
     private readonly notifications: NotificationsService,
     private readonly repositories: RepositoriesService,
     private readonly pruneRunner: PruneRunnerService,
+    private readonly checkRunner: CheckRunnerService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -511,6 +526,9 @@ echo "Amber agent installed and started."
     const tasks: AgentTask[] = [];
     tasks.push(...(await this.claimBackupTasks(agent.id)));
     tasks.push(...(await this.claimRestoreTasks(agent.id)));
+    if (dto.capabilities?.includes(AGENT_CAPABILITY_CHECK)) {
+      tasks.push(...(await this.claimCheckTasks(agent.id)));
+    }
 
     return {
       tasks,
@@ -574,6 +592,67 @@ echo "Amber agent installed and started."
           typeof run.restic_options === 'string'
             ? JSON.parse(run.restic_options)
             : run.restic_options,
+      });
+    }
+    return tasks;
+  }
+
+  private async claimCheckTasks(agentId: string): Promise<AgentTask[]> {
+    const runs = await this.db
+      .selectFrom('job_runs')
+      .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
+      .innerJoin('repositories', 'repositories.id', 'backup_jobs.repository_id')
+      .select([
+        'job_runs.id as run_id',
+        'job_runs.check_info',
+        'backup_jobs.id as job_id',
+        'backup_jobs.name as job_name',
+        'repositories.target_id',
+        'repositories.repo_config',
+        'repositories.repo_password_secret_id',
+        'repositories.credential_secret_id',
+      ])
+      .where('backup_jobs.agent_id', '=', agentId)
+      .where('job_runs.kind', '=', 'check')
+      .where('job_runs.status', '=', 'queued')
+      .execute();
+
+    const tasks: AgentTask[] = [];
+    for (const run of runs) {
+      const claimed = await this.db
+        .updateTable('job_runs')
+        .set({ status: 'running', agent_id: agentId, started_at: new Date() })
+        .where('id', '=', run.run_id)
+        .where('status', '=', 'queued')
+        .returning('id')
+        .executeTakeFirst();
+      if (!claimed) continue;
+
+      const info: CheckInfo =
+        (typeof run.check_info === 'string'
+          ? JSON.parse(run.check_info)
+          : run.check_info) ?? { level: 'quick' };
+      const resolved = await this.targets.resolveForJob({
+        target_id: run.target_id,
+        repo_config: run.repo_config,
+        repo_password_secret_id: run.repo_password_secret_id,
+        credential_secret_id: run.credential_secret_id,
+      });
+      tasks.push({
+        type: 'check',
+        taskId: run.run_id,
+        jobId: run.job_id,
+        jobName: run.job_name,
+        repository: resolved.repository,
+        password: resolved.password,
+        env: resolved.env,
+        credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
+        checkLevel: info.level,
+        checkSubset:
+          info.level === 'rotating' && info.part && info.parts
+            ? `${info.part}/${info.parts}`
+            : undefined,
       });
     }
     return tasks;
@@ -762,11 +841,18 @@ echo "Amber agent installed and started."
     // Route to the correct run table.
     const jobRun = await this.db
       .selectFrom('job_runs')
-      .select('id')
+      .select(['id', 'kind'])
       .where('id', '=', taskId)
       .where('agent_id', '=', agentId)
       .executeTakeFirst();
-    if (jobRun) {
+    if (jobRun?.kind === 'check') {
+      await this.checkRunner.recordAgentResult(agentId, taskId, {
+        status: dto.status,
+        damaged: dto.damaged ?? false,
+        error: dto.error ?? null,
+        log: dto.log ?? null,
+      });
+    } else if (jobRun) {
       await this.submitBackupResult(agentId, taskId, dto);
     } else {
       await this.submitRestoreResult(agentId, taskId, dto);

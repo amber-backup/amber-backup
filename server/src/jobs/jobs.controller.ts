@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -16,7 +17,9 @@ import { TargetsService } from '../targets/targets.service';
 import { JobsService } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
+import { CheckRunnerService, parseIntegrityConfig } from './check-runner.service';
 import { CreateJobDto, UpdateJobDto, TestRepoDto } from './dto/job.dto';
+import { IntegrityCheckConfigDto, StartCheckDto } from './dto/integrity-check.dto';
 import { BackupJobRow } from '../database/database.types';
 
 @ApiTags('jobs')
@@ -26,6 +29,7 @@ export class JobsController {
     private readonly jobs: JobsService,
     private readonly scheduler: SchedulerService,
     private readonly runner: JobRunnerService,
+    private readonly checkRunner: CheckRunnerService,
     private readonly targets: TargetsService,
     private readonly restic: ResticService,
     private readonly slugs: SlugResolverService,
@@ -38,12 +42,18 @@ export class JobsController {
    */
   private toApi(job: BackupJobRow) {
     const { credential_secret_id, ...rest } = job;
+    const integrity = parseIntegrityConfig(job.integrity_check);
     return {
       ...rest,
       // pg returns bigint as a string.
       repo_size_bytes:
         job.repo_size_bytes == null ? null : Number(job.repo_size_bytes),
+      integrity_check: integrity,
       next_run: this.jobs.nextRun(job.cron_expr),
+      next_check:
+        job.enabled && integrity.enabled && integrity.cronExpr
+          ? this.jobs.nextRun(integrity.cronExpr)
+          : null,
       has_credential_override: credential_secret_id != null,
     };
   }
@@ -115,5 +125,31 @@ export class JobsController {
     const runId = await this.jobs.createRun(id, 'manual');
     await this.runner.dispatch(runId);
     return { runId };
+  }
+
+  @Post(':id/check')
+  @ApiOperation({ summary: "Start an integrity check of the job's repository" })
+  async check(
+    @CurrentUser() user: RequestUser,
+    @Param('id') idOrSlug: string,
+    @Body() dto: StartCheckDto,
+  ) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
+    await this.jobs.assertOperate(user, id);
+    const runId = await this.checkRunner.start(id, 'manual', dto.level);
+    return { runId };
+  }
+
+  @Put(':id/integrity-check')
+  @ApiOperation({ summary: 'Set the integrity check schedule of a job' })
+  async setIntegrityCheck(
+    @CurrentUser() user: RequestUser,
+    @Param('id') idOrSlug: string,
+    @Body() dto: IntegrityCheckConfigDto,
+  ) {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
+    const job = await this.jobs.setIntegrityCheck(user, id, dto);
+    await this.scheduler.sync(job.id);
+    return this.toApi(job);
   }
 }

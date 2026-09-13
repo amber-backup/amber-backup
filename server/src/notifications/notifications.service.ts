@@ -4,7 +4,11 @@ import { SecretsService } from '../crypto/secrets.service';
 import { loadConfig } from '../config/configuration';
 import { RequestUser } from '../common/auth/request-user';
 import { uniqueSlug } from '../common/slug';
-import { JobNotifyConfig, NotificationChannel } from '../database/database.types';
+import {
+  CheckInfo,
+  JobNotifyConfig,
+  NotificationChannel,
+} from '../database/database.types';
 import {
   NotificationMessage,
   getChannel,
@@ -157,6 +161,8 @@ export class NotificationsService {
       .selectFrom('job_runs')
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
       .select([
+        'job_runs.kind',
+        'job_runs.check_info',
         'job_runs.status',
         'job_runs.snapshot_id',
         'job_runs.error',
@@ -184,14 +190,17 @@ export class NotificationsService {
       .execute();
     if (channels.length === 0) return;
 
-    const message = this.buildMessage(
-      run.status,
-      run.job_name,
-      run.snapshot_id,
-      run.error,
-      run.started_at,
-      run.finished_at,
-    );
+    const message =
+      run.kind === 'check'
+        ? this.buildCheckMessage(run.status, run.job_name, run.check_info, run.error, run.started_at, run.finished_at)
+        : this.buildMessage(
+            run.status,
+            run.job_name,
+            run.snapshot_id,
+            run.error,
+            run.started_at,
+            run.finished_at,
+          );
 
     await Promise.all(
       channels.map((c) =>
@@ -292,6 +301,57 @@ export class NotificationsService {
       body: meta.map((m) => `${m.label}: ${m.value}`).join('\n'),
       jobName,
       url: `${loadConfig().publicBaseUrl.replace(/\/$/, '')}/#/jobs`,
+      meta,
+    };
+  }
+
+  /** Message for a finished integrity check; damage is called out as such. */
+  private buildCheckMessage(
+    status: 'success' | 'failed',
+    jobName: string,
+    checkInfo: unknown,
+    error: string | null,
+    startedAt: Date | null,
+    finishedAt: Date | null,
+  ): NotificationMessage {
+    const info = (
+      typeof checkInfo === 'string' ? JSON.parse(checkInfo) : checkInfo
+    ) as CheckInfo | null;
+    const ok = status === 'success';
+    const damaged = !ok && !!info?.damaged;
+    const levelLabel =
+      info?.level === 'full'
+        ? 'Full (all data read)'
+        : info?.level === 'rotating'
+          ? `Rotating (data part ${info.part}/${info.parts})`
+          : 'Quick (structure only)';
+    const meta: { label: string; value: string }[] = [
+      { label: 'Job', value: jobName },
+      {
+        label: 'Result',
+        value: ok ? 'No errors found' : damaged ? 'Repository damaged' : 'Check could not complete',
+      },
+      { label: 'Level', value: levelLabel },
+    ];
+    if (startedAt && finishedAt) {
+      const secs = Math.max(
+        0,
+        Math.round((new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000),
+      );
+      meta.push({ label: 'Duration', value: `${secs}s` });
+    }
+    if (!ok && error) meta.push({ label: 'Error', value: error });
+    const title = ok
+      ? `✅ Integrity check passed: ${jobName}`
+      : damaged
+        ? `🚨 Repository damaged: ${jobName}`
+        : `❌ Integrity check failed: ${jobName}`;
+    return {
+      status,
+      title,
+      body: meta.map((m) => `${m.label}: ${m.value}`).join('\n'),
+      jobName,
+      url: `${loadConfig().publicBaseUrl.replace(/\/$/, '')}/#/snapshots`,
       meta,
     };
   }

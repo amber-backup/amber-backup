@@ -1,4 +1,4 @@
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './core/auth';
 import { ToastProvider } from './ui/toast';
 import { ModalProvider } from './ui/modal';
@@ -9,13 +9,19 @@ import { Dashboard } from './pages/dashboard';
 import { Targets } from './pages/targets';
 import { Jobs } from './pages/jobs';
 import { Agents } from './pages/agents';
-import { Restore } from './pages/restore';
+import { Snapshots } from './pages/snapshots';
 import { Users } from './pages/users';
 import { Notifications } from './pages/notifications';
 import { Reports } from './pages/reports';
 import { Admin } from './pages/admin';
 import { AuditLog } from './pages/audit';
 import { Settings } from './pages/settings';
+
+/** Forwards the former `/restore/:jobId` URL to the Snapshots page. */
+function RestoreRedirect() {
+  const { jobId } = useParams();
+  return <Navigate to={`/snapshots/${encodeURIComponent(jobId ?? '')}`} replace />;
+}
 
 function Gate() {
   const { user, loading } = useAuth();
@@ -37,8 +43,11 @@ function Gate() {
         <Route path="/targets" element={<Targets />} />
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/agents" element={<Agents />} />
-        <Route path="/restore" element={<Restore />} />
-        <Route path="/restore/:jobId" element={<Restore />} />
+        <Route path="/snapshots" element={<Snapshots />} />
+        <Route path="/snapshots/:jobId" element={<Snapshots />} />
+        {/* The page was called Restore; keep old bookmarks and links working. */}
+        <Route path="/restore" element={<Navigate to="/snapshots" replace />} />
+        <Route path="/restore/:jobId" element={<RestoreRedirect />} />
         <Route path="/users" element={<Users />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/reports" element={<Reports />} />

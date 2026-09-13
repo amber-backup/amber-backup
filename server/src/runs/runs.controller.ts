@@ -10,7 +10,7 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List activities: backup and prune runs (history + live)' })
+  @ApiOperation({ summary: 'List activities: backup, prune and check runs (history + live)' })
   list(
     @CurrentUser() user: RequestUser,
     @Query('limit') limit?: string,

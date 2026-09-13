@@ -227,16 +227,27 @@ export class ReportsService {
       }
     }
 
-    // Ensure jobs with zero matching runs still appear, by their name.
+    // Ensure jobs with zero matching runs still appear, by their name. The
+    // repository's integrity verdict comes along for the integrity section.
     const jobNameRows =
       jobIds.length > 0
         ? await this.db
             .selectFrom('backup_jobs')
-            .select(['id', 'name'])
-            .where('id', 'in', jobIds)
+            .innerJoin('repositories', 'repositories.id', 'backup_jobs.repository_id')
+            .select([
+              'backup_jobs.id as id',
+              'backup_jobs.name as name',
+              'repositories.check_status as check_status',
+              'repositories.check_at as check_at',
+              'repositories.check_error as check_error',
+            ])
+            .where('backup_jobs.id', 'in', jobIds)
             .execute()
         : [];
     for (const j of jobNameRows) if (!names.has(j.id)) names.set(j.id, j.name);
+    const integrityLines = jobNameRows.map(
+      (j) => `${names.get(j.id) ?? j.name}: ${integrityLabel(j)}`,
+    );
 
     let totalSuccess = 0;
     let totalFailed = 0;
@@ -278,6 +289,7 @@ export class ReportsService {
       ...(lines.length ? lines : ['No jobs selected.']),
       '',
       `Total: ${totalsLabel}`,
+      ...(integrityLines.length ? ['', 'Integrity:', ...integrityLines] : []),
     ].join('\n');
 
     return {
@@ -299,4 +311,22 @@ export class ReportsService {
         : undefined,
     };
   }
+}
+
+/** One-line integrity verdict of a job's repository for report bodies. */
+function integrityLabel(repo: {
+  check_status: string | null;
+  check_at: Date | null;
+  check_error: string | null;
+}): string {
+  const when = repo.check_at
+    ? ` (${new Date(repo.check_at).toISOString().slice(0, 10)})`
+    : '';
+  const verdict =
+    repo.check_status === 'passed'
+      ? `✅ verified${when}`
+      : repo.check_status === 'damaged'
+        ? `🚨 damaged${when}`
+        : '— never checked';
+  return repo.check_error ? `${verdict}, last attempt failed` : verdict;
 }

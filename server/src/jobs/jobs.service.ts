@@ -10,7 +10,11 @@ import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
-import { BackupJobRow, RunTrigger } from '../database/database.types';
+import {
+  BackupJobRow,
+  IntegrityCheckConfig,
+  RunTrigger,
+} from '../database/database.types';
 import {
   overridableFields,
   requiredJobFields,
@@ -18,6 +22,7 @@ import {
 } from '../targets/backend-registry';
 import { uniqueSlug } from '../common/slug';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
+import { IntegrityCheckConfigDto } from './dto/integrity-check.dto';
 
 @Injectable()
 export class JobsService {
@@ -144,6 +149,13 @@ export class JobsService {
         'r.snapshot_count as repo_snapshot_count',
         'r.stats_at as repo_stats_at',
         'r.stats_error as repo_stats_error',
+        'r.check_status as repo_check_status',
+        'r.check_at as repo_check_at',
+        'r.check_level as repo_check_level',
+        'r.check_error as repo_check_error',
+        'r.data_verified_at as repo_data_verified_at',
+        'r.check_subset_next as repo_check_subset_next',
+        'r.check_subset_parts as repo_check_subset_parts',
       ]);
   }
 
@@ -434,6 +446,37 @@ export class JobsService {
     if (job.credential_secret_id) {
       await this.secrets.remove(job.credential_secret_id);
     }
+  }
+
+  /**
+   * Replaces a job's integrity check schedule (requires 'manage'). The cron
+   * expression is only required — and validated — while the schedule is on.
+   */
+  async setIntegrityCheck(
+    user: RequestUser,
+    id: string,
+    dto: IntegrityCheckConfigDto,
+  ): Promise<BackupJobRow> {
+    await this.acl.assert(user, 'job', id, 'manage');
+    await this.getRow(id);
+    if (dto.enabled) {
+      if (!dto.cronExpr) {
+        throw new BadRequestException('A schedule needs a cron expression');
+      }
+      this.validateCron(dto.cronExpr);
+    }
+    const config: IntegrityCheckConfig = {
+      enabled: dto.enabled,
+      cronExpr: dto.cronExpr,
+      level: dto.level,
+      subsetParts: dto.level === 'rotating' ? dto.subsetParts : undefined,
+    };
+    await this.db
+      .updateTable('backup_jobs')
+      .set({ integrity_check: JSON.stringify(config), updated_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+    return this.getRow(id);
   }
 
   async assertOperate(user: RequestUser, id: string): Promise<void> {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, type Job, type Snapshot, type LsEntry, type RestoreRun } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtRelative, statusLabel } from '../core/format';
@@ -6,31 +7,47 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, Field, Loading, Spinner } from '../ui/primitives';
+import { IntegrityBadge, IntegrityPanel } from '../ui/integrity';
 
-export function Restore() {
-  const { data: jobs, loading } = useAsync(() => api.get<Job[]>('/jobs'));
-  const [job, setJob] = useState<Job | null>(null);
+/**
+ * Snapshots of each job's repository: browse, restore, delete — and verify the
+ * repository's integrity. The selected job lives in the URL (`#/snapshots/:jobId`,
+ * id or slug) so it can be linked to.
+ */
+export function Snapshots() {
+  const navigate = useNavigate();
+  const { jobId } = useParams();
+  const { data: jobs, loading, reload } = useAsync(() => api.get<Job[]>('/jobs'));
   const history = useAsync(() => api.get<RestoreRun[]>('/restores?limit=15').catch(() => [] as RestoreRun[]));
 
-  if (loading || !jobs) return <Loading label="Loading…" />;
+  // Keep showing the list while a reload (after a check) is in flight.
+  if (!jobs) return <Loading label="Loading…" />;
+  const job = jobId ? jobs.find((j) => j.id === jobId || j.slug === jobId) : undefined;
 
   return (
     <div>
       <PageHeader
-        title="Restore"
+        title="Snapshots"
         subtitle={
           job
-            ? 'Browse snapshots and restore selectively or in full'
-            : 'Pick a job to browse its snapshots'
+            ? 'Verify the repository, browse snapshots and restore selectively or in full'
+            : 'Pick a job to browse its snapshots and check its repository'
         }
       />
       {job ? (
         <>
-          <SnapshotsPanel job={job} onBack={() => setJob(null)} reloadHistory={history.reload} />
+          <IntegrityPanel job={job} onChanged={reload} />
+          <div className="section-gap">
+            <SnapshotsPanel job={job} onBack={() => navigate('/snapshots')} reloadHistory={history.reload} />
+          </div>
           <HistoryPanel runs={history.data} />
         </>
+      ) : jobId && !loading ? (
+        <div className="panel">
+          <div className="empty">This job does not exist or you have no access to it.</div>
+        </div>
       ) : (
-        <JobListPanel jobs={jobs} onSelect={setJob} />
+        <JobListPanel jobs={jobs} onSelect={(j) => navigate(`/snapshots/${j.slug}`)} />
       )}
     </div>
   );
@@ -57,6 +74,7 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
               <div className="row-title">{j.name}</div>
               <div className="row-sub">{repoSizeLabel(j)}</div>
             </div>
+            <IntegrityBadge job={j} />
             <div className="row-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => onSelect(j)}>
                 <Icon name="snapshot" />

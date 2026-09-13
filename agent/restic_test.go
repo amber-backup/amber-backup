@@ -52,3 +52,36 @@ func TestRestoreArgsSnapshotAfterTerminator(t *testing.T) {
 		t.Fatalf("snapshot id at %d appears before terminator at %d: %v", i, dd, args)
 	}
 }
+
+func TestCheckArgs(t *testing.T) {
+	cases := []struct {
+		task Task
+		want []string
+	}{
+		{Task{CheckLevel: "quick"}, []string{"check"}},
+		{Task{CheckLevel: "full"}, []string{"check", "--read-data"}},
+		{Task{CheckLevel: "rotating", CheckSubset: "3/12"}, []string{"check", "--read-data-subset=3/12"}},
+		// A rotating task without a subset degrades to a structure check.
+		{Task{CheckLevel: "rotating"}, []string{"check"}},
+	}
+	for _, c := range cases {
+		got := checkArgs(&c.task)
+		if len(got) != len(c.want) {
+			t.Fatalf("checkArgs(%+v) = %v, want %v", c.task, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("checkArgs(%+v) = %v, want %v", c.task, got, c.want)
+			}
+		}
+	}
+}
+
+func TestIsDamagedCheckOutput(t *testing.T) {
+	if !isDamagedCheckOutput("pack abc contains 2 errors\nFatal: repository contains errors\n") {
+		t.Fatal("damage report not recognized")
+	}
+	if isDamagedCheckOutput("Fatal: unable to create lock in backend: repository is already locked") {
+		t.Fatal("lock failure mistaken for damage")
+	}
+}

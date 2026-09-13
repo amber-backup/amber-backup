@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var credentialFileRefRE = regexp.MustCompile(`\{\{credentialFile:([^}]+)\}\}`)
@@ -101,7 +103,22 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 		return -1, err
 	}
 
+	// Wait must not run before the pipes are drained, or trailing output (e.g.
+	// restic's final "Fatal: …" line) can be lost.
+	var readers sync.WaitGroup
+	readers.Add(2)
+	// Both streams feed the same log; callers append to a plain strings.Builder.
+	var logMu sync.Mutex
+	logLine := func(line string) {
+		if onLog == nil {
+			return
+		}
+		logMu.Lock()
+		defer logMu.Unlock()
+		onLog(line)
+	}
 	go func() {
+		defer readers.Done()
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 1024*1024), 8*1024*1024)
 		for sc.Scan() {
@@ -111,20 +128,23 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 				if onLine != nil {
 					onLine(obj)
 				}
-			} else if onLog != nil {
-				onLog(line)
+			} else {
+				logLine(line)
 			}
 		}
+		// A scanner stops at an over-long line; keep draining so restic can't block.
+		io.Copy(io.Discard, stdout)
 	}()
 	go func() {
+		defer readers.Done()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			if onLog != nil {
-				onLog(sc.Text())
-			}
+			logLine(sc.Text())
 		}
+		io.Copy(io.Discard, stderr)
 	}()
 
+	readers.Wait()
 	err = cmd.Wait()
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		return exitErr.ExitCode(), nil
@@ -244,6 +264,26 @@ func restoreArgs(t *Task) []string {
 	// be interpreted as a restic flag.
 	args = append(args, "--", t.SnapshotID)
 	return args
+}
+
+// checkArgs builds `restic check` arguments for the task's level (mirrors the
+// server's checkArgs). The subset comes from the server as "part/parts".
+func checkArgs(t *Task) []string {
+	switch t.CheckLevel {
+	case "full":
+		return []string{"check", "--read-data"}
+	case "rotating":
+		if t.CheckSubset != "" {
+			return []string{"check", "--read-data-subset=" + t.CheckSubset}
+		}
+	}
+	return []string{"check"}
+}
+
+// isDamagedCheckOutput tells a check that found errors apart from one that
+// could not run: restic ends the former with "Fatal: repository contains errors".
+func isDamagedCheckOutput(output string) bool {
+	return strings.Contains(strings.ToLower(output), "repository contains errors")
 }
 
 func hasRetention(ret *Retention) bool {
