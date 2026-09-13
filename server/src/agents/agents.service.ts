@@ -433,6 +433,21 @@ echo "Amber agent installed and started."
       throw new BadRequestException('Agent name is required for enrollment');
     }
 
+    // Consume a one-time token atomically *before* creating the agent: the
+    // conditional UPDATE marks it used only if it is still unused, so two
+    // concurrent enrollments with the same token cannot both succeed.
+    if (oneTimeTokenId) {
+      const claim = await this.db
+        .updateTable('enrollment_tokens')
+        .set({ used_at: new Date() })
+        .where('id', '=', oneTimeTokenId)
+        .where('used_at', 'is', null)
+        .executeTakeFirst();
+      if (Number(claim.numUpdatedRows ?? 0) === 0) {
+        throw new ForbiddenException('Token already used');
+      }
+    }
+
     // Server keypair for signing task payloads (integrity verification).
     const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
       publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -457,15 +472,8 @@ echo "Amber agent installed and started."
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    // One-time tokens are consumed; the global token stays valid for the fleet.
-    if (oneTimeTokenId) {
-      await this.db
-        .updateTable('enrollment_tokens')
-        .set({ used_at: new Date() })
-        .where('id', '=', oneTimeTokenId)
-        .execute();
-    }
-
+    // (The one-time token was already consumed atomically above; the global
+    // token stays valid for the fleet.)
     this.logger.log(
       `Agent enrolled: ${agent.name} (${agent.id})${viaGlobal ? ' [self-registered]' : ''}`,
     );
