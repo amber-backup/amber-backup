@@ -51,7 +51,9 @@ export class JobsService {
     targetId: string | null | undefined,
   ): Promise<string> {
     if (!targetId) return 'local';
-    await this.acl.assert(user, 'target', targetId, 'view');
+    // Using a connection as a job's repository (and thereby its decrypted
+    // credentials at run time) is an 'operate' action, not mere visibility.
+    await this.acl.assert(user, 'target', targetId, 'operate');
     const t = await this.db
       .selectFrom('targets')
       .select('backend_type')
@@ -172,6 +174,16 @@ export class JobsService {
   }
 
   async create(user: RequestUser, dto: CreateJobDto): Promise<BackupJobRow> {
+    // A backup job reads a host filesystem (the server for local jobs, an agent
+    // host for remote ones) as the restic process user — an un-delegable,
+    // root-level capability the view/operate/manage grant model does not cover.
+    // Defining what gets backed up from a host is therefore an admin action;
+    // non-admins operate (run) and view the jobs admins define.
+    if (!user.isAdmin) {
+      throw new ForbiddenException(
+        'Creating a backup job requires administrator access',
+      );
+    }
     this.validateCron(dto.cronExpr);
     // The repository lives on a shared connection (target) or locally on the
     // executing host (target_id = null). The user must be able to use the
@@ -272,6 +284,20 @@ export class JobsService {
     dto: UpdateJobDto,
   ): Promise<BackupJobRow> {
     await this.acl.assert(user, 'job', id, 'manage');
+    // Changing the execution host, source paths or host-run scripts crosses the
+    // same host-filesystem trust boundary as creating a job → admin only. A
+    // non-admin with 'manage' may still edit non-host fields (schedule,
+    // notifications, enabled flag, name, repository password/config).
+    const touchesHost =
+      dto.location !== undefined ||
+      dto.agentId !== undefined ||
+      dto.paths !== undefined ||
+      dto.resticOptions !== undefined;
+    if (touchesHost && !user.isAdmin) {
+      throw new ForbiddenException(
+        "Editing a job's execution host, paths or scripts requires administrator access",
+      );
+    }
     if (dto.cronExpr) this.validateCron(dto.cronExpr);
     const job = await this.getRow(id);
 
