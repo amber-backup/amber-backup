@@ -1,3 +1,13 @@
+# [1.28.0](https://github.com/amber-backup/amber-backup/compare/v1.27.0...v1.28.0) (2026-09-13)
+
+
+### Features
+
+* **auth:** device authorization flow for CLI login ([244b1d8](https://github.com/amber-backup/amber-backup/commit/244b1d87cfe070e939b4e868f513d94cf497140c))
+* **cli:** `ambb login` / `ambb logout` via browser device pairing ([1902eb5](https://github.com/amber-backup/amber-backup/commit/1902eb5ed2e23da1df26401781ade5a8164db24b))
+* **cli:** add `ambb update` to self-update from GitHub Releases ([e200ffb](https://github.com/amber-backup/amber-backup/commit/e200ffb9917581a57db2bcb915f95a89eccc5dfd))
+* **client:** device login page to approve `ambb login` ([0ee196e](https://github.com/amber-backup/amber-backup/commit/0ee196e6b0bc1f004a7dc36116b7b55dc90ec020))
+
 # [1.27.0](https://github.com/amber-backup/amber-backup/compare/v1.26.0...v1.27.0) (2026-09-13)
 
 
