@@ -28,9 +28,16 @@ export class CryptoService {
     this.key = Buffer.from(config.masterEncryptionKey, 'base64');
   }
 
-  encrypt(plaintext: string): EncryptedPayload {
+  /**
+   * Encrypts a secret. `aad` (associated data) is authenticated but not
+   * encrypted: binding it to the owning row's identity means a ciphertext moved
+   * onto a different row (e.g. via direct DB write) fails to decrypt there, so
+   * an attacker cannot relocate one repo's secret onto a repo they control.
+   */
+  encrypt(plaintext: string, aad?: string): EncryptedPayload {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);
+    if (aad) cipher.setAAD(Buffer.from(aad, 'utf8'));
     const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
     return {
@@ -39,12 +46,13 @@ export class CryptoService {
     };
   }
 
-  decrypt(payload: EncryptedPayload): string {
+  decrypt(payload: EncryptedPayload, aad?: string): string {
     const iv = Buffer.from(payload.nonce, 'base64');
     const raw = Buffer.from(payload.ciphertext, 'base64');
     const authTag = raw.subarray(0, 16);
     const enc = raw.subarray(16);
     const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
+    if (aad) decipher.setAAD(Buffer.from(aad, 'utf8'));
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
   }

@@ -1,7 +1,13 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Db, KYSELY } from '../database/database.module';
 import { SecretType } from '../database/database.types';
 import { CryptoService } from './crypto.service';
+
+/** AAD binding a ciphertext to its own row, so it can't be swapped between rows. */
+function aadFor(id: string): string {
+  return `secret:${id}`;
+}
 
 /**
  * Stores and retrieves encrypted secrets (repo passwords, backend credentials).
@@ -15,17 +21,19 @@ export class SecretsService {
   ) {}
 
   async create(type: SecretType, plaintext: string): Promise<string> {
-    const { ciphertext, nonce } = this.crypto.encrypt(plaintext);
+    // Generate the id up front so it can bind the ciphertext as AAD.
+    const id = randomUUID();
+    const { ciphertext, nonce } = this.crypto.encrypt(plaintext, aadFor(id));
     const row = await this.db
       .insertInto('secrets')
-      .values({ type, ciphertext, nonce })
+      .values({ id, type, ciphertext, nonce })
       .returning('id')
       .executeTakeFirstOrThrow();
     return row.id;
   }
 
   async update(id: string, plaintext: string): Promise<void> {
-    const { ciphertext, nonce } = this.crypto.encrypt(plaintext);
+    const { ciphertext, nonce } = this.crypto.encrypt(plaintext, aadFor(id));
     await this.db
       .updateTable('secrets')
       .set({ ciphertext, nonce })
@@ -40,7 +48,13 @@ export class SecretsService {
       .where('id', '=', id)
       .executeTakeFirst();
     if (!row) throw new NotFoundException(`Secret ${id} not found`);
-    return this.crypto.decrypt(row);
+    try {
+      return this.crypto.decrypt(row, aadFor(id));
+    } catch {
+      // Secrets written before AAD binding carry none; fall back so existing
+      // deployments keep working. They upgrade to AAD-bound on the next update.
+      return this.crypto.decrypt(row);
+    }
   }
 
   async revealOptional(id: string | null): Promise<string | null> {
