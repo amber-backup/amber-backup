@@ -120,7 +120,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorEmail: dto.email,
@@ -168,7 +169,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorType: 'session',
@@ -305,7 +307,8 @@ export class AuthController {
         ip,
         userAgent,
       });
-      return { user: result.user, token: result.token };
+      // The session lives in the httpOnly cookie only; never expose the JWT to JS.
+      return { user: result.user };
     } catch (err) {
       void this.audit.record({
         actorType: 'session',
