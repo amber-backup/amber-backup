@@ -1,0 +1,90 @@
+name: Release CLI
+
+# Cross-compiles the ambb CLI and attaches the binaries to a GitHub Release.
+# Triggered by the version tags semantic-release creates (v1.2.3), or manually
+# for an existing tag.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release (e.g. v1.27.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.mod
+
+      - name: Test
+        working-directory: cli
+        run: go test ./...
+
+      - name: Build binaries
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="ambb_${version}_${os}_${arch}"
+            ext=""
+            [ "$os" = windows ] && ext=".exe"
+            mkdir -p "build/$name"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.Version=${version}" \
+              -o "build/$name/ambb$ext" .
+            cp README.md ../LICENSE "build/$name/"
+            if [ "$os" = windows ]; then
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -czf "dist/$name.tar.gz" -C build "$name"
+            fi
+          done
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # Section of this version: from its heading up to the next version heading.
+          awk -v v="$version" '
+            /^#{1,2} \[/ { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" cli/dist/* --clobber
+          else
+            gh release create "$TAG" cli/dist/* \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              --verify-tag
+          fi

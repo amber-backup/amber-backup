@@ -3,6 +3,12 @@
 A small, dependency-free Go CLI for the Amber Backup server's REST API. It lists
 and inspects agents, jobs, repositories and targets, and triggers jobs manually.
 
+## Download
+
+Prebuilt binaries for Linux, macOS and Windows (amd64/arm64) are attached to
+every [GitHub Release](https://github.com/amber-backup/amber-backup/releases),
+together with a `checksums.txt`.
+
 ## Build
 
 ```bash

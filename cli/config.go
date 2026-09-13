@@ -6,8 +6,9 @@ import (
 	"strings"
 )
 
-// Version of the ambb CLI. Kept in sync with the server release line.
-const Version = "0.1.0"
+// Version of the ambb CLI. Kept in sync with the server release line: release
+// builds inject the tag via -ldflags "-X main.Version=<version>".
+var Version = "dev"
 
 // OutputFormat controls how command results are rendered.
 type OutputFormat string
