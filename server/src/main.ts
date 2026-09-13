@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { loadConfig, validateConfig } from './config/configuration';
 import { httpLogger } from './common/middleware/http-logger.middleware';
@@ -25,6 +26,44 @@ async function bootstrap(): Promise<void> {
   app.getHttpAdapter().getInstance().set('trust proxy', config.trustProxy);
 
   app.setGlobalPrefix('api', { exclude: ['/'] });
+
+  // Security headers (CSP, HSTS, X-Frame-Options: DENY, nosniff, no-referrer,
+  // etc.). The CSP is tuned for the self-hosted SPA: everything comes from the
+  // same origin; inline *styles* are allowed (React style attributes + the
+  // design system) but inline scripts are not; framing is denied to prevent
+  // clickjacking of destructive actions. The interactive Swagger UI at
+  // /api/explorer ships inline scripts, so it is exempted from the CSP.
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+  const secureHeaders = helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'default-src': ["'self'"],
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'img-src': ["'self'", 'data:', 'blob:'],
+        'font-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'object-src': ["'none'"],
+        'frame-ancestors': ["'none'"],
+        'base-uri': ["'self'"],
+        'form-action': ["'self'"],
+        // Would force https on plain-HTTP deployments; leave to the operator.
+        'upgrade-insecure-requests': null,
+      },
+    },
+    // Not needed for this app and can block same-origin asset loading.
+    crossOriginEmbedderPolicy: false,
+  });
+  app.use((req: { path?: string; url: string }, res: unknown, next: () => void) => {
+    if ((req.path ?? req.url).startsWith('/api/explorer')) return next();
+    return (secureHeaders as (a: unknown, b: unknown, c: unknown) => void)(
+      req,
+      res,
+      next,
+    );
+  });
+
   app.use(cookieParser());
   // Access log for every HTTP request (before guards/routing so 401/403 and 404
   // are logged too). Disable with HTTP_LOGGING=false.
