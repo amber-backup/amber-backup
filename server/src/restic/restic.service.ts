@@ -264,8 +264,19 @@ export class ResticService {
     let stats: RunStats = {};
     let snapshotId: string | null = null;
 
+    // Enforce the job's optional time limit: abort the restic process when it
+    // is exceeded, so a hung backend cannot hold a run (and its slot) forever.
+    // Combined with any cancellation signal the caller passed.
+    const limit = options.timeLimitSeconds;
+    const effectiveSignal =
+      limit && limit > 0
+        ? signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(limit * 1000)])
+          : AbortSignal.timeout(limit * 1000)
+        : signal;
+
     const res = await this.run(ctx, args, {
-      signal,
+      signal: effectiveSignal,
       onStdoutLine: (line) => {
         try {
           const msg = JSON.parse(line);
