@@ -1,3 +1,11 @@
+# [1.29.0](https://github.com/amber-backup/amber-backup/compare/v1.28.0...v1.29.0) (2026-09-13)
+
+
+### Features
+
+* **client:** show upgrade hint next to the version label ([6299959](https://github.com/amber-backup/amber-backup/commit/6299959e6deaf7604676f55a4e711f742ee2ef17))
+* **updates:** periodically check GitHub for a newer release ([1b836e0](https://github.com/amber-backup/amber-backup/commit/1b836e0c3e2c454765dad903f799463fd0658b60))
+
 # [1.28.0](https://github.com/amber-backup/amber-backup/compare/v1.27.0...v1.28.0) (2026-09-13)
 
 
