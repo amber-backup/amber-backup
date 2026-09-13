@@ -1,3 +1,40 @@
+## [1.25.1](https://github.com/amber-backup/amber-backup/compare/v1.25.0...v1.25.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **agent:** only auto-update over HTTPS ([c6d795b](https://github.com/amber-backup/amber-backup/commit/c6d795b5dbf4d990f34eb7aeb3c726b33373ff80))
+* **agents:** bound agent-submitted string fields ([2a1df64](https://github.com/amber-backup/amber-backup/commit/2a1df648fec804200366170e7846659c9c1157f0))
+* **agents:** consume one-time enrollment token atomically ([f064dc8](https://github.com/amber-backup/amber-backup/commit/f064dc8230eeab0d98930500d9830e29f7fcd3ff))
+* **agents:** keep the enrollment token out of the world-readable unit file ([5dcae18](https://github.com/amber-backup/amber-backup/commit/5dcae189772f530882b1e443243af35c0fa3a5a1))
+* **audit:** derive client IP via trust-proxy instead of raw XFF ([88412d8](https://github.com/amber-backup/amber-backup/commit/88412d8442973afed271db60b9acddc128dad9da))
+* **audit:** redact secrets by declared fields, not just a name regex ([8122c31](https://github.com/amber-backup/amber-backup/commit/8122c312e52d62a0517831e292bdb994cc818108))
+* **auth:** enforce API-key scopes and block privilege minting ([9e01927](https://github.com/amber-backup/amber-backup/commit/9e019270806c961f787548e3f2dfcc72509ef3bb))
+* **auth:** make the 2FA challenge single-use and attempt-capped ([324eac3](https://github.com/amber-backup/amber-backup/commit/324eac3e875705143ef26e6ea736d92a59d10ca1))
+* **auth:** rate-limit login, 2FA and passkey endpoints ([63a35b8](https://github.com/amber-backup/amber-backup/commit/63a35b88b24b4a636fd697ad5524be7e317435d1))
+* **auth:** revoke existing sessions on password change/reset ([44596fb](https://github.com/amber-backup/amber-backup/commit/44596fb2dd11412f4afb4f252b705783be6bc260))
+* **auth:** stop returning the session JWT in login response bodies ([6f33af2](https://github.com/amber-backup/amber-backup/commit/6f33af250959e6f081372aff1f262c01cfde835e))
+* **cors:** restrict origins instead of reflecting any with credentials ([d6f671f](https://github.com/amber-backup/amber-backup/commit/d6f671f2ad056644a2a3b0a54ee08f6e62310f66))
+* **crypto:** bind each secret's ciphertext to its row via GCM AAD ([bad2ab3](https://github.com/amber-backup/amber-backup/commit/bad2ab3a02e74591a8105a75e21af84a864c79d8))
+* **deps:** upgrade nodemailer to v10 (drops known advisories) ([5938fe1](https://github.com/amber-backup/amber-backup/commit/5938fe1f37628b1b56bfe550c02000b917fd46b3))
+* **docker:** verify restic checksum and require secrets in compose ([a2b9a84](https://github.com/amber-backup/amber-backup/commit/a2b9a84fae934cc1d6a0bafbf1b7bc803f7374af))
+* **dto:** validate authorization-critical nested inputs ([3773e30](https://github.com/amber-backup/amber-backup/commit/3773e30fbce1572cb45a5a130b0463d1fb47d637))
+* **exec:** strip server secrets from child-process environments ([add5fb8](https://github.com/amber-backup/amber-backup/commit/add5fb89e4de04a32c94f882433db092136dd427))
+* **headers:** add security headers via helmet ([84fb794](https://github.com/amber-backup/amber-backup/commit/84fb794e4f3a5d86c3524ef7a90cde2063b09f31))
+* **jobs:** gate host-filesystem access behind admin ([54633ab](https://github.com/amber-backup/amber-backup/commit/54633ab5c20b6825d39236a07d872dfbee23804a))
+* **notifications:** prevent message-injection in Slack and Discord ([705206d](https://github.com/amber-backup/amber-backup/commit/705206de5bd35b5058a568d5986982ba7167b9e7))
+* **passkeys:** keep passkeys local-only and drop them on SSO switch ([48d19c1](https://github.com/amber-backup/amber-backup/commit/48d19c16032b7f39239b01a36c777c1ea5fba78c))
+* **repositories:** require manage to reveal decrypted credentials ([eaea595](https://github.com/amber-backup/amber-backup/commit/eaea59516472f5f526e007a34425a21948045d5a))
+* **restic:** enforce the per-job backup time limit ([2a572f1](https://github.com/amber-backup/amber-backup/commit/2a572f199063203c5a8610e8429735a1326cc6ed))
+* **restic:** scrub embedded credentials from restic output ([42556f5](https://github.com/amber-backup/amber-backup/commit/42556f552781d5a9003133cb9f833c2cbddb52b5))
+* **restic:** terminate option parsing with -- before user positionals ([2a95d7e](https://github.com/amber-backup/amber-backup/commit/2a95d7e7622cf3a7e6c2ef442ce5faae6b78d61e))
+* **restore:** require admin to restore onto a host filesystem ([b18af09](https://github.com/amber-backup/amber-backup/commit/b18af090884f842ab119f2f04867daca855eda96))
+* **sftp:** reject ssh-option injection in host/user/port ([3955833](https://github.com/amber-backup/amber-backup/commit/395583342c685dca217ffc4988beb8cd6e9be308))
+* **sso:** require a verified email before linking or provisioning ([51fa077](https://github.com/amber-backup/amber-backup/commit/51fa0774f26fb2fdcb5f422df81c972236f14a2c))
+* **ssrf:** block loopback/link-local/metadata for outbound connections ([60fe17d](https://github.com/amber-backup/amber-backup/commit/60fe17d376c3abbf8ddf7b2cc30929d6a4b9d166))
+* **swagger:** do not expose the API explorer in production ([e555c88](https://github.com/amber-backup/amber-backup/commit/e555c88f86fa336764ebe0c05462767f10fa2956))
+* **users:** prevent locking out the last administrator ([1306faf](https://github.com/amber-backup/amber-backup/commit/1306fafdc0511928ba5830f12010d559ab2d4083))
+
 # [1.25.0](https://github.com/amber-backup/amber-backup/compare/v1.24.3...v1.25.0) (2026-09-13)
 
 
