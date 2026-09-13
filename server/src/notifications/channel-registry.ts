@@ -1,4 +1,5 @@
 import * as nodemailer from 'nodemailer';
+import { assertSafeFetchUrl, assertSafeHost } from '../common/net-guard';
 
 /**
  * Registry of supported notification providers. Each definition declares its
@@ -69,10 +70,15 @@ async function postJson(
   payload: unknown,
   headers: Record<string, string> = {},
 ): Promise<void> {
+  // SSRF guard: reject before connecting if the (possibly user-configured) URL
+  // targets loopback/link-local/metadata. `redirect: 'manual'` stops a 30x from
+  // bouncing a vetted host to an internal one.
+  await assertSafeFetchUrl(url);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(payload),
+    redirect: 'manual',
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -322,6 +328,9 @@ export const CHANNELS: ChannelDefinition[] = [
     send: async (config, secrets, message) => {
       const port = Number(str(config.port)) || 587;
       const security = str(config.security) || 'starttls';
+      // SSRF guard: don't let a channel point the SMTP client at localhost or a
+      // link-local address on the server's own network.
+      await assertSafeHost(str(config.host));
       const transport = nodemailer.createTransport({
         host: str(config.host),
         port,

@@ -4,6 +4,7 @@ import * as net from 'node:net';
 import { Db, KYSELY } from '../database/database.module';
 import { SecretsService } from '../crypto/secrets.service';
 import { Target, TargetStatus } from '../database/database.types';
+import { assertSafeFetchUrl, assertSafeHost } from '../common/net-guard';
 
 /**
  * Reachability checks for targets (backend connections). A target carries no
@@ -96,7 +97,14 @@ function errMessage(err: unknown): string {
   return String(err);
 }
 
-function probeTcp(host: string, port: number): Promise<CheckOutcome> {
+async function probeTcp(host: string, port: number): Promise<CheckOutcome> {
+  // SSRF guard: never let a target probe reach loopback/link-local (the server's
+  // own services or the cloud metadata endpoint).
+  try {
+    await assertSafeHost(host);
+  } catch {
+    return { status: 'offline', error: 'blocked address' };
+  }
   return new Promise((resolve) => {
     const socket = net.connect({ host, port });
     const done = (status: TargetStatus, error: string | null) => {
@@ -112,6 +120,12 @@ function probeTcp(host: string, port: number): Promise<CheckOutcome> {
 }
 
 async function probeHttp(url: string): Promise<CheckOutcome> {
+  try {
+    // SSRF guard: reject loopback/link-local/metadata before connecting.
+    await assertSafeFetchUrl(url);
+  } catch {
+    return { status: 'offline', error: 'blocked address' };
+  }
   try {
     // Any HTTP response — auth errors included — proves reachability.
     await fetch(url, {
