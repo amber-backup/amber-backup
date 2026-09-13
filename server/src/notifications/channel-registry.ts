@@ -522,6 +522,15 @@ export function channelCatalog() {
   return CHANNELS.map((c) => ({ type: c.type, label: c.label, fields: c.fields }));
 }
 
+/** Every field name any channel marks as secret (used to redact audit bodies). */
+export function secretChannelFieldNames(): string[] {
+  const names = new Set<string>();
+  for (const c of CHANNELS) {
+    for (const f of c.fields) if (f.secret) names.add(f.name);
+  }
+  return [...names];
+}
+
 /** Splits a flat form payload into non-secret config and secret credentials. */
 export function splitChannelConfig(
   type: string,

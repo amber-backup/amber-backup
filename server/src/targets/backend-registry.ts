@@ -428,3 +428,16 @@ export function requiredJobFields(type: string): string[] {
     .fields.filter((f) => f.scope === 'job' && f.required)
     .map((f) => f.name);
 }
+
+/**
+ * Every field name any backend marks as secret. Used to redact request bodies
+ * (e.g. in the audit log) by declared sensitivity rather than a name heuristic,
+ * so fields like accountKey/serviceAccountJson/authUrl are never persisted.
+ */
+export function secretFieldNames(): string[] {
+  const names = new Set<string>();
+  for (const b of BACKENDS) {
+    for (const f of b.fields) if (f.secret) names.add(f.name);
+  }
+  return [...names];
+}

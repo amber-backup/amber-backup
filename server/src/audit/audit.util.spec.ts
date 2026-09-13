@@ -39,6 +39,33 @@ describe('audit redaction (never persist plaintext secrets)', () => {
     }
   });
 
+  it('redacts registry-declared secret fields the name regex misses', () => {
+    // These are marked secret by the backend/channel registries but their
+    // names do not match SECRET_KEY_RE — they used to leak into the audit log.
+    const input = {
+      accountId: 'b2-key-id',
+      accountKey: 'b2-app-key',
+      serviceAccountJson: '{"private_key":"-----BEGIN..."}',
+      authUrl: 'https://swift.example.com/v3',
+      region: 'eu-central',
+      headerValue: 'Bearer super-secret',
+      code: '123456',
+      bucket: 'my-bucket',
+    };
+
+    const out = redactSecrets(input) as Record<string, unknown>;
+
+    expect(out.accountId).toBe('[redacted]');
+    expect(out.accountKey).toBe('[redacted]');
+    expect(out.serviceAccountJson).toBe('[redacted]');
+    expect(out.authUrl).toBe('[redacted]');
+    expect(out.region).toBe('[redacted]');
+    expect(out.headerValue).toBe('[redacted]');
+    expect(out.code).toBe('[redacted]');
+    // Non-secret config is preserved for a useful audit trail.
+    expect(out.bucket).toBe('my-bucket');
+  });
+
   it('does not mutate the original object', () => {
     const input = { password: 'hunter2' };
     redactSecrets(input);
