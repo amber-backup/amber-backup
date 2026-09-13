@@ -22,6 +22,13 @@ export interface AppConfig {
   jwtExpiresIn: string;
   /** Whether session/SSO cookies get the Secure flag (breaks login over HTTP). */
   cookieSecure: boolean;
+  /**
+   * Express `trust proxy` setting. Controls whether X-Forwarded-For is honoured
+   * when deriving the client IP (used for audit entries and rate limiting).
+   * Number = trust N proxy hops; 'true'/'false'; or a preset like 'loopback'.
+   * Default false: never trust the header, so a client cannot spoof its IP.
+   */
+  trustProxy: boolean | number | string;
   resticBinary: string;
   resticCacheDir: string;
   restoreTmpDir: string;
@@ -46,6 +53,21 @@ function bool(value: string | undefined, fallback = false): boolean {
 function int(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Interprets TRUST_PROXY as Express expects: a hop count (number), an explicit
+ * boolean, or a named preset (e.g. 'loopback', 'uniquelocal'). Defaults to
+ * false so X-Forwarded-For is ignored unless a deployment opts in.
+ */
+function parseTrustProxy(value: string | undefined): boolean | number | string {
+  if (value === undefined || value === '') return false;
+  const lower = value.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+  const n = Number(value);
+  if (Number.isInteger(n) && n >= 0) return n;
+  return value;
 }
 
 /** Parses a URL, returning undefined instead of throwing on malformed input. */
@@ -91,6 +113,7 @@ export function loadConfig(): AppConfig {
       env.COOKIE_SECURE,
       (env.PUBLIC_BASE_URL ?? '').startsWith('https://'),
     ),
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
     resticBinary: env.RESTIC_BINARY ?? 'restic',
     resticCacheDir: env.RESTIC_CACHE_DIR ?? './.cache/restic',
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',

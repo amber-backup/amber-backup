@@ -19,6 +19,11 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
 
+  // Honour X-Forwarded-For only as far as the deployment declares (default: not
+  // at all), so the audit log and rate limiter see a client IP that cannot be
+  // spoofed by an arbitrary caller sending its own X-Forwarded-For header.
+  app.getHttpAdapter().getInstance().set('trust proxy', config.trustProxy);
+
   app.setGlobalPrefix('api', { exclude: ['/'] });
   app.use(cookieParser());
   // Access log for every HTTP request (before guards/routing so 401/403 and 404

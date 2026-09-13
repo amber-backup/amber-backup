@@ -33,10 +33,12 @@ import {
   PasskeyRegisterDto,
 } from './dto/auth.dto';
 
-/** Best-effort client IP for audit entries. */
+/**
+ * Client IP for audit entries. Uses Express's `req.ip`, which honours
+ * X-Forwarded-For only according to the configured `trust proxy` setting — so
+ * a caller cannot forge the recorded IP by sending its own header.
+ */
 function clientIp(req: Request): string | null {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   return req.ip ?? req.socket?.remoteAddress ?? null;
 }
 
