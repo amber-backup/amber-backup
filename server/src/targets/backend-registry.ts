@@ -109,6 +109,32 @@ function str(v: unknown): string {
   return v == null ? '' : String(v);
 }
 
+/**
+ * restic's SFTP backend shells out to `ssh` via a space-joined `-o
+ * sftp.command=...`. A host/user containing whitespace or a leading `-` would
+ * be re-split by restic and parsed by ssh as extra options (e.g.
+ * `-oProxyCommand=...`, which ssh runs through /bin/sh → RCE on the executing
+ * host). Restrict host/user/port to characters that cannot break out of their
+ * argv token. Hostnames, IPv4, and bracketed IPv6 literals all pass.
+ */
+const SFTP_HOST_RE = /^\[[0-9A-Fa-f:]+\]$|^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+const SFTP_USER_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+
+export function assertSafeSftpConfig(config: Record<string, unknown>): void {
+  const host = str(config.host);
+  const user = str(config.user);
+  const port = str(config.port);
+  if (host && !SFTP_HOST_RE.test(host)) {
+    throw new Error(`Invalid SFTP host: ${host}`);
+  }
+  if (user && !SFTP_USER_RE.test(user)) {
+    throw new Error(`Invalid SFTP user: ${user}`);
+  }
+  if (port && !/^[0-9]{1,5}$/.test(port)) {
+    throw new Error(`Invalid SFTP port: ${port}`);
+  }
+}
+
 function joinPath(base: string, prefix?: unknown): string {
   const p = str(prefix).replace(/^\/+|\/+$/g, '');
   return p ? `${base}/${p}` : base;
@@ -145,6 +171,9 @@ export const BACKENDS: BackendDefinition[] = [
       { name: 'path', label: 'Path', type: 'text', required: true, scope: 'job', placeholder: '/backups/restic' },
     ],
     build: (config, credentials, repoConfig) => {
+      // Enforced here too (not only at write time) so a value that somehow
+      // reached the DB can never be composed into the ssh command.
+      assertSafeSftpConfig(config);
       const host = str(config.host);
       const user = str(config.user);
       const path = str(repoConfig.path);
