@@ -138,6 +138,16 @@ export class UsersService implements OnModuleInit {
       .executeTakeFirst();
     if (!user) throw new NotFoundException('User not found');
 
+    // Don't let the last usable admin be demoted or disabled — that would lock
+    // everyone out with no recovery short of editing the database.
+    const losesAdmin =
+      user.is_admin && (dto.isAdmin === false || dto.disabled === true);
+    if (losesAdmin && (await this.isLastActiveAdmin(id))) {
+      throw new BadRequestException(
+        'Cannot demote or disable the last remaining administrator',
+      );
+    }
+
     const patch: Record<string, unknown> = { updated_at: new Date() };
     if (dto.displayName !== undefined) patch.display_name = dto.displayName;
     if (dto.isAdmin !== undefined) patch.is_admin = dto.isAdmin;
@@ -207,7 +217,30 @@ export class UsersService implements OnModuleInit {
   }
 
   async remove(id: string): Promise<void> {
+    if (await this.isLastActiveAdmin(id)) {
+      throw new BadRequestException(
+        'Cannot delete the last remaining administrator',
+      );
+    }
     await this.db.deleteFrom('users').where('id', '=', id).execute();
+  }
+
+  /** True when `id` is an enabled admin and no other enabled admin exists. */
+  private async isLastActiveAdmin(id: string): Promise<boolean> {
+    const target = await this.db
+      .selectFrom('users')
+      .select(['is_admin', 'disabled'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!target || !target.is_admin || target.disabled) return false;
+    const others = await this.db
+      .selectFrom('users')
+      .select('id')
+      .where('is_admin', '=', true)
+      .where('disabled', '=', false)
+      .where('id', '!=', id)
+      .executeTakeFirst();
+    return !others;
   }
 
   // --- Grants ---------------------------------------------------------------
