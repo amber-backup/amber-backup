@@ -12,3 +12,10 @@ export const REQUIRED_ACTION_KEY = 'requiredAction';
 /** Declares the API-key action scope a route needs (e.g. 'read','backup'). */
 export const RequireAction = (action: string) =>
   SetMetadata(REQUIRED_ACTION_KEY, action);
+
+export const NO_API_KEY_KEY = 'noApiKey';
+/**
+ * Marks a route/controller as unreachable via an API key (session auth only) —
+ * e.g. API-key management, so a key can never mint or revoke keys.
+ */
+export const NoApiKey = () => SetMetadata(NO_API_KEY_KEY, true);

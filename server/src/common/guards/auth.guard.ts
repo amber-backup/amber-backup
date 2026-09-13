@@ -15,6 +15,7 @@ import {
   IS_PUBLIC_KEY,
   IS_ADMIN_KEY,
   REQUIRED_ACTION_KEY,
+  NO_API_KEY_KEY,
 } from '../decorators/public.decorator';
 import { RequestUser } from '../auth/request-user';
 
@@ -63,11 +64,45 @@ export class AuthGuard implements CanActivate {
       IS_ADMIN_KEY,
       [ctx.getHandler(), ctx.getClass()],
     );
-    if (requireAdmin && !user.isAdmin) {
-      throw new ForbiddenException('Administrator access required');
+    if (requireAdmin) {
+      // API keys never exercise administrator privileges, even for an admin
+      // user: an admin's leaked read-scoped key must not manage users, settings
+      // or agents. Admin operations require an interactive session.
+      if (user.authVia === 'apikey') {
+        throw new ForbiddenException(
+          'Administrator operations require an interactive session, not an API key',
+        );
+      }
+      if (!user.isAdmin) {
+        throw new ForbiddenException('Administrator access required');
+      }
     }
 
-    // API-key action scope requirement.
+    // Routes explicitly closed to API keys (e.g. API-key management, so a key
+    // can never mint or revoke another key).
+    const noApiKey = this.reflector.getAllAndOverride<boolean>(NO_API_KEY_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (noApiKey && user.authVia === 'apikey') {
+      throw new ForbiddenException('This operation is not permitted for API keys');
+    }
+
+    // Coarse action-scope enforcement for API keys: a scoped key (actions
+    // without '*') may only perform a state-changing request if it carries an
+    // action beyond 'read'. Fine-grained per-resource action/level checks still
+    // run in AccessControlService for resource routes.
+    if (user.apiKeyScopes) {
+      const actions = user.apiKeyScopes.actions ?? [];
+      const unrestricted = actions.includes('*');
+      const method = req.method.toUpperCase();
+      const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+      if (!unrestricted && mutating && !actions.some((a) => a !== 'read')) {
+        throw new ForbiddenException('API key lacks a write scope');
+      }
+    }
+
+    // API-key action scope requirement declared per route.
     const requiredAction = this.reflector.getAllAndOverride<string>(
       REQUIRED_ACTION_KEY,
       [ctx.getHandler(), ctx.getClass()],
