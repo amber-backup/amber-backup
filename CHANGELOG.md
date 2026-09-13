@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/amber-backup/amber-backup/compare/v1.24.3...v1.25.0) (2026-09-13)
+
+
+### Features
+
+* **jobs:** show agent, target and repository in the job list ([d3e1bba](https://github.com/amber-backup/amber-backup/commit/d3e1bbaf3803109a77a0bd3aaf4823ea2f087eef))
+
 ## [1.24.3](https://github.com/amber-backup/amber-backup/compare/v1.24.2...v1.24.3) (2026-09-13)
 
 
