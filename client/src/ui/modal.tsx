@@ -168,15 +168,10 @@ export function ModalProvider({ children }: { children: ReactNode }) {
             const closeThis = () => close(e.id);
             return (
               // Each modal has its own backdrop so one modal can open another
-              // without the first's close wiping out the second. Backdrop click
-              // closes only when the click lands on the backdrop itself.
-              <div
-                key={e.id}
-                className="modal-backdrop"
-                onClick={(ev) => {
-                  if (ev.target === ev.currentTarget) closeThis();
-                }}
-              >
+              // without the first's close wiping out the second. Clicking the
+              // backdrop does not close the modal — only the X or Cancel does,
+              // so a stray click can't discard a half-filled form.
+              <div key={e.id} className="modal-backdrop">
                 {e.render(closeThis)}
               </div>
             );
