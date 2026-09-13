@@ -12,6 +12,8 @@ import { UsersService } from './users.service';
 import { ApiKeysController } from './api-keys.controller';
 import { ApiKeysService } from './api-keys.service';
 import { SsoService } from './sso.service';
+import { DeviceAuthController } from './device-auth.controller';
+import { DeviceAuthService } from './device-auth.service';
 import { SettingsModule } from '../settings/settings.module';
 
 @Module({
@@ -22,7 +24,12 @@ import { SettingsModule } from '../settings/settings.module';
     }),
     SettingsModule,
   ],
-  controllers: [AuthController, UsersController, ApiKeysController],
+  controllers: [
+    AuthController,
+    UsersController,
+    ApiKeysController,
+    DeviceAuthController,
+  ],
   providers: [
     AuthService,
     TotpService,
@@ -30,6 +37,7 @@ import { SettingsModule } from '../settings/settings.module';
     UsersService,
     ApiKeysService,
     SsoService,
+    DeviceAuthService,
     // Global authentication guard (respects @Public).
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

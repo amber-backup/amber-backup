@@ -11,6 +11,7 @@ export interface CreatedApiKey {
   /** Full plaintext key — shown only once. */
   key: string;
   prefix: string;
+  expiresAt: Date | null;
 }
 
 @Injectable()
@@ -37,7 +38,12 @@ export class ApiKeysService {
       .execute();
   }
 
-  async create(userId: string, dto: CreateApiKeyDto): Promise<CreatedApiKey> {
+  /** `db` lets a caller mint the key inside its own transaction. */
+  async create(
+    userId: string,
+    dto: CreateApiKeyDto,
+    db: Db = this.db,
+  ): Promise<CreatedApiKey> {
     const secret = this.crypto.generateToken(24);
     const key = `${API_KEY_PREFIX}${secret}`;
     const prefix = key.slice(0, 12);
@@ -46,7 +52,7 @@ export class ApiKeysService {
       ? new Date(Date.now() + dto.expiresInDays * 86400_000)
       : null;
 
-    const row = await this.db
+    const row = await db
       .insertInto('api_keys')
       .values({
         user_id: userId,
@@ -59,7 +65,13 @@ export class ApiKeysService {
       .returning(['id', 'name', 'prefix'])
       .executeTakeFirstOrThrow();
 
-    return { id: row.id, name: row.name, prefix: row.prefix, key };
+    return {
+      id: row.id,
+      name: row.name,
+      prefix: row.prefix,
+      key,
+      expiresAt,
+    };
   }
 
   async remove(userId: string, keyId: string): Promise<void> {

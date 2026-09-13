@@ -19,3 +19,10 @@ export const NO_API_KEY_KEY = 'noApiKey';
  * e.g. API-key management, so a key can never mint or revoke keys.
  */
 export const NoApiKey = () => SetMetadata(NO_API_KEY_KEY, true);
+
+export const ANY_API_KEY_SCOPE_KEY = 'anyApiKeyScope';
+/**
+ * Lets a key of any scope call a mutating route — only for operations that act
+ * on the calling key itself (e.g. a read-only key revoking itself on logout).
+ */
+export const AnyApiKeyScope = () => SetMetadata(ANY_API_KEY_SCOPE_KEY, true);

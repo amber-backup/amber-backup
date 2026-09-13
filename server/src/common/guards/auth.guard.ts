@@ -16,6 +16,7 @@ import {
   IS_ADMIN_KEY,
   REQUIRED_ACTION_KEY,
   NO_API_KEY_KEY,
+  ANY_API_KEY_SCOPE_KEY,
 } from '../decorators/public.decorator';
 import { RequestUser } from '../auth/request-user';
 
@@ -94,7 +95,11 @@ export class AuthGuard implements CanActivate {
     // without '*') may only perform a state-changing request if it carries an
     // action beyond 'read'. Fine-grained per-resource action/level checks still
     // run in AccessControlService for resource routes.
-    if (user.apiKeyScopes) {
+    const anyScope = this.reflector.getAllAndOverride<boolean>(
+      ANY_API_KEY_SCOPE_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
+    if (user.apiKeyScopes && !anyScope) {
       const actions = user.apiKeyScopes.actions ?? [];
       const unrestricted = actions.includes('*');
       const method = req.method.toUpperCase();

@@ -88,6 +88,8 @@ export function deriveAction(
     const map: Record<string, string> = {
       logout: 'Log out',
       'change-password': 'Change password',
+      approve: 'Approve CLI device login',
+      deny: 'Deny CLI device login',
     };
     return {
       action: map[last] ?? `Account: ${tail.join(' ') || 'action'}`,

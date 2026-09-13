@@ -7,6 +7,7 @@ import { Db } from '../../database/database.module';
 import {
   IS_ADMIN_KEY,
   NO_API_KEY_KEY,
+  ANY_API_KEY_SCOPE_KEY,
 } from '../decorators/public.decorator';
 import { ApiKeyScopes } from '../../database/database.types';
 
@@ -80,6 +81,15 @@ describe('AuthGuard — API key restrictions', () => {
   it('denies a read-only key on a mutating request', async () => {
     const { guard, ctx } = build({ method: 'POST', scopes: { actions: ['read'] } });
     await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a read-only key on a mutating route marked AnyApiKeyScope', async () => {
+    const { guard, ctx } = build({
+      method: 'DELETE',
+      scopes: { actions: ['read'] },
+      meta: { [ANY_API_KEY_SCOPE_KEY]: true },
+    });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
   });
 
   it('allows a read-only key on a GET', async () => {

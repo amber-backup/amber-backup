@@ -113,6 +113,34 @@ export type ApiKey = Selectable<ApiKeysTable>;
 export type NewApiKey = Insertable<ApiKeysTable>;
 export type ApiKeyUpdate = Updateable<ApiKeysTable>;
 
+// --- device_authorizations --------------------------------------------------
+
+export type DeviceAuthorizationStatus = 'pending' | 'approved' | 'denied' | 'consumed';
+export type DeviceAccess = 'full' | 'read';
+
+export interface DeviceAuthorizationsTable {
+  id: Generated<string>;
+  device_code_hash: string;
+  user_code_hash: string;
+  client_name: string;
+  request_ip: string | null;
+  request_user_agent: string | null;
+  status: ColumnType<
+    DeviceAuthorizationStatus,
+    DeviceAuthorizationStatus | undefined,
+    DeviceAuthorizationStatus
+  >;
+  user_id: string | null;
+  access: DeviceAccess | null;
+  key_expires_in_days: number | null;
+  api_key_id: string | null;
+  expires_at: ColumnType<Date, Date, Date>;
+  last_polled_at: ColumnType<Date | null, Date | null, Date | null>;
+  decided_at: ColumnType<Date | null, Date | null, Date | null>;
+  created_at: CreatedAt;
+}
+export type DeviceAuthorization = Selectable<DeviceAuthorizationsTable>;
+
 // --- resource_grants --------------------------------------------------------
 
 export interface ResourceGrantsTable {
@@ -636,6 +664,7 @@ export type NewAuditLog = Insertable<AuditLogTable>;
 export interface Database {
   users: UsersTable;
   api_keys: ApiKeysTable;
+  device_authorizations: DeviceAuthorizationsTable;
   resource_grants: ResourceGrantsTable;
   secrets: SecretsTable;
   targets: TargetsTable;
