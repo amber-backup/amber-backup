@@ -99,6 +99,20 @@ export class PasskeysService {
     userId: string,
     email: string,
   ): Promise<{ options: PublicKeyCredentialCreationOptionsJSON; challengeToken: string }> {
+    // Passkeys are a local login factor. An SSO account must authenticate
+    // through its identity provider, so registering a passkey on it would let
+    // the holder bypass IdP policy/deprovisioning.
+    const account = await this.db
+      .selectFrom('users')
+      .select('auth_source')
+      .where('id', '=', userId)
+      .executeTakeFirst();
+    if (account && account.auth_source !== 'local') {
+      throw new BadRequestException(
+        'Passkeys are only available for local (password) accounts',
+      );
+    }
+
     const existing = await this.db
       .selectFrom('webauthn_credentials')
       .select(['credential_id', 'transports'])

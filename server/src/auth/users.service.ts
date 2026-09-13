@@ -170,6 +170,13 @@ export class UsersService implements OnModuleInit {
         patch.totp_secret_ciphertext = null;
         patch.totp_secret_nonce = null;
         patch.totp_recovery_codes = null;
+        // Passkeys are a local factor too; leaving them would let the holder
+        // keep signing in with a passkey after the account is moved to SSO
+        // (bypassing the IdP). Remove them.
+        await this.db
+          .deleteFrom('webauthn_credentials')
+          .where('user_id', '=', id)
+          .execute();
       }
     }
 
