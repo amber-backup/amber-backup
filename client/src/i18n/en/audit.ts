@@ -1,0 +1,37 @@
+export const audit = {
+  title: 'Audit Log',
+  subtitle: 'Writes and operations by users, admins, and API keys',
+  searchPlaceholder: 'Search action, actor, path…',
+  allOutcomes: 'All outcomes',
+  outcomes: { success: 'Success', failure: 'Failure' } as Record<string, string>,
+  loadFailed: 'Failed to load the audit log.',
+  columns: {
+    time: 'Time',
+    actor: 'Actor',
+    action: 'Action',
+    resource: 'Resource',
+    status: 'Status',
+  },
+  noMatches: 'No audit entries match.',
+  noEntries: 'No entries',
+  range: (from: number, to: number, total: number) => `${from}–${to} of ${total}`,
+  prev: '‹ Prev',
+  next: 'Next ›',
+  pageOf: (page: number, total: number) => `Page ${page} / ${total}`,
+  clickForDetails: 'Click for details',
+  apiKey: 'API key',
+  detail: {
+    time: 'Time',
+    action: 'Action',
+    outcome: 'Outcome',
+    actor: 'Actor',
+    actorType: 'Actor type',
+    request: 'Request',
+    resource: 'Resource',
+    ip: 'IP address',
+    userAgent: 'User agent',
+    details: 'Details',
+  },
+};
+
+export type AuditMessages = typeof audit;

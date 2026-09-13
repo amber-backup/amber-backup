@@ -7,14 +7,16 @@ import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
 import { BackendFields, PublicKeyBox } from '../ui/backend-fields';
+import { useT } from '../i18n';
 
 export function Targets() {
   const { data, loading, reload } = useAsync(() =>
     Promise.all([api.get<Target[]>('/targets'), api.get<BackendDef[]>('/targets/backends')]),
   );
   const { open } = useModal();
+  const t = useT();
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const [targets, backends] = data;
 
   const newTarget = () =>
@@ -23,19 +25,19 @@ export function Targets() {
   return (
     <div>
       <PageHeader
-        title="Targets"
-        subtitle={`${targets.length} repositories`}
-        actions={<ActionButton label="New target" icon="plus" variant="primary" onClick={newTarget} />}
+        title={t.targets.title}
+        subtitle={t.targets.subtitle(targets.length)}
+        actions={<ActionButton label={t.targets.newTarget} icon="plus" variant="primary" onClick={newTarget} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Repositories</h2>
+          <h2>{t.targets.panelTitle}</h2>
         </div>
         {targets.length === 0 ? (
-          <Empty>No targets yet. Create your first backup repository.</Empty>
+          <Empty>{t.targets.empty}</Empty>
         ) : (
-          targets.map((t) => (
-            <TargetRow key={t.id} target={t} backends={backends} reload={reload} />
+          targets.map((tg) => (
+            <TargetRow key={tg.id} target={tg} backends={backends} reload={reload} />
           ))
         )}
       </div>
@@ -54,14 +56,16 @@ function TargetRow({
 }) {
   const toast = useToast();
   const { open, confirmDialog } = useModal();
+  const msgs = useT();
+  const m = msgs.targets.row;
   const backend = backends.find((b) => b.type === t.backend_type);
 
   const statusTitle =
     t.status === 'online'
-      ? 'Reachable'
+      ? m.reachable
       : t.status === 'offline'
-        ? `Offline${t.last_check_error ? `: ${t.last_check_error}` : ''}`
-        : 'Not checked yet';
+        ? m.offline(t.last_check_error)
+        : m.notChecked;
 
   return (
     <div className="row">
@@ -75,30 +79,30 @@ function TargetRow({
           {backend?.label ?? t.backend_type}
           {t.status === 'offline' && (
             <span style={{ color: 'var(--danger)' }}>
-              {` · offline${t.last_check_error ? `: ${t.last_check_error}` : ''}`}
+              {m.offlineInline(t.last_check_error)}
             </span>
           )}
         </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
-        {t.last_check_at ? `checked ${fmtRelative(t.last_check_at)}` : 'not checked yet'}
+        {t.last_check_at ? m.checked(fmtRelative(t.last_check_at)) : m.notCheckedMeta}
       </div>
       <div className="row-actions">
         <BusyButton
           className="btn btn-ghost btn-sm"
-          title="Check now"
+          title={m.checkNow}
           onClick={async () => {
             try {
               const res = await api.post<{ status: Target['status']; error: string | null }>(
                 `/targets/${t.id}/check`,
               );
-              if (res.status === 'online') toast('Target reachable', 'success');
+              if (res.status === 'online') toast(m.toastReachable, 'success');
               else if (res.status === 'offline')
-                toast(`Target offline${res.error ? `: ${res.error}` : ''}`, 'error');
-              else toast('This backend has no checkable endpoint', 'info');
+                toast(m.toastOffline(res.error), 'error');
+              else toast(m.noEndpoint, 'info');
               reload();
             } catch (err) {
-              toast(err instanceof Error ? err.message : 'Check failed', 'error');
+              toast(err instanceof Error ? err.message : m.checkFailed, 'error');
             }
           }}
         >
@@ -106,28 +110,28 @@ function TargetRow({
         </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
-          title="Edit"
+          title={m.edit}
           onClick={() => open((close) => <TargetEditor backends={backends} target={t} onClose={close} onSaved={reload} />)}
         >
           <Icon name="edit" />
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title="Duplicate"
+          title={m.duplicate}
           onClick={() => open((close) => <TargetEditor backends={backends} target={t} duplicate onClose={close} onSaved={reload} />)}
         >
           <Icon name="copy" />
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title="Delete"
+          title={msgs.common.delete}
           onClick={() =>
             confirmDialog(
-              'Delete target',
-              `"${t.name}" will be removed. The repository itself stays intact.`,
+              m.deleteTitle,
+              m.deleteConfirm(t.name),
               async () => {
                 await api.del(`/targets/${t.id}`);
-                toast('Target deleted', 'success');
+                toast(m.deleted, 'success');
                 reload();
               },
               true,
@@ -155,6 +159,8 @@ function TargetEditor({
   onSaved: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
+  const m = t.targets.editor;
   // A target is now just the shared connection (access + credentials). The
   // repository-specific fields (bucket/path) and the repo password live per job.
   // Duplicate: prefill from an existing target but create a new one (POST).
@@ -167,7 +173,7 @@ function TargetEditor({
   // a job-level repository option, never a connection), so all of them apply.
   const connections = backends;
 
-  const [name, setName] = useState(isDuplicate ? `Copy of ${target!.name}` : target?.name ?? '');
+  const [name, setName] = useState(isDuplicate ? m.copyOf(target!.name) : target?.name ?? '');
   const [type, setType] = useState(target?.backend_type ?? connections[0].type);
   // Public key surfaced right after creating an SFTP target so the user can
   // install it on the server before testing.
@@ -206,7 +212,7 @@ function TargetEditor({
           backendType: type,
           config: collect(),
         });
-        toast('Target saved', 'success');
+        toast(m.saved, 'success');
         onSaved();
         const pubKey = created?.config?.publicKey as string | undefined;
         if (type === 'sftp' && pubKey) {
@@ -216,10 +222,10 @@ function TargetEditor({
         }
         return;
       }
-      toast('Target saved', 'success');
+      toast(m.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Save failed', 'error');
+      toast(err instanceof Error ? err.message : m.saveFailed, 'error');
       return false;
     }
   };
@@ -227,8 +233,8 @@ function TargetEditor({
   if (createdKey) {
     return (
       <FormModal
-        title="SFTP public key"
-        confirmLabel="Done"
+        title={m.publicKey}
+        confirmLabel={m.done}
         onClose={onClose}
         onSubmit={() => onClose()}
       >
@@ -239,15 +245,15 @@ function TargetEditor({
 
   return (
     <FormModal
-      title={isEdit ? 'Edit target' : isDuplicate ? 'Duplicate target' : 'New target'}
-      confirmLabel={isEdit ? 'Save' : 'Create'}
+      title={isEdit ? m.titleEdit : isDuplicate ? m.titleDuplicate : m.titleNew}
+      confirmLabel={isEdit ? t.common.save : m.create}
       onClose={onClose}
       onSubmit={submit}
     >
-      <Field label="Name">
-        <input type="text" value={name} placeholder="My backup target" onChange={(e) => setName(e.target.value)} />
+      <Field label={m.name}>
+        <input type="text" value={name} placeholder={m.namePlaceholder} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Backend">
+      <Field label={m.backend}>
         <select name="__type" disabled={isEdit} value={type} onChange={(e) => setType(e.target.value)}>
           {connections.map((b) => (
             <option key={b.type} value={b.type}>
@@ -260,7 +266,7 @@ function TargetEditor({
         <BackendFields fields={connectionFields} values={values} onChange={setValue} />
       </div>
       {existingPublicKey && (
-        <Field label="SFTP public key">
+        <Field label={m.publicKey}>
           <PublicKeyBox publicKey={existingPublicKey} />
         </Field>
       )}

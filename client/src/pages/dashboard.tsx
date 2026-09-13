@@ -8,6 +8,8 @@ import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
 import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
 import { checkLevelLabel } from '../ui/integrity';
+import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 
 interface DashboardData {
   recent: Run[];
@@ -18,16 +20,17 @@ interface DashboardData {
 
 const RUNS_PAGE = 50;
 /** Time windows offered for the storage growth chart. */
-const STORAGE_RANGES: { label: string; days: number }[] = [
-  { label: '7d', days: 7 },
-  { label: '30d', days: 30 },
-  { label: '90d', days: 90 },
-  { label: '1y', days: 365 },
+const STORAGE_RANGES: { key: keyof Messages['dashboard']['storage']['ranges']; days: number }[] = [
+  { key: 'd7', days: 7 },
+  { key: 'd30', days: 30 },
+  { key: 'd90', days: 90 },
+  { key: 'y1', days: 365 },
 ];
 // Poll fairly briskly so running backups show near-live progress (bytes/percent).
 const REFRESH_MS = 2000;
 
 export function Dashboard() {
+  const t = useT();
   const { data, loading } = useAsync(() =>
     Promise.all([
       api.get<DashboardData>('/runs/dashboard'),
@@ -36,12 +39,13 @@ export function Dashboard() {
     ]),
   );
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const [dash0, jobs, agents0] = data;
   return <DashboardView dash0={dash0} jobs={jobs} agents0={agents0} />;
 }
 
 function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: Job[]; agents0: Agent[] }) {
+  const t = useT();
   const navigate = useNavigate();
   const [dash, setDash] = useState(dash0);
   const [agents, setAgents] = useState(agents0);
@@ -204,14 +208,14 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   return (
     <div className="dashboard">
       <PageHeader
-        title="Overview"
-        subtitle={`${jobs.length} jobs · ${agents.length} agents · ${dash.running} active`}
+        title={t.common.nav.overview}
+        subtitle={t.dashboard.subtitle(jobs.length, agents.length, dash.running)}
         actions={
           <>
-            <button className="btn btn-ghost btn-icon" title="Refresh" onClick={() => void poll()}>
+            <button className="btn btn-ghost btn-icon" title={t.dashboard.refresh} onClick={() => void poll()}>
               <Icon name="refresh" size={17} />
             </button>
-            <ActionButton label="New job" icon="plus" variant="primary" onClick={() => navigate('/jobs')} />
+            <ActionButton label={t.dashboard.newJob} icon="plus" variant="primary" onClick={() => navigate('/jobs')} />
           </>
         }
       />
@@ -224,7 +228,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
           <div className="panel fill-col">
             <div className="panel-head">
-              <h2>Recent activities</h2>
+              <h2>{t.dashboard.activity.title}</h2>
               <div className="panel-head-actions">
                 <label className="checkbox sm">
                   <input
@@ -232,10 +236,10 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                     checked={showMaintenance}
                     onChange={(e) => toggleShowMaintenance(e.target.checked)}
                   />
-                  Show prunes &amp; checks
+                  {t.dashboard.activity.showMaintenance}
                 </label>
                 <span className="link" onClick={() => navigate('/jobs')}>
-                  All jobs →
+                  {t.dashboard.activity.allJobs}
                 </span>
               </div>
             </div>
@@ -250,7 +254,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                   </div>
                 )}
                 {runs.length === 0 && !pageLoading && doneRef.current && (
-                  <div className="empty">No activities yet.</div>
+                  <div className="empty">{t.dashboard.activity.empty}</div>
                 )}
               </div>
               <div ref={sentinelRef} style={{ height: 1 }} />
@@ -261,14 +265,14 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         <div className="side-stack fill-col">
           <div className="panel fill-col">
             <div className="panel-head">
-              <h2>Upcoming schedules</h2>
+              <h2>{t.dashboard.schedules.title}</h2>
               <span className="link" onClick={() => navigate('/jobs')}>
-                Edit
+                {t.dashboard.schedules.edit}
               </span>
             </div>
             <div className="panel-scroll">
               {nextJobs.length === 0 ? (
-                <div className="empty">No scheduled jobs.</div>
+                <div className="empty">{t.dashboard.schedules.empty}</div>
               ) : (
                 nextJobs.map((j) => (
                   <div className="row compact" key={j.id} title={fmtDateTime(j.next_run)}>
@@ -290,6 +294,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
 /** Repository storage growth over a selectable window. */
 function StoragePanel() {
+  const t = useT();
   const [days, setDays] = useState(7);
   const { data, loading, error } = useAsync(
     () => api.get<RepositoryStatsHistory>(`/repositories/stats-history?days=${days}`),
@@ -300,23 +305,23 @@ function StoragePanel() {
     <div className="panel fill-col">
       <div className="panel-head">
         <div className="panel-title-group">
-          <h2>Repository storage</h2>
+          <h2>{t.dashboard.storage.title}</h2>
           {data && <StorageSummary history={data} />}
         </div>
-        <div className="seg" role="group" aria-label="Time window">
+        <div className="seg" role="group" aria-label={t.dashboard.storage.timeWindow}>
           {STORAGE_RANGES.map((r) => (
             <button
               key={r.days}
               className={`seg-btn${r.days === days ? ' active' : ''}`}
               onClick={() => setDays(r.days)}
             >
-              {r.label}
+              {t.dashboard.storage.ranges[r.key]}
             </button>
           ))}
         </div>
       </div>
       {error ? (
-        <div className="empty">Could not load storage history.</div>
+        <div className="empty">{t.dashboard.storage.loadFailed}</div>
       ) : loading && !data ? (
         <div className="loading" style={{ padding: 16 }}>
           <Spinner />
@@ -329,28 +334,30 @@ function StoragePanel() {
 }
 
 function Stats({ dash, agents }: { dash: DashboardData; agents: Agent[] }) {
+  const t = useT();
+  const s = t.dashboard.stats;
   const online = agents.filter((a) => a.status === 'online').length;
   const offline = agents.length - online;
   return (
     <div className="stats">
-      <StatCard label="Successful backups" value={String(dash.successTotal)} trend="total" trendClass="neutral" icon="check" />
+      <StatCard label={s.successfulBackups} value={String(dash.successTotal)} trend={s.total} trendClass="neutral" icon="check" />
       <StatCard
-        label="Failed (7 d)"
+        label={s.failedWeek}
         value={String(dash.failedLastWeek)}
-        trend={dash.failedLastWeek > 0 ? 'needs attention' : 'all good'}
+        trend={dash.failedLastWeek > 0 ? s.needsAttention : s.allGood}
         trendClass={dash.failedLastWeek > 0 ? 'down' : 'up'}
         icon="job"
       />
-      <StatCard label="Running operations" value={String(dash.running)} trend="active" trendClass="neutral" icon="play" />
+      <StatCard label={s.runningOperations} value={String(dash.running)} trend={s.active} trendClass="neutral" icon="play" />
       <StatCard
-        label="Agents online"
+        label={s.agentsOnline}
         value={
           <span>
             {String(online)}
             <small>{` / ${agents.length}`}</small>
           </span>
         }
-        trend={offline > 0 ? `${offline} offline` : 'all online'}
+        trend={offline > 0 ? s.offlineCount(offline) : s.allOnline}
         trendClass={offline > 0 ? 'warn' : 'up'}
         icon="agent"
       />
@@ -386,6 +393,8 @@ function StatCard({
 }
 
 function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) {
+  const t = useT();
+  const a = t.dashboard.activity;
   const toast = useToast();
   const [cancelling, setCancelling] = useState(false);
   const bytes = (r.stats?.dataAdded as number) ?? null;
@@ -411,10 +420,10 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
     setCancelling(true);
     try {
       await api.post(`/runs/${r.id}/cancel`);
-      toast('Activity cancelled', 'success');
+      toast(a.cancelled, 'success');
       onCancelled();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not cancel the activity', 'error');
+      toast(e instanceof ApiError ? e.message : a.cancelFailed, 'error');
     } finally {
       setCancelling(false);
     }
@@ -423,8 +432,8 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   const cancelButton = cancellable && (
     <button
       className="run-cancel"
-      title="Cancel this activity"
-      aria-label="Cancel this activity"
+      title={a.cancelTitle}
+      aria-label={a.cancelTitle}
       disabled={cancelling}
       onClick={() => void cancel()}
     >
@@ -441,7 +450,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
           {cancelButton}
           {r.status !== 'success' && <StatusBadge status={r.status} />}
         </span>
-        <span className="muted" title="Duration">
+        <span className="muted" title={a.duration}>
           {r.started_at ? duration : ''}
         </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
@@ -464,7 +473,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
     meta = (
       <div className="row-meta run-meta">
         <span style={{ fontWeight: 500 }}>{fmtBytes(bytes)}</span>
-        <span className="muted" title="Duration">
+        <span className="muted" title={a.duration}>
           {duration}
         </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
@@ -477,7 +486,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
           {cancelButton}
           <StatusBadge status={r.status} />
         </span>
-        <span className="muted" title="Duration">
+        <span className="muted" title={a.duration}>
           {r.started_at ? duration : ''}
         </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
@@ -493,11 +502,11 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       : r.status === 'running' && r.started_at
         ? `${statusLabel(r.status)} · ${duration}`
         : r.kind === 'check'
-          ? checkSub(r)
+          ? checkSub(r, t)
           : r.kind === 'prune'
             ? r.parent_run_id
-              ? 'prune after backup'
-              : 'manual prune'
+              ? a.pruneAfterBackup
+              : a.manualPrune
             : r.snapshot_id
               ? r.snapshot_id.slice(0, 12)
               : statusLabel(r.status);
@@ -507,10 +516,10 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
         <div className="row-title">
-          {r.job_name ?? 'Job'}
+          {r.job_name ?? a.jobFallback}
           {r.kind !== 'backup' && (
             <span className={`badge ${r.check_info?.damaged ? 'danger' : 'muted'} row-kind`}>
-              {r.kind}
+              {a.kinds[r.kind] ?? r.kind}
             </span>
           )}
         </div>
@@ -522,11 +531,12 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
 }
 
 /** Sub line of a finished or queued check: what it read and what it found. */
-function checkSub(r: Run): string {
-  const what = checkLevelLabel(r.check_info).toLowerCase();
-  if (r.check_info?.damaged) return `${what} — integrity errors found`;
-  if (r.status === 'success') return `${what} — no errors`;
-  return `${what} — ${statusLabel(r.status)}`;
+function checkSub(r: Run, t: Messages): string {
+  const a = t.dashboard.activity;
+  const what = checkLevelLabel(r.check_info);
+  if (r.check_info?.damaged) return a.checkDamaged(what);
+  if (r.status === 'success') return a.checkClean(what);
+  return a.checkStatus(what, statusLabel(r.status));
 }
 
 function isActive(status: string): boolean {

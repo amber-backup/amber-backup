@@ -9,6 +9,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Icon } from '../core/icons';
 import { useToast } from './toast';
+import { useT } from '../i18n';
 
 // --- Modal chrome ---------------------------------------------------------
 
@@ -27,11 +28,12 @@ export function ModalFrame({
   footer?: ReactNode;
   children: ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="modal" style={wide ? { maxWidth: 720 } : undefined}>
       <div className="modal-head">
         <h2>{title}</h2>
-        <button className="btn-icon" onClick={onClose} aria-label="Close">
+        <button className="btn-icon" onClick={onClose} aria-label={t.common.close}>
           <Icon name="x" />
         </button>
       </div>
@@ -49,7 +51,7 @@ export function ModalFrame({
 export function FormModal({
   title,
   wide,
-  confirmLabel = 'Save',
+  confirmLabel,
   onClose,
   onSubmit,
   children,
@@ -61,6 +63,7 @@ export function FormModal({
   onSubmit: () => boolean | void | Promise<boolean | void>;
   children: ReactNode;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
@@ -79,10 +82,10 @@ export function FormModal({
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose}>
-            Cancel
+            {t.common.cancel}
           </button>
           <button className="btn btn-primary" disabled={busy} onClick={submit}>
-            {confirmLabel}
+            {confirmLabel ?? t.common.save}
           </button>
         </>
       }
@@ -117,6 +120,7 @@ export function ModalProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ModalEntry[]>([]);
   const nextId = useRef(0);
   const toast = useToast();
+  const t = useT();
 
   const close = useCallback((id: number) => {
     setEntries((cur) => cur.filter((e) => e.id !== id));
@@ -139,14 +143,14 @@ export function ModalProvider({ children }: { children: ReactNode }) {
         try {
           await onConfirm();
         } catch (err) {
-          toast(err instanceof Error ? err.message : 'Action failed', 'error');
+          toast(err instanceof Error ? err.message : t.common.actionFailed, 'error');
           return false;
         }
       };
       open((closeThis) => (
         <FormModal
           title={title}
-          confirmLabel={danger ? 'Delete' : 'Confirm'}
+          confirmLabel={danger ? t.common.delete : t.common.confirm}
           onClose={closeThis}
           onSubmit={submit}
         >
@@ -154,7 +158,7 @@ export function ModalProvider({ children }: { children: ReactNode }) {
         </FormModal>
       ));
     },
-    [open, toast],
+    [open, toast, t],
   );
 
   const root = document.getElementById('modal-root');

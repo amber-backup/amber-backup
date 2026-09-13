@@ -6,6 +6,7 @@ import { useAuth } from '../core/auth';
 import { passkeysSupported } from '../core/passkeys';
 import { Field } from '../ui/primitives';
 import { postLoginPath } from '../core/device-login';
+import { messages, useT } from '../i18n';
 
 interface SsoProvider {
   id: string;
@@ -19,13 +20,14 @@ interface LoginMethods {
 }
 
 /** Why a redirect back from an identity provider did not sign anyone in. */
-const SSO_MESSAGES: Record<string, string> = {
-  pending: 'Your account is waiting for an administrator to approve it.',
-  local_account:
-    'This account signs in with a password. An administrator has to switch it to SSO first.',
-};
+function ssoMessage(reason: string): string {
+  const m = messages().login.sso;
+  const byReason: Record<string, string> = { pending: m.pending, local_account: m.localAccount };
+  return byReason[reason] ?? m.incomplete;
+}
 
 export function Login() {
+  const t = useT();
   const { login, loginTotp, loginPasskey } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -54,7 +56,7 @@ export function Login() {
   useEffect(() => {
     const reason = new URLSearchParams(window.location.search).get('sso');
     if (!reason) return;
-    setNotice(SSO_MESSAGES[reason] ?? 'Single sign-on did not complete.');
+    setNotice(ssoMessage(reason));
     const url = window.location.pathname + window.location.hash;
     window.history.replaceState(null, '', url);
   }, []);
@@ -74,7 +76,7 @@ export function Login() {
       }
       navigate(postLoginPath(), { replace: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-in failed');
+      setError(e instanceof Error ? e.message : t.login.signInFailed);
       setBusy(false);
     }
   };
@@ -86,7 +88,7 @@ export function Login() {
       await loginTotp(challengeToken, code.trim());
       navigate(postLoginPath(), { replace: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Verification failed');
+      setError(e instanceof Error ? e.message : t.login.verificationFailed);
       setBusy(false);
     }
   };
@@ -103,7 +105,7 @@ export function Login() {
         setBusy(false);
         return;
       }
-      setError(e instanceof Error ? e.message : 'Passkey sign-in failed');
+      setError(e instanceof Error ? e.message : t.login.passkeyFailed);
       setBusy(false);
     }
   };
@@ -125,7 +127,7 @@ export function Login() {
           <>
             {localLogin && (
               <>
-                <Field label="Email">
+                <Field label={t.login.email}>
                   <input
                     type="email"
                     placeholder="admin@example.com"
@@ -133,7 +135,7 @@ export function Login() {
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 </Field>
-                <Field label="Password">
+                <Field label={t.login.password}>
                   <input
                     type="password"
                     placeholder="••••••••"
@@ -150,7 +152,7 @@ export function Login() {
                   disabled={busy}
                   onClick={() => void doLogin()}
                 >
-                  Sign in
+                  {t.login.signIn}
                 </button>
 
                 {passkeysSupported() && (
@@ -160,7 +162,7 @@ export function Login() {
                     disabled={busy}
                     onClick={() => void doPasskey()}
                   >
-                    Sign in with a passkey
+                    {t.login.signInWithPasskey}
                   </button>
                 )}
               </>
@@ -168,8 +170,7 @@ export function Login() {
 
             {!localLogin && providers.length === 0 && (
               <div className="help" style={{ textAlign: 'center' }}>
-                No sign-in method is available. An administrator has to enable
-                local login or configure single sign-on.
+                {t.login.noMethod}
               </div>
             )}
 
@@ -182,7 +183,7 @@ export function Login() {
                     style={{ width: '100%', justifyContent: 'center' }}
                     href={`/api/auth/oidc/${p.id}`}
                   >
-                    {`Sign in with ${p.label}`}
+                    {t.login.signInWith(p.label)}
                   </a>
                 ))}
               </div>
@@ -190,7 +191,7 @@ export function Login() {
           </>
         ) : (
           <>
-            <Field label="Authentication code">
+            <Field label={t.login.codeLabel}>
               <input
                 id="totp"
                 type="text"
@@ -206,7 +207,7 @@ export function Login() {
               />
             </Field>
             <div className="help" style={{ marginTop: -4, marginBottom: 4 }}>
-              Enter the 6-digit code from your authenticator app, or a recovery code.
+              {t.login.codeHelp}
             </div>
             <button
               className="btn btn-primary"
@@ -214,7 +215,7 @@ export function Login() {
               disabled={busy}
               onClick={() => void doTotp()}
             >
-              Verify
+              {t.login.verify}
             </button>
             <button
               className="btn btn-ghost"
@@ -226,7 +227,7 @@ export function Login() {
                 setCode('');
               }}
             >
-              Back
+              {t.login.back}
             </button>
           </>
         )}

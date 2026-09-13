@@ -6,6 +6,7 @@ import { copyToClipboard } from '../core/clipboard';
 import { useAuth } from '../core/auth';
 import { passkeysSupported, registerPasskey, type Passkey } from '../core/passkeys';
 import { useAsync } from '../hooks/useAsync';
+import { LOCALES, useI18n, useT, type Locale } from '../i18n';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty } from '../ui/primitives';
@@ -21,56 +22,59 @@ interface ApiKey {
 }
 
 export function Settings() {
+  const t = useT();
   const { user, isAdmin, logout, refresh } = useAuth();
   const { open } = useModal();
   const { data: keys, loading, reload } = useAsync(() => api.get<ApiKey[]>('/api-keys'));
 
-  if (loading || !keys) return <Loading label="Loading…" />;
+  if (loading || !keys) return <Loading label={t.common.loading} />;
 
   const isLocal = user?.auth_source === 'local';
 
   return (
     <div>
       <PageHeader
-        title="Settings"
-        subtitle="Profile, API keys and SSO"
-        actions={<ActionButton label="Sign out" icon="logout" variant="ghost" onClick={() => void logout()} />}
+        title={t.settings.title}
+        subtitle={t.settings.subtitle}
+        actions={<ActionButton label={t.common.nav.signOut} icon="logout" variant="ghost" onClick={() => void logout()} />}
       />
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Profile</h2>
+          <h2>{t.settings.profile.title}</h2>
           {isLocal && (
             <span className="link" onClick={() => open((close) => <ChangePasswordModal onClose={close} />)}>
-              Change password
+              {t.settings.profile.changePassword}
             </span>
           )}
         </div>
         <div className="row">
           <div className="row-main">
             <div className="row-title">{user?.display_name ?? ''}</div>
-            <div className="row-sub">{`${user?.email} · ${isAdmin ? 'Administrator' : 'User'}`}</div>
+            <div className="row-sub">{`${user?.email} · ${isAdmin ? t.common.administrator : t.common.user}`}</div>
           </div>
         </div>
       </div>
 
+      <LanguagePanel />
+
       {isLocal && (
         <div className="panel section-gap">
           <div className="panel-head">
-            <h2>Two-factor authentication</h2>
+            <h2>{t.settings.twoFactor.title}</h2>
             {user?.totp_enabled ? (
               <span
                 className="link"
                 onClick={() => open((close) => <DisableTwoFactorModal onClose={close} onDone={refresh} />)}
               >
-                Disable
+                {t.settings.twoFactor.disable}
               </span>
             ) : (
               <span
                 className="link"
                 onClick={() => open((close) => <EnableTwoFactorModal onClose={close} onDone={refresh} />)}
               >
-                Enable
+                {t.settings.twoFactor.enable}
               </span>
             )}
           </div>
@@ -85,11 +89,11 @@ export function Settings() {
               <Icon name="shield" size={16} />
             </span>
             <div className="row-main">
-              <div className="row-title">{user?.totp_enabled ? 'Enabled' : 'Disabled'}</div>
+              <div className="row-title">{user?.totp_enabled ? t.settings.twoFactor.enabled : t.settings.twoFactor.disabled}</div>
               <div className="row-sub">
                 {user?.totp_enabled
-                  ? 'A code from your authenticator app is required at sign-in.'
-                  : 'Protect sign-in with a time-based code from an authenticator app.'}
+                  ? t.settings.twoFactor.enabledHelp
+                  : t.settings.twoFactor.disabledHelp}
               </div>
             </div>
           </div>
@@ -100,16 +104,16 @@ export function Settings() {
 
       <div className="panel section-gap">
         <div className="panel-head">
-          <h2>API keys</h2>
+          <h2>{t.settings.apiKeys.title}</h2>
           <span
             className="link"
             onClick={() => open((close) => <CreateKeyModal onClose={close} onCreated={reload} />)}
           >
-            + New key
+            {t.settings.apiKeys.newKey}
           </span>
         </div>
         {keys.length === 0 ? (
-          <Empty>No API keys. Create one for third-party applications.</Empty>
+          <Empty>{t.settings.apiKeys.empty}</Empty>
         ) : (
           keys.map((k) => <KeyRow key={k.id} apiKey={k} reload={reload} />)
         )}
@@ -118,7 +122,55 @@ export function Settings() {
   );
 }
 
+function LanguagePanel() {
+  const { t, preference, setPreference } = useI18n();
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const change = async (value: string) => {
+    setSaving(true);
+    try {
+      await setPreference(value === 'auto' ? null : (value as Locale));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>{t.settings.language.title}</h2>
+      </div>
+      <div className="row">
+        <span className="stat-icon" style={{ background: 'var(--bg-3)', color: 'var(--text-2)' }}>
+          <Icon name="globe" size={16} />
+        </span>
+        <div className="row-main">
+          <div className="row-title">{t.settings.language.label}</div>
+          <div className="row-sub">{t.settings.language.help}</div>
+        </div>
+        <select
+          value={preference ?? 'auto'}
+          disabled={saving}
+          className="select"
+          onChange={(e) => void change(e.target.value)}
+          style={{ width: 'auto' }}
+        >
+          <option value="auto">{t.settings.language.auto}</option>
+          {LOCALES.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function KeyRow({ apiKey: k, reload }: { apiKey: ApiKey; reload: () => void }) {
+  const t = useT();
   const toast = useToast();
   const { confirmDialog } = useModal();
 
@@ -129,17 +181,21 @@ function KeyRow({ apiKey: k, reload }: { apiKey: ApiKey; reload: () => void }) {
       </span>
       <div className="row-main">
         <div className="row-title">{k.name}</div>
-        <div className="row-sub">{`${k.prefix}… · actions: ${k.scopes.actions.join(', ')} · last used ${fmtRelative(k.last_used_at)}`}</div>
+        <div className="row-sub">{t.settings.apiKeys.meta(
+          k.prefix,
+          k.scopes.actions.map((a) => t.settings.createKey.scopeLabels[a] ?? a).join(', '),
+          fmtRelative(k.last_used_at),
+        )}</div>
       </div>
       <button
         className="btn btn-ghost btn-sm"
         onClick={() =>
           confirmDialog(
-            'Revoke key',
-            `"${k.name}" becomes invalid immediately.`,
+            t.settings.apiKeys.revokeTitle,
+            t.settings.apiKeys.revokeConfirm(k.name),
             async () => {
               await api.del(`/api-keys/${k.id}`);
-              toast('Key revoked', 'success');
+              toast(t.settings.apiKeys.revoked, 'success');
               reload();
             },
             true,
@@ -153,6 +209,7 @@ function KeyRow({ apiKey: k, reload }: { apiKey: ApiKey; reload: () => void }) {
 }
 
 function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const t = useT();
   const toast = useToast();
   const { open } = useModal();
   const [name, setName] = useState('');
@@ -174,31 +231,31 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
       onCreated();
       open((close) => <KeyCreatedModal keyValue={res.key} onClose={close} />);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="Create API key" confirmLabel="Create" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.settings.createKey.title} confirmLabel={t.settings.createKey.confirm} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Name">
-          <input type="text" placeholder="e.g. CI pipeline" value={name} onChange={(e) => setName(e.target.value)} />
+        <Field label={t.settings.createKey.name}>
+          <input type="text" placeholder={t.settings.createKey.namePlaceholder} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Scopes">
+        <Field label={t.settings.createKey.scopes}>
           <div style={{ display: 'flex', gap: 16 }}>
             {['read', 'operate', 'manage'].map((a) => (
               <label className="checkbox" key={a}>
                 <input type="checkbox" checked={actions[a]} onChange={() => toggle(a)} />
-                {a}
+                {t.settings.createKey.scopeLabels[a]}
               </label>
             ))}
           </div>
         </Field>
-        <Field label="Expiry">
+        <Field label={t.settings.createKey.expiry}>
           <input
             type="number"
-            placeholder="Days until expiry (blank = never)"
+            placeholder={t.settings.createKey.expiryPlaceholder}
             value={expiry}
             onChange={(e) => setExpiry(e.target.value)}
           />
@@ -209,24 +266,25 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
 }
 
 function KeyCreatedModal({ keyValue, onClose }: { keyValue: string; onClose: () => void }) {
+  const t = useT();
   const toast = useToast();
   const copy = async () => {
     const ok = await copyToClipboard(keyValue);
-    toast(ok ? 'Copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    toast(ok ? t.common.copied : t.settings.keyCreated.copyFailed, ok ? 'success' : 'error');
   };
 
   return (
     <ModalFrame
-      title="API key created"
+      title={t.settings.keyCreated.title}
       onClose={onClose}
       footer={
         <button className="btn btn-ghost" onClick={onClose}>
-          Close
+          {t.common.close}
         </button>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="warn-box">This key is shown only once. Copy it now.</div>
+        <div className="warn-box">{t.settings.keyCreated.warning}</div>
         <div
           className="mono"
           style={{
@@ -244,7 +302,7 @@ function KeyCreatedModal({ keyValue, onClose }: { keyValue: string; onClose: () 
         <div>
           <button className="btn btn-ghost btn-sm" onClick={copy}>
             <Icon name="copy" />
-            Copy
+            {t.common.copy}
           </button>
         </div>
       </div>
@@ -253,6 +311,7 @@ function KeyCreatedModal({ keyValue, onClose }: { keyValue: string; onClose: () 
 }
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -260,11 +319,11 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 
   const submit = async () => {
     if (next.length < 8) {
-      toast('New password must be at least 8 characters', 'error');
+      toast(t.settings.changePassword.tooShort, 'error');
       return false;
     }
     if (next !== confirm) {
-      toast('New passwords do not match', 'error');
+      toast(t.settings.changePassword.mismatch, 'error');
       return false;
     }
     try {
@@ -272,36 +331,36 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         currentPassword: current,
         newPassword: next,
       });
-      toast('Password changed', 'success');
+      toast(t.settings.changePassword.changed, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to change password', 'error');
+      toast(err instanceof Error ? err.message : t.settings.changePassword.failed, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="Change password" confirmLabel="Update password" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.settings.changePassword.title} confirmLabel={t.settings.changePassword.confirm} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Current password">
+        <Field label={t.settings.changePassword.current}>
           <input
             type="password"
-            placeholder="Current password"
+            placeholder={t.settings.changePassword.current}
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
           />
         </Field>
-        <Field label="New password">
+        <Field label={t.settings.changePassword.next}>
           <input
             type="password"
-            placeholder="New password (min. 8 characters)"
+            placeholder={t.settings.changePassword.nextPlaceholder}
             value={next}
             onChange={(e) => setNext(e.target.value)}
           />
         </Field>
-        <Field label="Confirm new password">
+        <Field label={t.settings.changePassword.repeat}>
           <input
             type="password"
-            placeholder="Repeat new password"
+            placeholder={t.settings.changePassword.repeatPlaceholder}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
@@ -318,6 +377,7 @@ interface TotpSetup {
 }
 
 function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const t = useT();
   const toast = useToast();
   const { open } = useModal();
   const [setup, setSetup] = useState<TotpSetup | null>(null);
@@ -330,16 +390,17 @@ function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone
     api
       .post<TotpSetup>('/auth/2fa/setup')
       .then((s) => active && setSetup(s))
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to start setup'));
+      .catch((e) => active && setError(e instanceof Error ? e.message : t.settings.enableTwoFactor.setupFailed));
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const submit = async () => {
     if (!setup) return false;
     if (!/^\d{6}$/.test(code.trim())) {
-      toast('Enter the 6-digit code from your app', 'error');
+      toast(t.settings.enableTwoFactor.invalidFormat, 'error');
       return false;
     }
     try {
@@ -347,43 +408,40 @@ function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone
         code: code.trim(),
       });
       onDone();
-      toast('Two-factor authentication enabled', 'success');
+      toast(t.settings.enableTwoFactor.enabledToast, 'success');
       open((close) => <RecoveryCodesModal codes={res.recoveryCodes} onClose={close} />);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Invalid code', 'error');
+      toast(err instanceof Error ? err.message : t.settings.enableTwoFactor.invalidCode, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title="Enable two-factor authentication"
-      confirmLabel="Verify & enable"
+      title={t.settings.enableTwoFactor.title}
+      confirmLabel={t.settings.enableTwoFactor.confirm}
       onClose={onClose}
       onSubmit={submit}
     >
       {error ? (
         <div className="warn-box">{error}</div>
       ) : !setup ? (
-        <Loading label="Preparing…" />
+        <Loading label={t.settings.enableTwoFactor.preparing} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="row-sub">
-            Scan this QR code with an authenticator app (Google Authenticator, 1Password,
-            Authy…), then enter the 6-digit code it shows.
-          </div>
+          <div className="row-sub">{t.settings.enableTwoFactor.scanHelp}</div>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <img
               src={setup.qrDataUrl}
               width={200}
               height={200}
-              alt="TOTP QR code"
+              alt={t.settings.enableTwoFactor.qrAlt}
               style={{ borderRadius: 8, background: '#fff', padding: 8 }}
             />
           </div>
           <div>
             <div className="row-sub" style={{ marginBottom: 6 }}>
-              Or enter this key manually:
+              {t.settings.enableTwoFactor.manualKey}
             </div>
             <div
               className="mono"
@@ -400,7 +458,7 @@ function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone
               {setup.secret}
             </div>
           </div>
-          <Field label="Authentication code">
+          <Field label={t.settings.enableTwoFactor.codeLabel}>
             <input
               type="text"
               inputMode="numeric"
@@ -418,27 +476,25 @@ function EnableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone
 }
 
 function RecoveryCodesModal({ codes, onClose }: { codes: string[]; onClose: () => void }) {
+  const t = useT();
   const toast = useToast();
   const copy = async () => {
     const ok = await copyToClipboard(codes.join('\n'));
-    toast(ok ? 'Copied' : 'Copy failed — select manually', ok ? 'success' : 'error');
+    toast(ok ? t.common.copied : t.settings.recoveryCodes.copyFailed, ok ? 'success' : 'error');
   };
 
   return (
     <ModalFrame
-      title="Recovery codes"
+      title={t.settings.recoveryCodes.title}
       onClose={onClose}
       footer={
         <button className="btn btn-primary" onClick={onClose}>
-          Done
+          {t.settings.recoveryCodes.done}
         </button>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="warn-box">
-          Store these somewhere safe. Each code works once and lets you sign in if you lose your
-          authenticator. They are shown only now.
-        </div>
+        <div className="warn-box">{t.settings.recoveryCodes.warning}</div>
         <div
           className="mono"
           style={{
@@ -460,7 +516,7 @@ function RecoveryCodesModal({ codes, onClose }: { codes: string[]; onClose: () =
         <div>
           <button className="btn btn-ghost btn-sm" onClick={copy}>
             <Icon name="copy" />
-            Copy all
+            {t.settings.recoveryCodes.copyAll}
           </button>
         </div>
       </div>
@@ -469,6 +525,7 @@ function RecoveryCodesModal({ codes, onClose }: { codes: string[]; onClose: () =
 }
 
 function PasskeysPanel() {
+  const t = useT();
   const { open, confirmDialog } = useModal();
   const toast = useToast();
   const { data: passkeys, loading, reload } = useAsync(() =>
@@ -478,21 +535,18 @@ function PasskeysPanel() {
   return (
     <div className="panel section-gap">
       <div className="panel-head">
-        <h2>Passkeys</h2>
+        <h2>{t.settings.passkeys.title}</h2>
         <span
           className="link"
           onClick={() => open((close) => <AddPasskeyModal onClose={close} onAdded={reload} />)}
         >
-          + Add passkey
+          {t.settings.passkeys.add}
         </span>
       </div>
       {loading || !passkeys ? (
-        <Loading label="Loading…" />
+        <Loading label={t.common.loading} />
       ) : passkeys.length === 0 ? (
-        <Empty>
-          No passkeys yet. Add one to sign in without a password using Face ID, Touch ID, Windows
-          Hello or a security key.
-        </Empty>
+        <Empty>{t.settings.passkeys.empty}</Empty>
       ) : (
         passkeys.map((p) => (
           <div className="row" key={p.id}>
@@ -502,18 +556,18 @@ function PasskeysPanel() {
             <div className="row-main">
               <div className="row-title">{p.name}</div>
               <div className="row-sub">
-                {`Added ${fmtRelative(p.created_at)} · last used ${fmtRelative(p.last_used_at)}`}
+                {t.settings.passkeys.meta(fmtRelative(p.created_at), fmtRelative(p.last_used_at))}
               </div>
             </div>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() =>
                 confirmDialog(
-                  'Remove passkey',
-                  `"${p.name}" will no longer be able to sign in.`,
+                  t.settings.passkeys.removeTitle,
+                  t.settings.passkeys.removeConfirm(p.name),
                   async () => {
                     await api.del(`/auth/passkeys/${p.id}`);
-                    toast('Passkey removed', 'success');
+                    toast(t.settings.passkeys.removed, 'success');
                     reload();
                   },
                   true,
@@ -530,35 +584,33 @@ function PasskeysPanel() {
 }
 
 function AddPasskeyModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [name, setName] = useState('');
 
   const submit = async () => {
     try {
-      await registerPasskey(name.trim() || 'Passkey');
+      await registerPasskey(name.trim() || t.settings.addPasskey.defaultName);
       onAdded();
-      toast('Passkey added', 'success');
+      toast(t.settings.addPasskey.added, 'success');
     } catch (e) {
       // Dismissing the native prompt just cancels — keep the dialog open quietly.
       if (e && typeof e === 'object' && 'name' in e && (e as { name: string }).name === 'NotAllowedError') {
         return false;
       }
-      toast(e instanceof Error ? e.message : 'Could not add passkey', 'error');
+      toast(e instanceof Error ? e.message : t.settings.addPasskey.failed, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="Add a passkey" confirmLabel="Create passkey" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.settings.addPasskey.title} confirmLabel={t.settings.addPasskey.confirm} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="row-sub">
-          Name this passkey so you can recognize it later, then follow your device’s prompt (Face
-          ID, Touch ID, Windows Hello, or a security key).
-        </div>
-        <Field label="Name">
+        <div className="row-sub">{t.settings.addPasskey.help}</div>
+        <Field label={t.settings.addPasskey.name}>
           <input
             type="text"
-            placeholder="e.g. MacBook Touch ID"
+            placeholder={t.settings.addPasskey.namePlaceholder}
             value={name}
             onChange={(e) => setName(e.target.value)}
             autoFocus
@@ -570,6 +622,7 @@ function AddPasskeyModal({ onClose, onAdded }: { onClose: () => void; onAdded: (
 }
 
 function DisableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [password, setPassword] = useState('');
 
@@ -577,25 +630,23 @@ function DisableTwoFactorModal({ onClose, onDone }: { onClose: () => void; onDon
     try {
       await api.post('/auth/2fa/disable', { password });
       onDone();
-      toast('Two-factor authentication disabled', 'success');
+      toast(t.settings.disableTwoFactor.disabledToast, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to disable', 'error');
+      toast(err instanceof Error ? err.message : t.settings.disableTwoFactor.failed, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title="Disable two-factor authentication"
-      confirmLabel="Disable"
+      title={t.settings.disableTwoFactor.title}
+      confirmLabel={t.settings.disableTwoFactor.confirm}
       onClose={onClose}
       onSubmit={submit}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="warn-box">
-          This removes the second factor from your account. Confirm your password to continue.
-        </div>
-        <Field label="Password">
+        <div className="warn-box">{t.settings.disableTwoFactor.warning}</div>
+        <Field label={t.settings.disableTwoFactor.password}>
           <input
             type="password"
             value={password}

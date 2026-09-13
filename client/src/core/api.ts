@@ -54,6 +54,8 @@ export interface User {
   is_admin: boolean;
   disabled: boolean;
   totp_enabled: boolean;
+  /** Preferred UI language; null follows the browser. */
+  locale: 'en' | 'de' | null;
 }
 
 /** Newest published release as last seen by the server's update check. */

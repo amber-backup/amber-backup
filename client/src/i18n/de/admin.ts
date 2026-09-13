@@ -1,0 +1,70 @@
+import type { AdminMessages } from '../en/admin';
+
+export const admin: AdminMessages = {
+  title: 'Administration',
+  subtitle: 'Systemweite Einstellungen',
+  copyFailed: 'Kopieren fehlgeschlagen — bitte manuell markieren und kopieren',
+  enroll: {
+    loadFailed: 'Registrierungseinstellungen konnten nicht geladen werden.',
+    enabledToast: 'Selbstregistrierung aktiviert',
+    disabledToast: 'Selbstregistrierung deaktiviert',
+    tokenCopied: 'Token kopiert',
+    rotateTitle: 'Globales Token erneuern',
+    rotateMessage:
+      'Das aktuelle Token funktioniert für neue Rollouts nicht mehr. Bereits registrierte Agents arbeiten weiter.',
+    rotated: 'Token erneuert',
+    heading: 'Selbstregistrierung von Agents',
+    globalToken: 'Globales Registrierungs-Token',
+    help:
+      'Wenn aktiviert, registrieren sich Agents selbst mit diesem gemeinsamen Token — sie wählen ihren Namen selbst und tauschen das Token gegen eigene Zugangsdaten ein.',
+    enabled: 'Aktiviert',
+    token: 'Token',
+    copyToken: 'Token kopieren',
+    rotateToken: 'Token erneuern',
+  },
+  system: {
+    loadFailed: 'Systemeinstellungen konnten nicht geladen werden.',
+  },
+  auth: {
+    heading: 'Authentifizierung',
+    enabledToast: 'Lokale Anmeldung aktiviert',
+    disabledToast: 'Lokale Anmeldung deaktiviert',
+    allowLocal: 'Lokale Anmeldung erlauben (Passwort und Passkeys)',
+    needsSso:
+      'Zum Deaktivieren muss Single Sign-on mit mindestens einem vollständig konfigurierten Anbieter aktiv sein — sonst könnte sich niemand mehr anmelden.',
+    help:
+      'Ist dies deaktiviert, verschwinden Passwortformular und Passkey-Schaltfläche von der Anmeldeseite, und nur Single Sign-on bleibt. API-Schlüssel funktionieren weiterhin.',
+  },
+  agents: {
+    heading: 'Agents',
+    invalidTimeout: 'Geben Sie eine ganze Zahl zwischen 30 und 3600 Sekunden ein',
+    saved: 'Agent-Einstellungen gespeichert',
+    offlineTimeout: 'Offline-Timeout (Sekunden)',
+    offlineTimeoutHelp:
+      'Nach welcher Zeit ohne Abfrage ein Agent als offline gilt. 30–3600 Sekunden.',
+  },
+  sso: {
+    heading: 'Single Sign-on',
+    enable: 'Single Sign-on aktivieren',
+    saved: 'SSO-Konfiguration gespeichert',
+    redirectCopied: 'Redirect URI kopiert',
+    redirectUri: 'Redirect URI',
+    redirectHelp: 'Registrieren Sie diese Callback-URL bei jedem Anbieter.',
+    copyRedirect: 'Redirect URI kopieren',
+    providers: 'Anbieter',
+    noProviders: 'Noch keine Anbieter. Fügen Sie unten einen hinzu.',
+    addProvider: 'Anbieter hinzufügen',
+    save: 'SSO speichern',
+    removeProvider: 'Anbieter entfernen',
+    issuerUrl: 'Issuer URL',
+    issuerUrlHelp: 'Basis-URL, unter der /.well-known/openid-configuration erreichbar ist.',
+    tenantId: 'Verzeichnis-ID (Tenant ID)',
+    tenantIdPlaceholder: 'Verzeichnis-ID (Tenant ID)',
+    clientId: 'Client ID',
+    clientSecret: 'Client Secret',
+    secretStored: 'Ein Secret ist gespeichert. Leer lassen, um es beizubehalten.',
+    secretUnchanged: '•••••••• (unverändert)',
+    buttonLabel: 'Beschriftung der Anmeldeschaltfläche (optional)',
+    buttonLabelHelp: (name: string) => `Standard: „${name}“.`,
+  },
+};

@@ -1,0 +1,69 @@
+export const admin = {
+  title: 'Admin',
+  subtitle: 'System-wide settings',
+  copyFailed: 'Copy failed — select and copy manually',
+  enroll: {
+    loadFailed: 'Failed to load enrollment settings.',
+    enabledToast: 'Self-registration enabled',
+    disabledToast: 'Self-registration disabled',
+    tokenCopied: 'Token copied',
+    rotateTitle: 'Rotate global token',
+    rotateMessage:
+      'The current token stops working for new rollouts. Agents already enrolled keep working.',
+    rotated: 'Token rotated',
+    heading: 'Agent self-registration',
+    globalToken: 'Global enrollment token',
+    help:
+      'When enabled, agents register themselves with this shared token — they choose their own name and exchange the token for their own credential.',
+    enabled: 'Enabled',
+    token: 'Token',
+    copyToken: 'Copy token',
+    rotateToken: 'Rotate token',
+  },
+  system: {
+    loadFailed: 'Failed to load system settings.',
+  },
+  auth: {
+    heading: 'Authentication',
+    enabledToast: 'Local login enabled',
+    disabledToast: 'Local login disabled',
+    allowLocal: 'Allow local login (password and passkeys)',
+    needsSso:
+      'Turning this off needs single sign-on enabled with at least one fully configured provider — otherwise nobody could sign in.',
+    help:
+      'With this off, the password form and passkey button disappear from the login page and only single sign-on remains. API keys keep working.',
+  },
+  agents: {
+    heading: 'Agents',
+    invalidTimeout: 'Enter a whole number between 30 and 3600 seconds',
+    saved: 'Agent settings saved',
+    offlineTimeout: 'Offline timeout (seconds)',
+    offlineTimeoutHelp: 'After how long without a poll an agent is marked offline. 30–3600 seconds.',
+  },
+  sso: {
+    heading: 'Single sign-on',
+    enable: 'Enable single sign-on',
+    saved: 'SSO configuration saved',
+    redirectCopied: 'Redirect URI copied',
+    redirectUri: 'Redirect URI',
+    redirectHelp: 'Register this callback URL with every provider.',
+    copyRedirect: 'Copy redirect URI',
+    providers: 'Providers',
+    noProviders: 'No providers yet. Add one below.',
+    addProvider: 'Add provider',
+    save: 'Save SSO',
+    removeProvider: 'Remove provider',
+    issuerUrl: 'Issuer URL',
+    issuerUrlHelp: 'Base URL exposing /.well-known/openid-configuration.',
+    tenantId: 'Directory (tenant) ID',
+    tenantIdPlaceholder: 'directory (tenant) id',
+    clientId: 'Client ID',
+    clientSecret: 'Client secret',
+    secretStored: 'A secret is stored. Leave blank to keep it.',
+    secretUnchanged: '•••••••• (unchanged)',
+    buttonLabel: 'Login button label (optional)',
+    buttonLabelHelp: (name: string) => `Defaults to "${name}".`,
+  },
+};
+
+export type AdminMessages = typeof admin;

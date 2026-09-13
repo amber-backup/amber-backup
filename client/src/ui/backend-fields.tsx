@@ -3,6 +3,7 @@ import { Icon } from '../core/icons';
 import { copyToClipboard } from '../core/clipboard';
 import { useToast } from './toast';
 import { Field } from './primitives';
+import { useT } from '../i18n';
 
 /** Renders a single dynamic backend field (text/password/number/textarea/select). */
 export function BackendFieldInput({
@@ -74,12 +75,13 @@ export function BackendFields({
 /** Read-only SSH public key with copy + install instructions (SFTP targets). */
 export function PublicKeyBox({ publicKey }: { publicKey: string }) {
   const toast = useToast();
+  const t = useT();
   return (
     <div>
       <p className="row-sub" style={{ marginBottom: 8 }}>
-        Add this public key to the SFTP server (append it to the backup user's{' '}
-        <code>~/.ssh/authorized_keys</code>). Then use “Test” to verify the
-        connection.
+        {t.backendFields.publicKey.instructionsBefore}{' '}
+        <code>~/.ssh/authorized_keys</code>
+        {t.backendFields.publicKey.instructionsAfter}
       </p>
       <textarea
         readOnly
@@ -94,10 +96,10 @@ export function PublicKeyBox({ publicKey }: { publicKey: string }) {
           className="btn btn-ghost btn-sm"
           onClick={async () => {
             const ok = await copyToClipboard(publicKey);
-            toast(ok ? 'Public key copied' : 'Copy failed', ok ? 'success' : 'error');
+            toast(ok ? t.backendFields.publicKey.copied : t.backendFields.publicKey.copyFailed, ok ? 'success' : 'error');
           }}
         >
-          <Icon name="copy" /> Copy public key
+          <Icon name="copy" /> {t.backendFields.publicKey.copy}
         </button>
       </div>
     </div>

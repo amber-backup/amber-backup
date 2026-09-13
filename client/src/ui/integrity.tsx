@@ -15,6 +15,8 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from './toast';
 import { useModal, FormModal, ModalFrame } from './modal';
 import { Field, Spinner } from './primitives';
+import { messages, useT } from '../i18n';
+import type { IntegrityMessages } from '../i18n/en/integrity';
 
 /** A verdict older than this is flagged as overdue. */
 const STALE_AFTER_DAYS = 30;
@@ -22,69 +24,53 @@ const STALE_AFTER_DAYS = 30;
 const ACTIVE_REFRESH_MS = 3000;
 const DEFAULT_SUBSET_PARTS = 12;
 
-const LEVELS: { value: IntegrityLevel; title: string; desc: string }[] = [
-  {
-    value: 'quick',
-    title: 'Structure only',
-    desc: 'Verifies snapshots, trees and the index. Fast — reads no file data.',
-  },
-  {
-    value: 'rotating',
-    title: 'Rotating data part',
-    desc: 'Also downloads and verifies one part of the data. Each run continues with the next part, so over time all data is read back.',
-  },
-  {
-    value: 'full',
-    title: 'All data',
-    desc: 'Downloads and verifies every data pack. Slow, and on cloud storage it can cause significant egress costs.',
-  },
-];
+const LEVELS: IntegrityLevel[] = ['quick', 'rotating', 'full'];
 
 /** Schedules offered for checks; off-hours so they don't collide with daytime backups. */
-const CHECK_PRESETS: { label: string; value: string }[] = [
-  { label: 'Daily at 04:00', value: '0 4 * * *' },
-  { label: 'Weekly — Sunday 04:00', value: '0 4 * * 0' },
-  { label: 'Monthly — 1st, 04:00', value: '0 4 1 * *' },
-  { label: 'Custom…', value: 'custom' },
+const CHECK_PRESETS: { key: keyof IntegrityMessages['presets']; value: string }[] = [
+  { key: 'daily', value: '0 4 * * *' },
+  { key: 'weekly', value: '0 4 * * 0' },
+  { key: 'monthly', value: '0 4 1 * *' },
+  { key: 'custom', value: 'custom' },
 ];
 
 /** Short label for what a check verified, e.g. "Rotating · part 3/12". */
 export function checkLevelLabel(info?: Pick<CheckInfo, 'level' | 'part' | 'parts'> | null): string {
-  if (!info) return 'Check';
-  if (info.level === 'full') return 'Full · all data';
+  const t = messages().integrity.levelLabel;
+  if (!info) return t.check;
+  if (info.level === 'full') return t.full;
   if (info.level === 'rotating') {
-    return info.part && info.parts ? `Rotating · part ${info.part}/${info.parts}` : 'Rotating';
+    return info.part && info.parts ? t.rotatingPart(info.part, info.parts) : t.rotating;
   }
-  return 'Quick · structure';
+  return t.quick;
 }
 
 type Tone = 'success' | 'danger' | 'warn' | 'muted';
 
 /** The repository's integrity state as one badge: tone, label and tooltip. */
 export function integrityVerdict(job: Job): { tone: Tone; label: string; title: string } {
+  const t = messages().integrity.verdict;
   const at = job.repo_check_at;
-  const failedNote = job.repo_check_error ? ` — the last attempt could not finish: ${job.repo_check_error}` : '';
+  const failedNote = job.repo_check_error ? t.failedNote(job.repo_check_error) : '';
   if (job.repo_check_status === 'damaged') {
     return {
       tone: 'danger',
-      label: 'Damaged',
-      title: `restic found integrity errors on ${fmtDateTime(at)}${failedNote}`,
+      label: t.damaged,
+      title: `${t.damagedTitle(fmtDateTime(at))}${failedNote}`,
     };
   }
   if (job.repo_check_status === 'passed' && at) {
     const ageDays = (Date.now() - new Date(at).getTime()) / 86_400_000;
     return {
       tone: ageDays > STALE_AFTER_DAYS ? 'warn' : 'success',
-      label: `Verified ${fmtRelative(at)}`,
-      title: `No errors found on ${fmtDateTime(at)} (${checkLevelLabel({ level: job.repo_check_level ?? 'quick' })})${failedNote}`,
+      label: t.verified(fmtRelative(at)),
+      title: `${t.passedTitle(fmtDateTime(at), checkLevelLabel({ level: job.repo_check_level ?? 'quick' }))}${failedNote}`,
     };
   }
   return {
     tone: job.repo_check_error ? 'danger' : 'muted',
-    label: job.repo_check_error ? 'Check failed' : 'Not verified',
-    title: job.repo_check_error
-      ? `The integrity check could not finish: ${job.repo_check_error}`
-      : 'The repository has never been checked for integrity',
+    label: job.repo_check_error ? t.checkFailed : t.notVerified,
+    title: job.repo_check_error ? t.checkFailedTitle(job.repo_check_error) : t.neverCheckedTitle,
   };
 }
 
@@ -114,6 +100,7 @@ function isActive(status: string): boolean {
  * finishes or the schedule is saved, so the verdict here stays current.
  */
 export function IntegrityPanel({ job, onChanged }: { job: Job; onChanged: () => void }) {
+  const t = useT();
   const { open } = useModal();
   const runs = useAsync(() => api.get<Run[]>(`/runs?jobId=${job.id}&kind=check&limit=5`), [job.id]);
   const active = runs.data?.some((r) => isActive(r.status)) ?? false;
@@ -141,63 +128,67 @@ export function IntegrityPanel({ job, onChanged }: { job: Job; onChanged: () => 
     <div className="panel">
       <div className="panel-head">
         <div className="integrity-head">
-          <h2>Integrity</h2>
+          <h2>{t.integrity.panel.title}</h2>
           <IntegrityBadge job={job} />
         </div>
         <div className="panel-head-actions">
           <button className="btn btn-ghost btn-sm" onClick={openSchedule}>
             <Icon name="clock" size={14} />
-            Schedule
+            {t.integrity.panel.schedule}
           </button>
           <button className="btn btn-primary btn-sm" onClick={openCheck} disabled={active}>
             <Icon name="shield" size={14} />
-            {active ? 'Check running…' : 'Check now'}
+            {active ? t.integrity.panel.checkRunning : t.integrity.panel.checkNow}
           </button>
         </div>
       </div>
 
       {job.repo_check_status === 'damaged' && (
         <div className="integrity-alert warn-box">
-          {`restic found damaged data in this repository (${fmtDateTime(job.repo_check_at)}). Snapshots that reference it may not restore completely. Open the failed check's log below for the affected data and the repair commands restic suggests, then run a new backup and check again.`}
+          {t.integrity.panel.damagedAlert(fmtDateTime(job.repo_check_at))}
         </div>
       )}
 
       <div className="integrity-facts">
         <Fact
-          label="Last verdict"
-          value={verdictText(job)}
+          label={t.integrity.panel.lastVerdict}
+          value={verdictText(job, t.integrity)}
           sub={
             job.repo_check_at
               ? `${fmtDateTime(job.repo_check_at)} · ${checkLevelLabel({ level: job.repo_check_level ?? 'quick' })}`
-              : 'Start a check to verify the repository'
+              : t.integrity.panel.startCheckHint
           }
         />
         <DataFact job={job} />
         <Fact
-          label="Schedule"
+          label={t.integrity.panel.schedule}
           value={
             config.enabled && config.cronExpr
               ? (describeCron(config.cronExpr) ?? config.cronExpr)
-              : 'Not scheduled'
+              : t.integrity.panel.notScheduled
           }
           sub={
             config.enabled && config.cronExpr
               ? `${checkLevelLabel({ level: config.level ?? 'quick' })}${
-                  job.next_check ? ` · next ${fmtRelative(job.next_check)}` : job.enabled ? '' : ' · job disabled'
+                  job.next_check
+                    ? t.integrity.panel.next(fmtRelative(job.next_check))
+                    : job.enabled
+                      ? ''
+                      : t.integrity.panel.jobDisabled
                 }`
-              : 'Checks only run when started by hand'
+              : t.integrity.panel.manualOnly
           }
         />
       </div>
 
       {job.repo_check_error && (
         <div className="integrity-note" title={job.repo_check_error}>
-          {`Last attempt could not finish: ${errorSummary(job.repo_check_error)}`}
+          {t.integrity.panel.lastAttemptFailed(errorSummary(job.repo_check_error))}
         </div>
       )}
 
       <div className="integrity-runs">
-        <div className="integrity-runs-head">Recent checks</div>
+        <div className="integrity-runs-head">{t.integrity.panel.recentChecks}</div>
         {!runs.data ? (
           runs.error ? (
             <div className="empty">{runs.error.message}</div>
@@ -207,7 +198,7 @@ export function IntegrityPanel({ job, onChanged }: { job: Job; onChanged: () => 
             </div>
           )
         ) : runs.data.length === 0 ? (
-          <div className="empty">No checks yet.</div>
+          <div className="empty">{t.integrity.panel.noChecks}</div>
         ) : (
           runs.data.map((r) => <CheckRunRow key={r.id} run={r} onChanged={runs.reload} />)
         )}
@@ -216,10 +207,10 @@ export function IntegrityPanel({ job, onChanged }: { job: Job; onChanged: () => 
   );
 }
 
-function verdictText(job: Job): string {
-  if (job.repo_check_status === 'passed') return 'No errors found';
-  if (job.repo_check_status === 'damaged') return 'Integrity errors found';
-  return 'Never checked';
+function verdictText(job: Job, t: IntegrityMessages): string {
+  if (job.repo_check_status === 'passed') return t.panel.noErrorsFound;
+  if (job.repo_check_status === 'damaged') return t.panel.integrityErrorsFound;
+  return t.panel.neverChecked;
 }
 
 function Fact({ label, value, sub, children }: { label: string; value: string; sub?: string; children?: React.ReactNode }) {
@@ -235,6 +226,7 @@ function Fact({ label, value, sub, children }: { label: string; value: string; s
 
 /** When all data was last read back, plus the progress of a rotation in flight. */
 function DataFact({ job }: { job: Job }) {
+  const t = useT().integrity.data;
   const schedParts = job.integrity_check?.level === 'rotating' ? (job.integrity_check.subsetParts ?? DEFAULT_SUBSET_PARTS) : null;
   const parts = schedParts ?? job.repo_check_subset_parts ?? null;
   // Parts of the current rotation already read: only meaningful when the
@@ -247,20 +239,20 @@ function DataFact({ job }: { job: Job }) {
 
   return (
     <Fact
-      label="All data read back"
-      value={job.repo_data_verified_at ? fmtRelative(job.repo_data_verified_at) : 'Never'}
+      label={t.label}
+      value={job.repo_data_verified_at ? fmtRelative(job.repo_data_verified_at) : t.never}
       sub={
         parts
           ? completed
-            ? `Rotation complete — the next run starts over at part 1 of ${parts}`
-            : `Rotation: ${done} of ${parts} parts read`
+            ? t.rotationComplete(parts)
+            : t.rotationProgress(done, parts)
           : job.repo_data_verified_at
             ? fmtDateTime(job.repo_data_verified_at)
-            : 'Run a full or rotating check to read the data back'
+            : t.readBackHint
       }
     >
       {parts ? (
-        <div className="progress-track integrity-rotation" title={`${shown} of ${parts} parts`}>
+        <div className="progress-track integrity-rotation" title={t.partsTitle(shown ?? 0, parts)}>
           <div className="fill" style={{ width: `${Math.round((shown / parts) * 100)}%` }} />
         </div>
       ) : null}
@@ -269,6 +261,8 @@ function DataFact({ job }: { job: Job }) {
 }
 
 function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void }) {
+  const { integrity, common } = useT();
+  const t = integrity.run;
   const toast = useToast();
   const { open } = useModal();
   const damaged = r.check_info?.damaged === true;
@@ -276,18 +270,18 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
   const cancel = async () => {
     try {
       await api.post(`/runs/${r.id}/cancel`);
-      toast('Check cancelled', 'success');
+      toast(t.cancelled, 'success');
       onChanged();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not cancel the check', 'error');
+      toast(e instanceof ApiError ? e.message : t.cancelFailed, 'error');
     }
   };
 
   const sub =
     r.status === 'success'
-      ? 'no errors found'
+      ? t.noErrorsFound
       : damaged
-        ? 'integrity errors found'
+        ? t.integrityErrorsFound
         : r.status === 'failed' && r.error
           ? errorSummary(r.error)
           : statusLabel(r.status);
@@ -298,7 +292,7 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
       <div className="row-main">
         <div className="row-title">
           {checkLevelLabel(r.check_info)}
-          {r.trigger === 'schedule' && <span className="badge muted row-kind">scheduled</span>}
+          {r.trigger === 'schedule' && <span className="badge muted row-kind">{t.scheduled}</span>}
         </div>
         <div className="row-sub integrity-run-sub" title={r.error ?? undefined}>
           {sub}
@@ -307,16 +301,16 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
       <div className="row-meta run-meta">
         <span>
           {damaged ? (
-            <span className="badge danger">damaged</span>
+            <span className="badge danger">{t.damaged}</span>
           ) : r.status !== 'success' ? (
             <span className={`badge ${r.status === 'failed' ? 'danger' : r.status === 'queued' ? 'info' : 'muted'}`}>
               {statusLabel(r.status)}
             </span>
           ) : (
-            <span className="badge success">passed</span>
+            <span className="badge success">{t.passed}</span>
           )}
         </span>
-        <span className="muted" title="Duration">
+        <span className="muted" title={t.duration}>
           {r.started_at ? fmtDuration(runDurationMs(r)) : ''}
         </span>
         <span className="muted">{fmtRelative(r.finished_at ?? r.created_at)}</span>
@@ -325,7 +319,7 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
         {isActive(r.status) ? (
           <button className="btn btn-ghost btn-sm" onClick={() => void cancel()}>
             <Icon name="x" size={14} />
-            Cancel
+            {common.cancel}
           </button>
         ) : (
           <button
@@ -333,7 +327,7 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
             onClick={() => open((close) => <RunLogModal runId={r.id} title={checkLevelLabel(r.check_info)} onClose={close} />)}
           >
             <Icon name="file" size={14} />
-            Log
+            {t.log}
           </button>
         )}
       </div>
@@ -342,9 +336,10 @@ function CheckRunRow({ run: r, onChanged }: { run: Run; onChanged: () => void })
 }
 
 function RunLogModal({ runId, title, onClose }: { runId: string; title: string; onClose: () => void }) {
+  const t = useT().integrity.run;
   const { data, loading, error } = useAsync(() => api.get<Run & { log?: string | null }>(`/runs/${runId}`), [runId]);
   return (
-    <ModalFrame title={`Check log — ${title}`} wide onClose={onClose}>
+    <ModalFrame title={t.logTitle(title)} wide onClose={onClose}>
       {loading ? (
         <div className="loading">
           <Spinner />
@@ -354,7 +349,7 @@ function RunLogModal({ runId, title, onClose }: { runId: string; title: string; 
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {data?.error && <div className="warn-box">{data.error}</div>}
-          <pre className="run-log">{data?.log?.trim() || 'No output recorded.'}</pre>
+          <pre className="run-log">{data?.log?.trim() || t.noOutput}</pre>
         </div>
       )}
     </ModalFrame>
@@ -372,25 +367,26 @@ function LevelOptions({
   job: Job;
   parts: number;
 }) {
+  const t = useT().integrity.levels;
   return (
     <div className="level-options" role="radiogroup">
-      {LEVELS.map((l) => {
-        let desc = l.desc;
-        if (l.value === 'rotating') {
+      {LEVELS.map((level) => {
+        let desc = t[level].desc;
+        if (level === 'rotating') {
           const next =
             job.repo_check_subset_parts === parts ? (job.repo_check_subset_next ?? 1) : 1;
-          desc = `${l.desc} Next: part ${next} of ${parts}.`;
+          desc = `${desc} ${t.nextPart(next, parts)}`;
         }
         return (
-          <label key={l.value} className={`level-option${value === l.value ? ' selected' : ''}`}>
+          <label key={level} className={`level-option${value === level ? ' selected' : ''}`}>
             <input
               type="radio"
               name="integrity-level"
-              checked={value === l.value}
-              onChange={() => onChange(l.value)}
+              checked={value === level}
+              onChange={() => onChange(level)}
             />
             <span>
-              <span className="level-option-title">{l.title}</span>
+              <span className="level-option-title">{t[level].title}</span>
               <span className="level-option-desc">{desc}</span>
             </span>
           </label>
@@ -401,6 +397,7 @@ function LevelOptions({
 }
 
 function CheckDialog({ job, onClose, onStarted }: { job: Job; onClose: () => void; onStarted: () => void }) {
+  const t = useT().integrity.checkDialog;
   const toast = useToast();
   const config = job.integrity_check ?? {};
   const [level, setLevel] = useState<IntegrityLevel>(config.level ?? 'quick');
@@ -409,28 +406,23 @@ function CheckDialog({ job, onClose, onStarted }: { job: Job; onClose: () => voi
   const submit = async () => {
     try {
       await api.post(`/jobs/${job.id}/check`, { level });
-      toast('Integrity check started', 'success');
+      toast(t.started, 'success');
       onStarted();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not start the check', 'error');
+      toast(err instanceof Error ? err.message : t.startFailed, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title={`Check integrity — ${job.name}`} confirmLabel="Start check" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.title(job.name)} confirmLabel={t.start} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <LevelOptions value={level} onChange={setLevel} job={job} parts={parts} />
         {level === 'full' && job.target_id != null && (
-          <div className="warn-box">
-            Every data pack is downloaded from the storage backend. Depending on the repository size this can take hours
-            and cause egress costs.
-          </div>
+          <div className="warn-box">{t.fullWarning}</div>
         )}
         <span className="muted" style={{ fontSize: 12.5 }}>
-          {job.location === 'agent'
-            ? "The check runs on the job's agent and locks the repository while it runs — backups of this job fail during that time."
-            : 'The check locks the repository while it runs — backups of this job fail during that time.'}
+          {job.location === 'agent' ? t.lockAgent : t.lockLocal}
         </span>
       </div>
     </FormModal>
@@ -438,6 +430,8 @@ function CheckDialog({ job, onClose, onStarted }: { job: Job; onClose: () => voi
 }
 
 function ScheduleDialog({ job, onClose, onSaved }: { job: Job; onClose: () => void; onSaved: () => void }) {
+  const { integrity } = useT();
+  const t = integrity.scheduleDialog;
   const toast = useToast();
   const initial: IntegrityCheckConfig = job.integrity_check ?? {};
   const [enabled, setEnabled] = useState(initial.enabled ?? false);
@@ -451,7 +445,7 @@ function ScheduleDialog({ job, onClose, onSaved }: { job: Job; onClose: () => vo
 
   const submit = async () => {
     if (level === 'rotating' && !partsValid) {
-      toast('Parts must be a whole number between 2 and 100', 'error');
+      toast(t.partsInvalid, 'error');
       return false;
     }
     try {
@@ -461,23 +455,23 @@ function ScheduleDialog({ job, onClose, onSaved }: { job: Job; onClose: () => vo
         level,
         subsetParts: level === 'rotating' ? partsNum : undefined,
       });
-      toast('Check schedule saved', 'success');
+      toast(t.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not save the schedule', 'error');
+      toast(err instanceof Error ? err.message : t.saveFailed, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title={`Check schedule — ${job.name}`} onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.title(job.name)} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <label className="checkbox">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Check this repository on a schedule
+          {t.enable}
         </label>
         <div className="field-row">
-          <Field label="Preset">
+          <Field label={t.preset}>
             <select
               value={preset}
               disabled={!enabled}
@@ -487,12 +481,12 @@ function ScheduleDialog({ job, onClose, onSaved }: { job: Job; onClose: () => vo
             >
               {CHECK_PRESETS.map((p) => (
                 <option key={p.value} value={p.value}>
-                  {p.label}
+                  {integrity.presets[p.key]}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="Cron" help="minute hour day month weekday">
+          <Field label={t.cron} help={t.cronHelp}>
             <input
               type="text"
               value={cron}
@@ -503,24 +497,19 @@ function ScheduleDialog({ job, onClose, onSaved }: { job: Job; onClose: () => vo
           </Field>
         </div>
         {enabled && (
-          <div className={`cron-preview${cronDesc ? '' : ' invalid'}`}>{`→ ${cronDesc ?? 'Custom schedule'}`}</div>
+          <div className={`cron-preview${cronDesc ? '' : ' invalid'}`}>{`→ ${cronDesc ?? t.customSchedule}`}</div>
         )}
         <LevelOptions value={level} onChange={setLevel} job={job} parts={partsValid ? partsNum : DEFAULT_SUBSET_PARTS} />
         {level === 'rotating' && (
           <Field
-            label="Parts"
-            help={
-              partsValid
-                ? `Each run reads 1/${partsNum} of the data — after ${partsNum} successful runs all data has been read back once.`
-                : 'A whole number between 2 and 100'
-            }
+            label={t.parts}
+            help={partsValid ? t.partsHelp(partsNum) : t.partsRange}
           >
             <input type="number" min="2" max="100" value={parts} onChange={(e) => setParts(e.target.value)} />
           </Field>
         )}
         <span className="muted" style={{ fontSize: 12.5 }}>
-          Checks lock the repository. Pick a time when this job does not back up; a check that finds the repository
-          busy is skipped until its next turn.
+          {t.lockNote}
         </span>
       </div>
     </FormModal>

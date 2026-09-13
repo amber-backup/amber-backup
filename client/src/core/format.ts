@@ -1,5 +1,7 @@
 // Pure formatting helpers shared across pages.
 
+import { intlLocale, messages } from '../i18n';
+
 export function fmtBytes(bytes?: number | null): string {
   if (bytes == null) return '—';
   if (bytes === 0) return '0 B';
@@ -16,12 +18,13 @@ export function fmtRelative(date?: string | null): string {
     hour = 3_600_000,
     day = 86_400_000;
   const ago = diff >= 0;
-  const fmt = (n: number, unit: string) => (ago ? `${n} ${unit} ago` : `in ${n} ${unit}`);
-  if (abs < min) return ago ? 'just now' : 'soon';
-  if (abs < hour) return fmt(Math.round(abs / min), 'min');
-  if (abs < day) return fmt(Math.round(abs / hour), 'h');
-  if (abs < 30 * day) return fmt(Math.round(abs / day), 'd');
-  return new Date(date).toLocaleDateString('en-US');
+  const m = messages().common.format;
+  const fmt = (n: number, unit: string) => (ago ? m.ago(n, unit) : m.in(n, unit));
+  if (abs < min) return ago ? m.justNow : m.soon;
+  if (abs < hour) return fmt(Math.round(abs / min), m.unitMin);
+  if (abs < day) return fmt(Math.round(abs / hour), m.unitHour);
+  if (abs < 30 * day) return fmt(Math.round(abs / day), m.unitDay);
+  return new Date(date).toLocaleDateString(intlLocale());
 }
 
 /** Human-readable elapsed time, e.g. "42 s", "3 min 12 s", "1 h 05 min". */
@@ -49,25 +52,14 @@ export function runDurationMs(run: { started_at: string | null; finished_at: str
 
 export function fmtDateTime(date?: string | null): string {
   if (!date) return '—';
-  return new Date(date).toLocaleString('en-US', {
+  return new Date(date).toLocaleString(intlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
 }
 
 export function statusLabel(status: string): string {
-  const map: Record<string, string> = {
-    queued: 'queued',
-    running: 'running',
-    success: 'success',
-    failed: 'failed',
-    cancelled: 'cancelled',
-    online: 'online',
-    offline: 'offline',
-    enrolled: 'connecting',
-    error: 'error',
-  };
-  return map[status] ?? status;
+  return messages().common.status[status] ?? status;
 }
 
 /** True when semver `candidate` (e.g. "1.29.0") is newer than `current`. */

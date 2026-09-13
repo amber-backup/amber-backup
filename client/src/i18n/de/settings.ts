@@ -1,0 +1,118 @@
+import type { SettingsMessages } from '../en/settings';
+
+export const settings: SettingsMessages = {
+  title: 'Einstellungen',
+  subtitle: 'Profil, API-Schlüssel und SSO',
+  profile: {
+    title: 'Profil',
+    changePassword: 'Passwort ändern',
+  },
+  language: {
+    title: 'Sprache',
+    label: 'Sprache der Oberfläche',
+    help: 'Gilt für dieses Konto auf allen Geräten.',
+    auto: 'Automatisch (Browser)',
+  },
+  twoFactor: {
+    title: 'Zwei-Faktor-Authentifizierung',
+    enable: 'Aktivieren',
+    disable: 'Deaktivieren',
+    enabled: 'Aktiviert',
+    disabled: 'Deaktiviert',
+    enabledHelp: 'Bei der Anmeldung ist ein Code aus Ihrer Authenticator-App erforderlich.',
+    disabledHelp: 'Schützen Sie die Anmeldung mit einem zeitbasierten Code aus einer Authenticator-App.',
+  },
+  enableTwoFactor: {
+    title: 'Zwei-Faktor-Authentifizierung aktivieren',
+    confirm: 'Prüfen & aktivieren',
+    setupFailed: 'Einrichtung konnte nicht gestartet werden',
+    invalidFormat: 'Geben Sie den 6-stelligen Code aus Ihrer App ein',
+    enabledToast: 'Zwei-Faktor-Authentifizierung aktiviert',
+    invalidCode: 'Ungültiger Code',
+    preparing: 'Wird vorbereitet…',
+    scanHelp:
+      'Scannen Sie diesen QR-Code mit einer Authenticator-App (Google Authenticator, 1Password, Authy…) und geben Sie dann den angezeigten 6-stelligen Code ein.',
+    qrAlt: 'TOTP-QR-Code',
+    manualKey: 'Oder geben Sie diesen Schlüssel manuell ein:',
+    codeLabel: 'Authentifizierungscode',
+  },
+  recoveryCodes: {
+    title: 'Wiederherstellungscodes',
+    done: 'Fertig',
+    warning:
+      'Bewahren Sie diese Codes sicher auf. Jeder Code funktioniert einmal und ermöglicht die Anmeldung, falls Sie Ihren Authenticator verlieren. Sie werden nur jetzt angezeigt.',
+    copyFailed: 'Kopieren fehlgeschlagen — bitte manuell markieren',
+    copyAll: 'Alle kopieren',
+  },
+  disableTwoFactor: {
+    title: 'Zwei-Faktor-Authentifizierung deaktivieren',
+    confirm: 'Deaktivieren',
+    warning:
+      'Dadurch wird der zweite Faktor von Ihrem Konto entfernt. Bestätigen Sie zum Fortfahren Ihr Passwort.',
+    password: 'Passwort',
+    disabledToast: 'Zwei-Faktor-Authentifizierung deaktiviert',
+    failed: 'Deaktivieren fehlgeschlagen',
+  },
+  changePassword: {
+    title: 'Passwort ändern',
+    confirm: 'Passwort aktualisieren',
+    tooShort: 'Das neue Passwort muss mindestens 8 Zeichen lang sein',
+    mismatch: 'Die neuen Passwörter stimmen nicht überein',
+    changed: 'Passwort geändert',
+    failed: 'Passwort konnte nicht geändert werden',
+    current: 'Aktuelles Passwort',
+    next: 'Neues Passwort',
+    nextPlaceholder: 'Neues Passwort (mind. 8 Zeichen)',
+    repeat: 'Neues Passwort bestätigen',
+    repeatPlaceholder: 'Neues Passwort wiederholen',
+  },
+  passkeys: {
+    title: 'Passkeys',
+    add: '+ Passkey hinzufügen',
+    empty:
+      'Noch keine Passkeys. Fügen Sie einen hinzu, um sich ohne Passwort per Face ID, Touch ID, Windows Hello oder Sicherheitsschlüssel anzumelden.',
+    meta: (added: string, lastUsed: string) => `Hinzugefügt ${added} · zuletzt verwendet ${lastUsed}`,
+    removeTitle: 'Passkey entfernen',
+    removeConfirm: (name: string) => `„${name}“ kann danach nicht mehr zur Anmeldung verwendet werden.`,
+    removed: 'Passkey entfernt',
+  },
+  addPasskey: {
+    title: 'Passkey hinzufügen',
+    confirm: 'Passkey erstellen',
+    help: 'Benennen Sie den Passkey, damit Sie ihn später wiedererkennen, und folgen Sie dann der Aufforderung Ihres Geräts (Face ID, Touch ID, Windows Hello oder Sicherheitsschlüssel).',
+    name: 'Name',
+    namePlaceholder: 'z. B. MacBook Touch ID',
+    defaultName: 'Passkey',
+    added: 'Passkey hinzugefügt',
+    failed: 'Passkey konnte nicht hinzugefügt werden',
+  },
+  apiKeys: {
+    title: 'API-Schlüssel',
+    newKey: '+ Neuer Schlüssel',
+    empty: 'Keine API-Schlüssel. Erstellen Sie einen für Anwendungen von Drittanbietern.',
+    meta: (prefix: string, actions: string, lastUsed: string) =>
+      `${prefix}… · Berechtigungen: ${actions} · zuletzt verwendet ${lastUsed}`,
+    revokeTitle: 'Schlüssel widerrufen',
+    revokeConfirm: (name: string) => `„${name}“ wird sofort ungültig.`,
+    revoked: 'Schlüssel widerrufen',
+  },
+  createKey: {
+    title: 'API-Schlüssel erstellen',
+    confirm: 'Erstellen',
+    name: 'Name',
+    namePlaceholder: 'z. B. CI-Pipeline',
+    scopes: 'Berechtigungen (Scopes)',
+    scopeLabels: {
+      read: 'Lesen',
+      operate: 'Bedienen',
+      manage: 'Verwalten',
+    },
+    expiry: 'Ablauf',
+    expiryPlaceholder: 'Tage bis zum Ablauf (leer = nie)',
+  },
+  keyCreated: {
+    title: 'API-Schlüssel erstellt',
+    warning: 'Dieser Schlüssel wird nur einmal angezeigt. Kopieren Sie ihn jetzt.',
+    copyFailed: 'Kopieren fehlgeschlagen — bitte manuell markieren und kopieren',
+  },
+};

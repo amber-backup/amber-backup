@@ -5,6 +5,7 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading } from '../ui/primitives';
+import { useT } from '../i18n';
 
 interface Grant {
   id: string;
@@ -14,10 +15,11 @@ interface Grant {
 }
 
 export function Users() {
+  const t = useT();
   const { data, loading, reload } = useAsync(() => api.get<User[]>('/users'));
   const { open } = useModal();
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const users = data;
 
   const newUser = () => open((close) => <CreateUser onClose={close} onSaved={reload} />);
@@ -25,13 +27,13 @@ export function Users() {
   return (
     <div>
       <PageHeader
-        title="Users"
-        subtitle={`${users.length} accounts`}
-        actions={<ActionButton label="New user" icon="plus" variant="primary" onClick={newUser} />}
+        title={t.users.title}
+        subtitle={t.users.accounts(users.length)}
+        actions={<ActionButton label={t.users.newUser} icon="plus" variant="primary" onClick={newUser} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Users</h2>
+          <h2>{t.users.title}</h2>
         </div>
         {users.map((u) => (
           <UserRow key={u.id} user={u} reload={reload} />
@@ -42,15 +44,16 @@ export function Users() {
 }
 
 function UserRow({ user: u, reload }: { user: User; reload: () => void }) {
+  const t = useT();
   const toast = useToast();
   const { open, confirmDialog } = useModal();
 
   const statusBadge = u.disabled ? (
-    <span className="badge danger">{u.auth_source !== 'local' ? 'SSO – approval needed' : 'disabled'}</span>
+    <span className="badge danger">{u.auth_source !== 'local' ? t.users.badge.ssoApprovalNeeded : t.users.badge.disabled}</span>
   ) : u.is_admin ? (
-    <span className="badge warn">Administrator</span>
+    <span className="badge warn">{t.common.administrator}</span>
   ) : (
-    <span className="badge success">active</span>
+    <span className="badge success">{t.users.badge.active}</span>
   );
 
   return (
@@ -69,17 +72,17 @@ function UserRow({ user: u, reload }: { user: User; reload: () => void }) {
             className="btn btn-primary btn-sm"
             onClick={async () => {
               await api.post(`/users/${u.id}/enable`);
-              toast('User enabled', 'success');
+              toast(t.users.enabledToast, 'success');
               reload();
             }}
           >
             <Icon name="check" />
-            Enable
+            {t.users.enable}
           </button>
         )}
         <button
           className="btn btn-ghost btn-sm"
-          title="Grants"
+          title={t.users.grants}
           onClick={() => open((close) => <GrantsModal user={u} onClose={close} />)}
         >
           <Icon name="key" />
@@ -94,11 +97,11 @@ function UserRow({ user: u, reload }: { user: User; reload: () => void }) {
           className="btn btn-ghost btn-sm"
           onClick={() =>
             confirmDialog(
-              'Delete user',
-              `"${u.display_name}" will be removed.`,
+              t.users.deleteTitle,
+              t.users.deleteConfirm(u.display_name),
               async () => {
                 await api.del(`/users/${u.id}`);
-                toast('User deleted', 'success');
+                toast(t.users.deleted, 'success');
                 reload();
               },
               true,
@@ -113,6 +116,7 @@ function UserRow({ user: u, reload }: { user: User; reload: () => void }) {
 }
 
 function CreateUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -122,29 +126,29 @@ function CreateUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   const submit = async () => {
     try {
       await api.post('/users', { email, displayName: name, password, isAdmin: admin });
-      toast('User created', 'success');
+      toast(t.users.created, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="New user" confirmLabel="Create" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.users.newUser} confirmLabel={t.users.create} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Email">
+        <Field label={t.users.email}>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
-        <Field label="Display name">
+        <Field label={t.users.displayName}>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Password">
+        <Field label={t.users.password}>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <label className="checkbox">
           <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
-          Administrator
+          {t.common.administrator}
         </label>
       </div>
     </FormModal>
@@ -152,6 +156,7 @@ function CreateUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 }
 
 function EditUser({ user: u, onClose, onSaved }: { user: User; onClose: () => void; onSaved: () => void }) {
+  const t = useT();
   const toast = useToast();
   const wasLocal = u.auth_source === 'local';
   const [name, setName] = useState(u.display_name);
@@ -166,50 +171,46 @@ function EditUser({ user: u, onClose, onSaved }: { user: User; onClose: () => vo
     if (password) payload.password = password;
     try {
       await api.patch(`/users/${u.id}`, payload);
-      toast('Saved', 'success');
+      toast(t.users.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="Edit user" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.users.editUser} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Display name">
+        <Field label={t.users.displayName}>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Sign-in method">
+        <Field label={t.users.signInMethod}>
           <select value={local ? 'local' : 'sso'} onChange={(e) => setLocal(e.target.value === 'local')}>
-            <option value="local">Local password</option>
-            <option value="sso">Single sign-on only</option>
+            <option value="local">{t.users.localPassword}</option>
+            <option value="sso">{t.users.ssoOnly}</option>
           </select>
         </Field>
         {local && (
-          <Field label={wasLocal ? 'New password' : 'Password'}>
+          <Field label={wasLocal ? t.users.newPassword : t.users.password}>
             <input
               type="password"
-              placeholder={wasLocal ? '(unchanged)' : 'Required to switch to local login'}
+              placeholder={wasLocal ? t.users.unchanged : t.users.passwordRequired}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </Field>
         )}
         {wasLocal && !local && (
-          <div className="help">
-            The password and any authenticator app on this account are removed. The
-            user then signs in through a configured identity provider, matched by
-            their e-mail address on first login.
-          </div>
+          <div className="help">{t.users.switchToSsoHelp}</div>
         )}
         <label className="checkbox">
           <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
-          Administrator
+          {t.common.administrator}
         </label>
         <label className="checkbox">
           <input type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} />
-          Disabled
+          {t.users.disabled}
         </label>
       </div>
     </FormModal>
@@ -217,6 +218,7 @@ function EditUser({ user: u, onClose, onSaved }: { user: User; onClose: () => vo
 }
 
 function GrantsModal({ user: u, onClose }: { user: User; onClose: () => void }) {
+  const t = useT();
   const { data, loading, reload } = useAsync(() =>
     Promise.all([
       api.get<Grant[]>(`/users/${u.id}/grants`),
@@ -227,17 +229,17 @@ function GrantsModal({ user: u, onClose }: { user: User; onClose: () => void }) 
 
   return (
     <ModalFrame
-      title={`Grants – ${u.display_name}`}
+      title={t.users.grantsTitle(u.display_name)}
       wide
       onClose={onClose}
       footer={
         <button className="btn btn-ghost" onClick={onClose}>
-          Close
+          {t.common.close}
         </button>
       }
     >
       {loading || !data ? (
-        <Loading label="Loading…" />
+        <Loading label={t.common.loading} />
       ) : (
         <GrantsBody user={u} grants={data[0]} targets={data[1]} jobs={data[2]} reload={reload} />
       )}
@@ -258,6 +260,7 @@ function GrantsBody({
   jobs: Job[];
   reload: () => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const [type, setType] = useState<'target' | 'job'>('target');
   const [resourceId, setResourceId] = useState(targets[0]?.id ?? '');
@@ -265,8 +268,8 @@ function GrantsBody({
 
   const pool = type === 'target' ? targets : jobs;
 
-  const resourceName = (t: string, id: string): string => {
-    const p = t === 'target' ? targets : jobs;
+  const resourceName = (rt: string, id: string): string => {
+    const p = rt === 'target' ? targets : jobs;
     return p.find((r) => r.id === id)?.name ?? id.slice(0, 8);
   };
 
@@ -284,9 +287,9 @@ function GrantsBody({
         accessLevel: level,
       });
       reload();
-      toast('Grant added', 'success');
+      toast(t.users.grantAdded, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
     }
   };
 
@@ -295,14 +298,14 @@ function GrantsBody({
       <div>
         {grants.length === 0 ? (
           <div className="empty" style={{ padding: 20 }}>
-            No grants. Without a grant the user sees nothing.
+            {t.users.noGrants}
           </div>
         ) : (
           grants.map((g) => (
             <div className="row" style={{ padding: '10px 0' }} key={g.id}>
               <div className="row-main">
-                <div className="row-title">{`${g.resource_type}: ${resourceName(g.resource_type, g.resource_id)}`}</div>
-                <div className="row-sub">{g.access_level}</div>
+                <div className="row-title">{`${t.users.resourceTypes[g.resource_type] ?? g.resource_type}: ${resourceName(g.resource_type, g.resource_id)}`}</div>
+                <div className="row-sub">{t.users.levels[g.access_level] ?? g.access_level}</div>
               </div>
               <button
                 className="btn btn-ghost btn-sm"
@@ -327,13 +330,13 @@ function GrantsBody({
         }}
       >
         <div className="field-row">
-          <Field label="Type">
+          <Field label={t.users.type}>
             <select value={type} onChange={(e) => changeType(e.target.value as 'target' | 'job')}>
-              <option value="target">Target</option>
-              <option value="job">Job</option>
+              <option value="target">{t.users.resourceTypes.target}</option>
+              <option value="job">{t.users.resourceTypes.job}</option>
             </select>
           </Field>
-          <Field label="Resource">
+          <Field label={t.users.resource}>
             <select value={resourceId} onChange={(e) => setResourceId(e.target.value)}>
               {pool.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -343,17 +346,17 @@ function GrantsBody({
             </select>
           </Field>
         </div>
-        <Field label="Access">
+        <Field label={t.users.access}>
           <select value={level} onChange={(e) => setLevel(e.target.value)}>
-            <option value="view">view (read)</option>
-            <option value="operate">operate (trigger)</option>
-            <option value="manage">manage (edit)</option>
+            <option value="view">{t.users.levelView}</option>
+            <option value="operate">{t.users.levelOperate}</option>
+            <option value="manage">{t.users.levelManage}</option>
           </select>
         </Field>
         <div>
           <button className="btn btn-ghost" onClick={addGrant}>
             <Icon name="plus" />
-            Add grant
+            {t.users.addGrant}
           </button>
         </div>
       </div>

@@ -8,6 +8,8 @@ import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, Field, Loading, Spinner } from '../ui/primitives';
 import { IntegrityBadge, IntegrityPanel } from '../ui/integrity';
+import { useT } from '../i18n';
+import type { SnapshotsMessages } from '../i18n/en/snapshots';
 
 /**
  * Snapshots of each job's repository: browse, restore, delete — and verify the
@@ -15,13 +17,14 @@ import { IntegrityBadge, IntegrityPanel } from '../ui/integrity';
  * id or slug) so it can be linked to.
  */
 export function Snapshots() {
+  const t = useT();
   const navigate = useNavigate();
   const { jobId } = useParams();
   const { data: jobs, loading, reload } = useAsync(() => api.get<Job[]>('/jobs'));
   const history = useAsync(() => api.get<RestoreRun[]>('/restores?limit=15').catch(() => [] as RestoreRun[]));
 
   // Keep showing the list while a reload (after a check) is in flight.
-  if (!jobs) return <Loading label="Loading…" />;
+  if (!jobs) return <Loading label={t.common.loading} />;
   const job = jobId ? jobs.find((j) => j.id === jobId || j.slug === jobId) : undefined;
 
   return (
@@ -29,16 +32,12 @@ export function Snapshots() {
       {jobId && (
         <button className="btn btn-ghost btn-sm page-back" onClick={() => navigate('/snapshots')}>
           <Icon name="arrow-left" />
-          Back
+          {t.snapshots.page.back}
         </button>
       )}
       <PageHeader
-        title="Snapshots"
-        subtitle={
-          job
-            ? 'Verify the repository, browse snapshots and restore selectively or in full'
-            : 'Pick a job to browse its snapshots and check its repository'
-        }
+        title={t.snapshots.page.title}
+        subtitle={job ? t.snapshots.page.subtitleJob : t.snapshots.page.subtitleList}
       />
       {job ? (
         <>
@@ -50,7 +49,7 @@ export function Snapshots() {
         </>
       ) : jobId && !loading ? (
         <div className="panel">
-          <div className="empty">This job does not exist or you have no access to it.</div>
+          <div className="empty">{t.snapshots.page.jobNotFound}</div>
         </div>
       ) : (
         <JobListPanel jobs={jobs} onSelect={(j) => navigate(`/snapshots/${j.slug}`)} />
@@ -60,13 +59,14 @@ export function Snapshots() {
 }
 
 function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => void }) {
+  const t = useT().snapshots.jobList;
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>{`Jobs (${jobs.length})`}</h2>
+        <h2>{t.title(jobs.length)}</h2>
       </div>
       {jobs.length === 0 ? (
-        <div className="empty">No backup jobs yet.</div>
+        <div className="empty">{t.empty}</div>
       ) : (
         jobs.map((j) => (
           // The whole row opens the job; the chevron only hints at that. Without
@@ -76,7 +76,7 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
             key={j.id}
             role="link"
             tabIndex={0}
-            title={`${j.location === 'agent' ? 'Agent' : 'Local'} · ${j.paths.join(', ')}`}
+            title={`${j.location === 'agent' ? t.agent : t.local} · ${j.paths.join(', ')}`}
             onClick={() => onSelect(j)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -87,7 +87,7 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
           >
             <div className="row-main">
               <div className="row-title">{j.name}</div>
-              <div className="row-sub">{repoSizeLabel(j)}</div>
+              <div className="row-sub">{repoSizeLabel(j, t)}</div>
             </div>
             <IntegrityBadge job={j} />
             <span className="row-chevron" aria-hidden="true">
@@ -101,12 +101,13 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
 }
 
 /** Cached repository size and snapshot count, as read after the last successful run. */
-function repoSizeLabel(j: Job): string {
-  if (j.repo_size_bytes == null) return 'size unknown';
-  return `${fmtBytes(j.repo_size_bytes)} · ${j.repo_snapshot_count ?? '?'} snapshots`;
+function repoSizeLabel(j: Job, t: SnapshotsMessages['jobList']): string {
+  if (j.repo_size_bytes == null) return t.sizeUnknown;
+  return t.sizeSummary(fmtBytes(j.repo_size_bytes), j.repo_snapshot_count ?? '?');
 }
 
 function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () => void }) {
+  const t = useT().snapshots.list;
   const { data: snaps, loading, error, reload } = useAsync<Snapshot[]>(
     () => api.get<Snapshot[]>(`/jobs/${job.id}/snapshots`),
     [job.id],
@@ -117,13 +118,13 @@ function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () =>
     body = (
       <div className="loading">
         <Spinner />
-        Loading snapshots…
+        {t.loading}
       </div>
     );
   } else if (error) {
     body = <div className="empty">{error.message}</div>;
   } else if (!snaps || snaps.length === 0) {
-    body = <div className="empty">No snapshots in this repository.</div>;
+    body = <div className="empty">{t.empty}</div>;
   } else {
     body = snaps.map((s) => (
       <SnapshotRow key={s.id} jobId={job.id} snap={s} reload={reload} reloadHistory={reloadHistory} />
@@ -133,7 +134,7 @@ function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () =>
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>{`${job.name} — Snapshots${snaps ? ` (${snaps.length})` : ''}`}</h2>
+        <h2>{t.title(job.name, snaps?.length)}</h2>
       </div>
       {body}
     </div>
@@ -151,6 +152,7 @@ function SnapshotRow({
   reload: () => void;
   reloadHistory: () => void;
 }) {
+  const t = useT().snapshots.list;
   const { open } = useModal();
 
   const openRestore = (includedPaths: string[]) =>
@@ -180,23 +182,23 @@ function SnapshotRow({
       </div>
       {s.tags && s.tags.length ? (
         <div className="tags">
-          {s.tags.map((t) => (
-            <span className="tag" key={t}>
-              {t}
+          {s.tags.map((tag) => (
+            <span className="tag" key={tag}>
+              {tag}
             </span>
           ))}
         </div>
       ) : null}
       <div className="row-actions">
-        <button className="btn btn-ghost btn-sm" title="Browse" onClick={openBrowse}>
+        <button className="btn btn-ghost btn-sm" title={t.browse} onClick={openBrowse}>
           <Icon name="folder" />
-          Browse
+          {t.browse}
         </button>
-        <button className="btn btn-primary btn-sm" title="Restore" onClick={() => openRestore([])}>
+        <button className="btn btn-primary btn-sm" title={t.restore} onClick={() => openRestore([])}>
           <Icon name="restore" />
-          Restore
+          {t.restore}
         </button>
-        <button className="btn btn-ghost btn-sm" title="Delete snapshot" onClick={openDelete}>
+        <button className="btn btn-ghost btn-sm" title={t.deleteSnapshot} onClick={openDelete}>
           <Icon name="trash" />
         </button>
       </div>
@@ -215,6 +217,8 @@ function DeleteSnapshotDialog({
   onClose: () => void;
   reload: () => void;
 }) {
+  const { snapshots, common } = useT();
+  const t = snapshots.deleteDialog;
   const toast = useToast();
   const [prune, setPrune] = useState(false);
   const shortId = s.short_id ?? s.id.slice(0, 8);
@@ -222,21 +226,21 @@ function DeleteSnapshotDialog({
   const submit = async () => {
     try {
       await api.del(`/jobs/${jobId}/snapshots/${s.id}?prune=${prune}`);
-      toast(prune ? 'Snapshot deleted — prune started, see recent activities' : 'Snapshot deleted', 'success');
+      toast(prune ? t.deletedPruning : t.deleted, 'success');
       reload();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Delete failed', 'error');
+      toast(err instanceof Error ? err.message : t.failed, 'error');
       return false;
     }
   };
 
   return (
-    <FormModal title="Delete snapshot" confirmLabel="Delete" onClose={onClose} onSubmit={submit}>
+    <FormModal title={t.title} confirmLabel={common.delete} onClose={onClose} onSubmit={submit}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="warn-box">{`Snapshot ${shortId} (${fmtDateTime(s.time)}) will be permanently removed. This cannot be undone.`}</div>
+        <div className="warn-box">{t.warning(shortId, fmtDateTime(s.time))}</div>
         <label className="checkbox">
           <input type="checkbox" checked={prune} onChange={(e) => setPrune(e.target.checked)} />
-          Also prune now — reclaim storage immediately (slower, locks the repository)
+          {t.prune}
         </label>
       </div>
     </FormModal>
@@ -254,6 +258,7 @@ function BrowserModal({
   onClose: () => void;
   openRestore: (paths: string[]) => void;
 }) {
+  const t = useT().snapshots.browser;
   const [path, setPath] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { data: entries, loading, error } = useAsync<LsEntry[]>(
@@ -300,7 +305,7 @@ function BrowserModal({
   } else if (error) {
     list = <div className="empty">{error.message}</div>;
   } else if (!entries || entries.length === 0) {
-    list = <div className="empty">Empty directory.</div>;
+    list = <div className="empty">{t.emptyDir}</div>;
   } else {
     list = entries.map((e) => {
       const isDir = e.type === 'dir';
@@ -326,9 +331,9 @@ function BrowserModal({
 
   return (
     <FormModal
-      title={`Browse snapshot ${snap.short_id ?? snap.id.slice(0, 8)}`}
+      title={t.title(snap.short_id ?? snap.id.slice(0, 8))}
       wide
-      confirmLabel="Restore selected"
+      confirmLabel={t.restoreSelected}
       onClose={onClose}
       onSubmit={() => {
         openRestore([...selected]);
@@ -340,7 +345,7 @@ function BrowserModal({
           <div className="fb-crumbs">{crumbs}</div>
           <div>{list}</div>
         </div>
-        <span className="muted" style={{ fontSize: 12.5 }}>{`${selected.size} selected`}</span>
+        <span className="muted" style={{ fontSize: 12.5 }}>{t.selected(selected.size)}</span>
       </div>
     </FormModal>
   );
@@ -359,6 +364,8 @@ function RestoreDialog({
   onClose: () => void;
   reloadHistory: () => void;
 }) {
+  const { snapshots, common } = useT();
+  const t = snapshots.restore;
   const toast = useToast();
   const [mode, setMode] = useState('download');
   const [targetPath, setTargetPath] = useState('');
@@ -383,40 +390,40 @@ function RestoreDialog({
   const dryRun = async () => {
     try {
       await api.post('/restores', buildPayload(true));
-      toast('Dry run started — see the history', 'success');
+      toast(t.dryRunStarted, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : common.error, 'error');
     }
   };
 
   const submit = async () => {
     try {
       await api.post('/restores', buildPayload(false));
-      toast('Restore started', 'success');
+      toast(t.started, 'success');
       reloadHistory();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : common.error, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title={`Restore${includedPaths.length ? ` (${includedPaths.length} paths)` : ''}`}
-      confirmLabel="Restore"
+      title={t.title(includedPaths.length)}
+      confirmLabel={t.confirm}
       onClose={onClose}
       onSubmit={submit}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Mode">
+        <Field label={t.mode}>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="download">Download (archive)</option>
-            <option value="alternate_path">Alternate path (server)</option>
-            <option value="original">Original location</option>
+            <option value="download">{t.modeDownload}</option>
+            <option value="alternate_path">{t.modeAlternate}</option>
+            <option value="original">{t.modeOriginal}</option>
           </select>
         </Field>
         {mode !== 'download' && (
-          <Field label="Target path">
+          <Field label={t.targetPath}>
             <input
               type="text"
               placeholder="/tmp/restore-target"
@@ -425,9 +432,9 @@ function RestoreDialog({
             />
           </Field>
         )}
-        <Field label="Overwrite">
+        <Field label={t.overwrite}>
           <select value={overwrite} onChange={(e) => setOverwrite(e.target.value)}>
-            <option value="always">always (overwrite everything)</option>
+            <option value="always">{t.overwriteAlways}</option>
             <option value="if-changed">if-changed</option>
             <option value="if-newer">if-newer</option>
             <option value="never">never</option>
@@ -435,20 +442,18 @@ function RestoreDialog({
         </Field>
         <label className="checkbox">
           <input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} />
-          Verify (--verify)
+          {t.verify}
         </label>
         <label className="checkbox">
           <input type="checkbox" checked={del} onChange={(e) => setDel(e.target.checked)} />
-          Delete foreign files (--delete)
+          {t.deleteForeign}
         </label>
         {del && (
-          <div className="warn-box">
-            ⚠ Warning: --delete removes files in the target that are not in the snapshot.
-          </div>
+          <div className="warn-box">{t.deleteWarning}</div>
         )}
         <div>
           <button className="btn btn-ghost" onClick={dryRun}>
-            Dry run
+            {t.dryRun}
           </button>
         </div>
       </div>
@@ -457,15 +462,16 @@ function RestoreDialog({
 }
 
 function HistoryPanel({ runs }: { runs: RestoreRun[] | undefined }) {
+  const t = useT().snapshots.history;
   return (
     <div className="panel section-gap">
       <div className="panel-head">
-        <h2>Restore history</h2>
+        <h2>{t.title}</h2>
       </div>
       {!runs ? (
         <Loading />
       ) : runs.length === 0 ? (
-        <div className="empty">No restores yet.</div>
+        <div className="empty">{t.empty}</div>
       ) : (
         runs.map((r) => <HistoryRow key={r.id} run={r} />)
       )}
@@ -474,10 +480,11 @@ function HistoryPanel({ runs }: { runs: RestoreRun[] | undefined }) {
 }
 
 function HistoryRow({ run: r }: { run: RestoreRun }) {
+  const t = useT().snapshots.history;
   const modeLabels: Record<string, string> = {
-    original: 'Original',
-    alternate_path: 'Alt. path',
-    download: 'Download',
+    original: t.modeOriginal,
+    alternate_path: t.modeAlternate,
+    download: t.modeDownload,
   };
   const canDownload =
     r.mode === 'download' &&
@@ -495,7 +502,7 @@ function HistoryRow({ run: r }: { run: RestoreRun }) {
         <div className="row-actions">
           <a className="btn btn-ghost btn-sm" href={`/api/restores/${r.id}/download`}>
             <Icon name="download" />
-            Download
+            {t.download}
           </a>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import type { RepositoryStatsHistory } from '../core/api';
 import { fmtBytes, fmtDateTime } from '../core/format';
+import { intlLocale, useT } from '../i18n';
 
 /** One point of the total-storage series. */
 export interface StoragePoint {
@@ -55,7 +56,7 @@ function byteTicks(max: number, count: number): number[] {
 }
 
 function fmtDay(t: number): string {
-  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(t).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' });
 }
 
 const PAD = { top: 14, right: 16, bottom: 24, left: 8 };
@@ -67,6 +68,7 @@ const Y_LABEL_W = 52;
  * at the pointer.
  */
 export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
+  const t = useT();
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<number | null>(null);
@@ -87,9 +89,7 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
   if (series.length === 0) {
     return (
       <div className="storage-chart" ref={hostRef}>
-        <div className="empty">
-          No storage readings yet. Sizes are recorded after each successful backup.
-        </div>
+        <div className="empty">{t.storageChart.empty}</div>
       </div>
     );
   }
@@ -142,7 +142,7 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
           width={w}
           height={h}
           role="img"
-          aria-label={`Total repository storage, ${fmtBytes(series[series.length - 1].bytes)} now`}
+          aria-label={t.storageChart.ariaLabel(fmtBytes(series[series.length - 1].bytes))}
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
         >
@@ -154,15 +154,15 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
               </text>
             </g>
           ))}
-          {xLabels.map((t, i) => (
+          {xLabels.map((tx, i) => (
             <text
-              key={t}
+              key={tx}
               className="chart-label"
-              x={sx(t)}
+              x={sx(tx)}
               y={h - 6}
               textAnchor={i === 0 ? 'start' : i === nLabels ? 'end' : 'middle'}
             >
-              {fmtDay(t)}
+              {fmtDay(tx)}
             </text>
           ))}
           <path className="chart-area" d={area} />
@@ -204,6 +204,7 @@ const MIN_RATE_DAYS = 1;
  * the average growth per day.
  */
 export function StorageSummary({ history }: { history: RepositoryStatsHistory }) {
+  const t = useT();
   const series = totalStorageSeries(history, Date.now());
   if (series.length === 0) return null;
   const first = series[0];
@@ -216,8 +217,8 @@ export function StorageSummary({ history }: { history: RepositoryStatsHistory })
   return (
     <span className="chart-summary">
       <strong>{fmtBytes(last.bytes)}</strong>
-      <span className="muted">{fmtDelta(delta)} in this window</span>
-      {perDay !== null && <span className="muted">{fmtDelta(perDay)}/day avg</span>}
+      <span className="muted">{t.storageChart.inWindow(fmtDelta(delta))}</span>
+      {perDay !== null && <span className="muted">{t.storageChart.perDayAvg(fmtDelta(perDay))}</span>}
     </span>
   );
 }

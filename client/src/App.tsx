@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './core/auth';
+import { I18nProvider } from './i18n';
 import { ToastProvider } from './ui/toast';
 import { ModalProvider } from './ui/modal';
 import { Loading } from './ui/primitives';
@@ -83,13 +84,15 @@ function Gate() {
 export function App() {
   return (
     <AuthProvider>
-      <ToastProvider>
-        <ModalProvider>
-          <HashRouter>
-            <Gate />
-          </HashRouter>
-        </ModalProvider>
-      </ToastProvider>
+      <I18nProvider>
+        <ToastProvider>
+          <ModalProvider>
+            <HashRouter>
+              <Gate />
+            </HashRouter>
+          </ModalProvider>
+        </ToastProvider>
+      </I18nProvider>
     </AuthProvider>
   );
 }

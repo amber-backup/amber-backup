@@ -2,59 +2,23 @@ import { useState, type ReactNode } from 'react';
 import { api, type Report, type Job, type NotificationChannel } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
+import { describeCron } from '../core/cron';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 
-const WINDOWS: { label: string; value: Report['dataset']['window'] }[] = [
-  { label: 'Last 24 hours', value: '24h' },
-  { label: 'Last 7 days', value: '7d' },
-  { label: 'Last 30 days', value: '30d' },
-  { label: 'Last 90 days', value: '90d' },
-  { label: 'Last 6 months', value: '6mo' },
-  { label: 'Last 12 months', value: '12mo' },
-];
-
-const WINDOW_LABELS: Record<string, string> = Object.fromEntries(
-  WINDOWS.map((w) => [w.value, w.label]),
-);
+const WINDOWS: Report['dataset']['window'][] = ['24h', '7d', '30d', '90d', '6mo', '12mo'];
 
 /** Common report schedules; 'custom' frees the raw cron field. */
-const CRON_PRESETS: { label: string; value: string }[] = [
-  { label: 'Daily at 08:00', value: '0 8 * * *' },
-  { label: 'Weekly — Monday 08:00', value: '0 8 * * 1' },
-  { label: 'Monthly — 1st, 08:00', value: '0 8 1 * *' },
-  { label: 'Custom…', value: 'custom' },
+const CRON_PRESETS: { key: keyof Messages['reports']['presets']; value: string }[] = [
+  { key: 'daily', value: '0 8 * * *' },
+  { key: 'weekly', value: '0 8 * * 1' },
+  { key: 'monthly', value: '0 8 1 * *' },
+  { key: 'custom', value: 'custom' },
 ];
-
-/** Human-readable summary of a cron expression, or null if not recognized. */
-function describeCron(expr: string): string | null {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return null;
-  const [m, hr, dom, mon, dow] = parts;
-  const isNum = (s: string): boolean => /^\d+$/.test(s);
-  const days = [
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-  ];
-  const at =
-    isNum(hr) && isNum(m) ? `${hr.padStart(2, '0')}:${m.padStart(2, '0')}` : null;
-  if (m === '0' && hr === '*' && dom === '*' && mon === '*' && dow === '*')
-    return 'Every hour';
-  if (at && dom === '*' && mon === '*' && dow === '*')
-    return `Every day at ${at}`;
-  if (at && dom === '*' && mon === '*' && isNum(dow))
-    return `Every week on ${days[Number(dow) % 7]} at ${at}`;
-  if (at && isNum(dom) && mon === '*' && dow === '*')
-    return `Every month on day ${dom} at ${at}`;
-  return null;
-}
 
 /** A titled group of fields in the report editor. */
 function section(title: string, sub: string, ...children: ReactNode[]): ReactNode {
@@ -70,6 +34,7 @@ function section(title: string, sub: string, ...children: ReactNode[]): ReactNod
 }
 
 export function Reports() {
+  const t = useT();
   const { data, loading, reload } = useAsync(() =>
     Promise.all([
       api.get<Report[]>('/reports'),
@@ -81,7 +46,7 @@ export function Reports() {
   );
   const { open } = useModal();
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const [reports, jobs, channels] = data;
 
   const newReport = () =>
@@ -92,19 +57,16 @@ export function Reports() {
   return (
     <div>
       <PageHeader
-        title="Reports"
-        subtitle={`${reports.length} report definitions`}
-        actions={<ActionButton label="New report" icon="plus" variant="primary" onClick={newReport} />}
+        title={t.reports.title}
+        subtitle={t.reports.subtitle(reports.length)}
+        actions={<ActionButton label={t.reports.newReport} icon="plus" variant="primary" onClick={newReport} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Report definitions</h2>
+          <h2>{t.reports.definitions}</h2>
         </div>
         {reports.length === 0 ? (
-          <Empty>
-            No reports yet. Summarize job successes and failures over a time window and have them
-            delivered on a schedule.
-          </Empty>
+          <Empty>{t.reports.empty}</Empty>
         ) : (
           reports.map((r) => (
             <ReportRow key={r.id} report={r} jobs={jobs} channels={channels} reload={reload} />
@@ -126,6 +88,8 @@ function ReportRow({
   channels: NotificationChannel[];
   reload: () => void;
 }) {
+  const t = useT();
+  const m = t.reports.row;
   const toast = useToast();
   const { open, confirmDialog } = useModal();
   const jobCount = r.dataset?.jobIds?.length ?? 0;
@@ -138,7 +102,7 @@ function ReportRow({
       <div className="row-main">
         <div className="row-title">
           {r.name}
-          {tags.map((t, i) => (
+          {tags.map((tag, i) => (
             <span
               key={i}
               className="pill"
@@ -151,39 +115,39 @@ function ReportRow({
                 borderRadius: 10,
               }}
             >
-              {t}
+              {tag}
             </span>
           ))}
         </div>
         <div className="row-sub">
-          {`${jobCount} job(s) · ${WINDOW_LABELS[r.dataset?.window] ?? r.dataset?.window ?? '—'} · ${channelCount} channel(s) · ${r.cron_expr}`}
+          {m.summary(jobCount, t.reports.windows[r.dataset?.window] ?? r.dataset?.window ?? '—', channelCount, r.cron_expr)}
         </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         <div>
-          last{' '}
+          {m.last}{' '}
           <span style={r.last_run_at ? undefined : { color: 'var(--text-3)' }}>
             {fmtRelative(r.last_run_at)}
           </span>
         </div>
         {r.enabled && r.next_run ? (
           <div>
-            next <span style={{ color: 'var(--amber)' }}>{fmtRelative(r.next_run)}</span>
+            {m.next} <span style={{ color: 'var(--amber)' }}>{fmtRelative(r.next_run)}</span>
           </div>
         ) : (
-          <div className="muted">disabled</div>
+          <div className="muted">{m.disabled}</div>
         )}
       </div>
       <div className="row-actions">
         <BusyButton
           className="btn btn-primary btn-sm"
-          title="Generate and send now"
+          title={m.sendNow}
           onClick={async () => {
             try {
               await api.post(`/reports/${r.id}/run`);
-              toast('Report sent', 'success');
+              toast(m.sent, 'success');
             } catch (err) {
-              toast(err instanceof Error ? err.message : 'Send failed', 'error');
+              toast(err instanceof Error ? err.message : m.sendFailed, 'error');
             }
           }}
         >
@@ -191,7 +155,7 @@ function ReportRow({
         </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
-          title="Edit"
+          title={m.edit}
           onClick={() =>
             open((close) => (
               <ReportEditor
@@ -208,14 +172,14 @@ function ReportRow({
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title="Delete"
+          title={t.common.delete}
           onClick={() =>
             confirmDialog(
-              'Delete report',
-              `"${r.name}" will be removed.`,
+              m.deleteTitle,
+              m.deleteConfirm(r.name),
               async () => {
                 await api.del(`/reports/${r.id}`);
-                toast('Report deleted', 'success');
+                toast(m.deleted, 'success');
                 reload();
               },
               true,
@@ -242,6 +206,8 @@ function ReportEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useT();
+  const m = t.reports.editor;
   const toast = useToast();
   const isEdit = !!report;
   const dataset = report?.dataset;
@@ -294,19 +260,19 @@ function ReportEditor({
     const channelIds = channels.filter((c) => selectedChannels.has(c.id)).map((c) => c.id);
 
     if (!name.trim()) {
-      toast('Name is required', 'error');
+      toast(m.nameRequired, 'error');
       return false;
     }
     if (jobIds.length === 0) {
-      toast('Select at least one job', 'error');
+      toast(m.selectJob, 'error');
       return false;
     }
     if (statusSel.length === 0) {
-      toast('Select at least one outcome', 'error');
+      toast(m.selectOutcome, 'error');
       return false;
     }
     if (channelIds.length === 0) {
-      toast('Select at least one channel', 'error');
+      toast(m.selectChannel, 'error');
       return false;
     }
 
@@ -314,7 +280,7 @@ function ReportEditor({
       name: name.trim(),
       tags: tagsText
         .split(',')
-        .map((t) => t.trim())
+        .map((tag) => tag.trim())
         .filter(Boolean),
       dataset: {
         jobIds,
@@ -332,30 +298,30 @@ function ReportEditor({
       } else {
         await api.post('/reports', payload);
       }
-      toast('Report saved', 'success');
+      toast(m.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Save failed', 'error');
+      toast(err instanceof Error ? err.message : m.saveFailed, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title={isEdit ? 'Edit report' : 'New report'}
+      title={isEdit ? m.editTitle : m.newTitle}
       wide
-      confirmLabel={isEdit ? 'Save' : 'Create'}
+      confirmLabel={isEdit ? t.common.save : m.create}
       onClose={onClose}
       onSubmit={submit}
     >
       <div className="modal-form">
         {section(
-          'General',
+          m.general,
           '',
-          <Field key="name" label="Name">
+          <Field key="name" label={m.name}>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>,
-          <Field key="tags" label="Tags" help="Comma-separated labels">
+          <Field key="tags" label={m.tags} help={m.tagsHelp}>
             <input
               type="text"
               value={tagsText}
@@ -365,18 +331,18 @@ function ReportEditor({
           </Field>,
           <label key="enabled" className="checkbox">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Report enabled
+            {m.enabled}
           </label>,
         )}
         {section(
-          'Dataset',
-          'what to report',
+          m.dataset,
+          m.datasetSub,
           jobs.length === 0 ? (
             <div key="nojobs" className="help">
-              No jobs available. Create backup jobs first.
+              {m.noJobs}
             </div>
           ) : (
-            <Field key="jobs" label="Jobs" help="Runs from these jobs are counted">
+            <Field key="jobs" label={m.jobs} help={m.jobsHelp}>
               <div className="channel-picker">
                 {jobs.map((j) => (
                   <label key={j.id} className="checkbox">
@@ -391,7 +357,7 @@ function ReportEditor({
               </div>
             </Field>
           ),
-          <Field key="outcomes" label="Outcomes">
+          <Field key="outcomes" label={m.outcomes}>
             <div className="field-row">
               <label className="checkbox">
                 <input
@@ -399,7 +365,7 @@ function ReportEditor({
                   checked={success}
                   onChange={(e) => setSuccess(e.target.checked)}
                 />
-                Successes
+                {m.successes}
               </label>
               <label className="checkbox">
                 <input
@@ -407,27 +373,27 @@ function ReportEditor({
                   checked={failed}
                   onChange={(e) => setFailed(e.target.checked)}
                 />
-                Failures
+                {m.failures}
               </label>
             </div>
           </Field>,
-          <Field key="window" label="Time window">
+          <Field key="window" label={m.timeWindow}>
             <select
               value={window}
               onChange={(e) => setWindow(e.target.value as Report['dataset']['window'])}
             >
               {WINDOWS.map((w) => (
-                <option key={w.value} value={w.value}>
-                  {w.label}
+                <option key={w} value={w}>
+                  {t.reports.windows[w]}
                 </option>
               ))}
             </select>
           </Field>,
         )}
         {section(
-          'Schedule',
-          'when it is sent',
-          <Field key="preset" label="Preset">
+          m.schedule,
+          m.scheduleSub,
+          <Field key="preset" label={m.preset}>
             <select
               value={preset}
               onChange={(e) => {
@@ -436,12 +402,12 @@ function ReportEditor({
             >
               {CRON_PRESETS.map((p) => (
                 <option key={p.value} value={p.value}>
-                  {p.label}
+                  {t.reports.presets[p.key]}
                 </option>
               ))}
             </select>
           </Field>,
-          <Field key="cron" label="Cron" help="minute hour day month weekday">
+          <Field key="cron" label={m.cron} help={m.cronHelp}>
             <input
               type="text"
               value={cron}
@@ -450,18 +416,18 @@ function ReportEditor({
             />
           </Field>,
           <div key="preview" className={`cron-preview${cronDesc ? '' : ' invalid'}`}>
-            {`→ ${cronDesc ?? 'Custom schedule'}`}
+            {`→ ${cronDesc ?? m.customSchedule}`}
           </div>,
         )}
         {section(
-          'Delivery',
-          'where to send it',
+          m.delivery,
+          m.deliverySub,
           channels.length === 0 ? (
             <div key="nochannels" className="help">
-              No channels configured. Add them under Notifications.
+              {m.noChannels}
             </div>
           ) : (
-            <Field key="channels" label="Channels">
+            <Field key="channels" label={m.channels}>
               <div className="channel-picker">
                 {channels.map((c) => (
                   <label key={c.id} className="checkbox">

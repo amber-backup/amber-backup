@@ -7,6 +7,8 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, ModalFrame } from '../ui/modal';
 import { PageHeader, ActionButton, Loading } from '../ui/primitives';
+import { useT } from '../i18n';
+import type { AgentsMessages } from '../i18n/en/agents';
 
 interface EnrollToken {
   token: string;
@@ -34,25 +36,28 @@ const CMD_STYLE: React.CSSProperties = {
 };
 
 function MethodSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useT().agents.methods;
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="binary">Binary (systemd)</option>
-      <option value="docker">Docker</option>
-      <option value="docker-compose">Docker Compose</option>
+      <option value="binary">{t.binary}</option>
+      <option value="docker">{t.docker}</option>
+      <option value="docker-compose">{t.dockerCompose}</option>
     </select>
   );
 }
 
-function intro(method: string): string {
-  return method === 'docker-compose'
-    ? 'Save as docker-compose.yml on the target server, then run "docker compose up -d":'
-    : 'Run on the target server:';
+/** Instruction above the install command; with `validMinutes`, notes how long a one-time token lasts. */
+function intro(t: AgentsMessages['intro'], method: string, validMinutes?: number): string {
+  const compose = method === 'docker-compose';
+  if (validMinutes != null) return compose ? t.composeValid(validMinutes) : t.runValid(validMinutes);
+  return compose ? t.compose : t.run;
 }
 
 /** A new agent enrolls from its own host, so the list is polled to show it (and live status). */
 const REFRESH_MS = 5000;
 
 export function Agents() {
+  const t = useT();
   const { data, loading, reload } = useAsync(() => api.get<Agent[]>('/agents'));
   const { open } = useModal();
   // Quiet background refresh; `reload()` would flash the loading screen each time.
@@ -74,7 +79,7 @@ export function Agents() {
     return () => clearInterval(timer);
   }, []);
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const agents = live ?? data;
   const online = agents.filter((a) => a.status === 'online').length;
 
@@ -95,25 +100,25 @@ export function Agents() {
   return (
     <div>
       <PageHeader
-        title="Agents"
-        subtitle={`${online} of ${agents.length} online`}
-        actions={<ActionButton label="Roll out agent" icon="plus" variant="primary" onClick={() => void openEnroll()} />}
+        title={t.agents.page.title}
+        subtitle={t.agents.page.subtitle(online, agents.length)}
+        actions={<ActionButton label={t.agents.page.rollOut} icon="plus" variant="primary" onClick={() => void openEnroll()} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Server fleet</h2>
+          <h2>{t.agents.page.fleet}</h2>
         </div>
         {agents.length > 0 && (
           <div className="table-head agents-grid">
-            <span>Host</span>
-            <span className="agents-hide-mobile">Agent</span>
-            <span>Last contact</span>
-            <span className="agents-hide-mobile">Restic</span>
+            <span>{t.agents.page.colHost}</span>
+            <span className="agents-hide-mobile">{t.agents.page.colAgent}</span>
+            <span>{t.agents.page.colLastContact}</span>
+            <span className="agents-hide-mobile">{t.agents.page.colRestic}</span>
             <span />
           </div>
         )}
         {agents.length === 0 ? (
-          <div className="empty">No agents yet. Roll out an agent on a remote server.</div>
+          <div className="empty">{t.agents.page.empty}</div>
         ) : (
           agents.map((a) => <AgentRow key={a.id} agent={a} reload={reload} />)
         )}
@@ -123,6 +128,7 @@ export function Agents() {
 }
 
 function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
+  const t = useT().agents.row;
   const toast = useToast();
   const { confirmDialog } = useModal();
 
@@ -136,23 +142,25 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
         </div>
       </div>
       <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-2)' }}>
-        {a.agent_version ? `v${a.agent_version}` : <span className="badge info">installing…</span>}
+        {a.agent_version ? `v${a.agent_version}` : <span className="badge info">{t.installing}</span>}
       </div>
       <div style={{ fontSize: 12.5, color: `var(--${a.status === 'offline' ? 'danger' : 'text-2'})` }}>
-        {a.last_seen_at ? fmtRelative(a.last_seen_at) : 'never'}
+        {a.last_seen_at ? fmtRelative(a.last_seen_at) : t.never}
       </div>
       <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
         {a.restic_version ?? '—'}
       </div>
       <button
         className="btn btn-ghost btn-sm"
+        title={t.remove}
+        aria-label={t.remove}
         onClick={() =>
           confirmDialog(
-            'Remove agent',
-            `"${a.name}" will be removed. The agent will no longer be able to check in.`,
+            t.remove,
+            t.removeConfirm(a.name),
             async () => {
               await api.del(`/agents/${a.id}`);
-              toast('Agent removed', 'success');
+              toast(t.removed, 'success');
               reload();
             },
             true,
@@ -167,6 +175,8 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
 
 /** Self-registration: the global token is already active; just pick a name. */
 function GlobalRollout({ global, onClose }: { global: GlobalEnroll; onClose: () => void }) {
+  const { agents, common } = useT();
+  const t = agents.rollout;
   const toast = useToast();
   const [name, setName] = useState('');
   const [method, setMethod] = useState('binary');
@@ -180,39 +190,39 @@ function GlobalRollout({ global, onClose }: { global: GlobalEnroll; onClose: () 
   const copy = async (): Promise<void> => {
     if (!name.trim()) return;
     const ok = await copyToClipboard(shownCommand);
-    toast(ok ? 'Command copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    toast(ok ? t.commandCopied : t.copyFailed, ok ? 'success' : 'error');
   };
 
   return (
     <ModalFrame
-      title="Roll out agent"
+      title={t.title}
       onClose={onClose}
       footer={
         <button className="btn btn-ghost" onClick={onClose}>
-          Cancel
+          {common.cancel}
         </button>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="field">
-          <label>Agent name</label>
-          <input type="text" placeholder="e.g. web-01" value={name} onChange={(e) => setName(e.target.value)} />
+          <label>{t.name}</label>
+          <input type="text" placeholder={t.namePlaceholder} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="field">
-          <label>Method</label>
+          <label>{t.method}</label>
           <MethodSelect value={method} onChange={setMethod} />
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 10 }}>{intro(method)}</p>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 10 }}>{intro(agents.intro, method)}</p>
         <div className="mono" style={CMD_STYLE}>
           {shownCommand}
         </div>
         <div className="help" style={{ color: 'var(--text-2)', display: ready ? 'none' : 'block' }}>
-          Enter an agent name to get the command.
+          {t.enterName}
         </div>
         <div>
           <button className="btn btn-ghost btn-sm" disabled={!ready} onClick={() => void copy()}>
             <Icon name="copy" />
-            Copy
+            {common.copy}
           </button>
         </div>
       </div>
@@ -222,6 +232,8 @@ function GlobalRollout({ global, onClose }: { global: GlobalEnroll; onClose: () 
 
 /** One-time tokens: generate a short-lived token per agent. */
 function TokenRollout({ onClose }: { onClose: () => void }) {
+  const { agents, common } = useT();
+  const t = agents.rollout;
   const toast = useToast();
   const [name, setName] = useState('');
   const [method, setMethod] = useState('binary');
@@ -238,7 +250,7 @@ function TokenRollout({ onClose }: { onClose: () => void }) {
       });
       setResult(res);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed', 'error');
+      toast(err instanceof Error ? err.message : common.actionFailed, 'error');
     } finally {
       setBusy(false);
     }
@@ -247,43 +259,43 @@ function TokenRollout({ onClose }: { onClose: () => void }) {
   const copy = async (): Promise<void> => {
     if (!result) return;
     const ok = await copyToClipboard(result.installCommand);
-    toast(ok ? 'Command copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    toast(ok ? t.commandCopied : t.copyFailed, ok ? 'success' : 'error');
   };
 
   return (
     <ModalFrame
-      title="Roll out agent"
+      title={t.title}
       onClose={onClose}
       footer={
         <button className="btn btn-ghost" onClick={onClose}>
-          Cancel
+          {common.cancel}
         </button>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="field">
-          <label>Agent name</label>
+          <label>{t.name}</label>
           <input
             type="text"
-            placeholder="e.g. web-01 (optional)"
+            placeholder={t.namePlaceholderOptional}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
         </div>
         <div className="field">
-          <label>Method</label>
+          <label>{t.method}</label>
           <MethodSelect value={method} onChange={setMethod} />
         </div>
         <div>
           <button className="btn btn-primary" disabled={busy} onClick={() => void generate()}>
-            Generate token
+            {t.generate}
           </button>
         </div>
         <div>
           {result && (
             <>
               <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 10 }}>
-                {`${intro(result.deployMethod)} (valid for 60 min):`}
+                {intro(agents.intro, result.deployMethod, 60)}
               </p>
               <div className="mono" style={CMD_STYLE}>
                 {result.installCommand}
@@ -291,7 +303,7 @@ function TokenRollout({ onClose }: { onClose: () => void }) {
               <div style={{ marginTop: 10 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => void copy()}>
                   <Icon name="copy" />
-                  Copy
+                  {common.copy}
                 </button>
               </div>
             </>

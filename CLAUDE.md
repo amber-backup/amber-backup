@@ -143,6 +143,15 @@ Structure:
 - `layout/Shell.tsx` — sidebar + mobile drawer, `<Outlet/>` for pages.
 - `pages/*.tsx` — one exported component per screen.
 
+- `i18n/` — dependency-free i18n (English + German). `en/<namespace>.ts` is the
+  source of truth, `de/<namespace>.ts` is typed against it so missing keys fail
+  `tsc`. Components use `useT()`; non-React helpers (`format.ts`, `cron.ts`)
+  use `messages()` / `intlLocale()`. Parameterized strings are functions. The
+  locale is a per-user preference (`users.locale`, `PATCH /auth/me/preferences`,
+  null = browser language) chosen in Settings. German UI uses "Sie" and keeps
+  domain terms like Snapshot, Job, Backup, Agent, Repository in English.
+  **Every new user-visible string goes into both locale files.**
+
 Adding a page = new `pages/X.tsx` exporting a component + a `<Route>` in `App.tsx`
 (+ a `NAV` entry in `layout/Shell.tsx`). Pages load via `useAsync` and refresh
 lists by calling its `reload()` after a mutation (editor dialogs take an

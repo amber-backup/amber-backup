@@ -6,6 +6,7 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal } from '../ui/modal';
 import { PageHeader, Field, Loading, Empty } from '../ui/primitives';
+import { useT } from '../i18n';
 
 interface GlobalEnroll {
   enabled: boolean;
@@ -85,9 +86,10 @@ const CARD_STYLE: CSSProperties = {
 
 /** Admin-only system settings (agent self-registration, timeouts, SSO). */
 export function Admin() {
+  const t = useT();
   return (
     <div>
-      <PageHeader title="Admin" subtitle="System-wide settings" />
+      <PageHeader title={t.admin.title} subtitle={t.admin.subtitle} />
       <EnrollPanel />
       <SystemPanels />
     </div>
@@ -97,6 +99,7 @@ export function Admin() {
 // --- Agent self-registration ------------------------------------------------
 
 function EnrollPanel() {
+  const t = useT();
   const toast = useToast();
   const { confirmDialog } = useModal();
   const { data, loading, error, reload } = useAsync(() =>
@@ -106,14 +109,14 @@ function EnrollPanel() {
   if (loading) {
     return (
       <div className="panel">
-        <Loading label="Loading…" />
+        <Loading label={t.common.loading} />
       </div>
     );
   }
   if (error || !data) {
     return (
       <div className="panel">
-        <Empty>Failed to load enrollment settings.</Empty>
+        <Empty>{t.admin.enroll.loadFailed}</Empty>
       </div>
     );
   }
@@ -123,25 +126,25 @@ function EnrollPanel() {
   const onToggle = async (checked: boolean) => {
     try {
       await api.patch('/agents/enrollment/global', { enabled: checked });
-      toast(checked ? 'Self-registration enabled' : 'Self-registration disabled', 'success');
+      toast(checked ? t.admin.enroll.enabledToast : t.admin.enroll.disabledToast, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
     }
     reload();
   };
 
   const copy = async (token: string) => {
     const ok = await copyToClipboard(token);
-    toast(ok ? 'Token copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    toast(ok ? t.admin.enroll.tokenCopied : t.admin.copyFailed, ok ? 'success' : 'error');
   };
 
   const rotate = () =>
     confirmDialog(
-      'Rotate global token',
-      'The current token stops working for new rollouts. Agents already enrolled keep working.',
+      t.admin.enroll.rotateTitle,
+      t.admin.enroll.rotateMessage,
       async () => {
         await api.post('/agents/enrollment/global/rotate');
-        toast('Token rotated', 'success');
+        toast(t.admin.enroll.rotated, 'success');
         reload();
       },
     );
@@ -149,37 +152,34 @@ function EnrollPanel() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>Agent self-registration</h2>
+        <h2>{t.admin.enroll.heading}</h2>
       </div>
       <div className="row">
         <div className="row-main">
-          <div className="row-title">Global enrollment token</div>
-          <div className="row-sub">
-            When enabled, agents register themselves with this shared token — they choose their own
-            name and exchange the token for their own credential.
-          </div>
+          <div className="row-title">{t.admin.enroll.globalToken}</div>
+          <div className="row-sub">{t.admin.enroll.help}</div>
         </div>
         <label className="checkbox">
           <input type="checkbox" checked={g.enabled} onChange={(e) => void onToggle(e.target.checked)} />
-          Enabled
+          {t.admin.enroll.enabled}
         </label>
       </div>
       {g.enabled && g.token && (
         <div className="row">
           <div className="row-main" style={{ minWidth: 0 }}>
-            <div className="row-title">Token</div>
+            <div className="row-title">{t.admin.enroll.token}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
               <div className="mono" style={{ ...MONO_STYLE, flex: 1, minWidth: 0 }}>
                 {g.token}
               </div>
               <button
                 className="btn btn-ghost btn-sm"
-                title="Copy token"
+                title={t.admin.enroll.copyToken}
                 onClick={() => void copy(g.token!)}
               >
                 <Icon name="copy" />
               </button>
-              <button className="btn btn-ghost btn-sm" title="Rotate token" onClick={rotate}>
+              <button className="btn btn-ghost btn-sm" title={t.admin.enroll.rotateToken} onClick={rotate}>
                 <Icon name="refresh" />
               </button>
             </div>
@@ -193,16 +193,17 @@ function EnrollPanel() {
 // --- Agents + SSO (both from GET /settings/system) --------------------------
 
 function SystemPanels() {
+  const t = useT();
   const { data, loading, error } = useAsync(() => api.get<SystemSettings>('/settings/system'));
 
   if (loading) {
     return (
       <>
         <div className="panel section-gap">
-          <Loading label="Loading…" />
+          <Loading label={t.common.loading} />
         </div>
         <div className="panel section-gap">
-          <Loading label="Loading…" />
+          <Loading label={t.common.loading} />
         </div>
       </>
     );
@@ -211,10 +212,10 @@ function SystemPanels() {
     return (
       <>
         <div className="panel section-gap">
-          <Empty>Failed to load system settings.</Empty>
+          <Empty>{t.admin.system.loadFailed}</Empty>
         </div>
         <div className="panel section-gap">
-          <Empty>Failed to load system settings.</Empty>
+          <Empty>{t.admin.system.loadFailed}</Empty>
         </div>
       </>
     );
@@ -240,6 +241,7 @@ function providerUsable(p: SsoProviderView): boolean {
 }
 
 function AuthPanel({ sys }: { sys: SystemSettings }) {
+  const t = useT();
   const toast = useToast();
   const [enabled, setEnabled] = useState(sys.localLoginEnabled);
   const [busy, setBusy] = useState(false);
@@ -255,10 +257,10 @@ function AuthPanel({ sys }: { sys: SystemSettings }) {
         localLoginEnabled: next,
       });
       setEnabled(updated.localLoginEnabled);
-      toast(next ? 'Local login enabled' : 'Local login disabled', 'success');
+      toast(next ? t.admin.auth.enabledToast : t.admin.auth.disabledToast, 'success');
     } catch (err) {
       setEnabled(sys.localLoginEnabled);
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
     } finally {
       setBusy(false);
     }
@@ -267,7 +269,7 @@ function AuthPanel({ sys }: { sys: SystemSettings }) {
   return (
     <div className="panel section-gap">
       <div className="panel-head">
-        <h2>Authentication</h2>
+        <h2>{t.admin.auth.heading}</h2>
       </div>
       <div style={BODY_STYLE}>
         <label className="checkbox">
@@ -277,12 +279,10 @@ function AuthPanel({ sys }: { sys: SystemSettings }) {
             disabled={busy || (enabled && !ssoUsable)}
             onChange={(e) => void change(e.target.checked)}
           />
-          Allow local login (password and passkeys)
+          {t.admin.auth.allowLocal}
         </label>
         <div className="help">
-          {enabled && !ssoUsable
-            ? 'Turning this off needs single sign-on enabled with at least one fully configured provider — otherwise nobody could sign in.'
-            : 'With this off, the password form and passkey button disappear from the login page and only single sign-on remains. API keys keep working.'}
+          {enabled && !ssoUsable ? t.admin.auth.needsSso : t.admin.auth.help}
         </div>
       </div>
     </div>
@@ -292,32 +292,33 @@ function AuthPanel({ sys }: { sys: SystemSettings }) {
 // --- Agent offline timeout --------------------------------------------------
 
 function AgentPanel({ sys }: { sys: SystemSettings }) {
+  const t = useT();
   const toast = useToast();
   const [value, setValue] = useState(String(sys.agentOfflineTimeoutSeconds));
 
   const save = async () => {
     const seconds = Number(value);
     if (!Number.isInteger(seconds) || seconds < 30 || seconds > 3600) {
-      toast('Enter a whole number between 30 and 3600 seconds', 'error');
+      toast(t.admin.agents.invalidTimeout, 'error');
       return;
     }
     try {
       await api.patch('/settings/agents', { offlineTimeoutSeconds: seconds });
-      toast('Agent settings saved', 'success');
+      toast(t.admin.agents.saved, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
     }
   };
 
   return (
     <div className="panel section-gap">
       <div className="panel-head">
-        <h2>Agents</h2>
+        <h2>{t.admin.agents.heading}</h2>
       </div>
       <div style={BODY_STYLE}>
         <Field
-          label="Offline timeout (seconds)"
-          help="After how long without a poll an agent is marked offline. 30–3600 seconds."
+          label={t.admin.agents.offlineTimeout}
+          help={t.admin.agents.offlineTimeoutHelp}
         >
           <input
             type="number"
@@ -330,7 +331,7 @@ function AgentPanel({ sys }: { sys: SystemSettings }) {
         </Field>
         <div style={ACTIONS_STYLE}>
           <button className="btn btn-primary btn-sm" onClick={() => void save()}>
-            Save
+            {t.common.save}
           </button>
         </div>
       </div>
@@ -353,6 +354,7 @@ interface ProviderDraft {
 }
 
 function SsoPanel({ sys }: { sys: SystemSettings }) {
+  const t = useT();
   const toast = useToast();
   const nextKey = useRef(0);
 
@@ -398,7 +400,7 @@ function SsoPanel({ sys }: { sys: SystemSettings }) {
 
   const copyRedirect = async () => {
     const ok = await copyToClipboard(redirectUri);
-    toast(ok ? 'Redirect URI copied' : 'Copy failed — select and copy manually', ok ? 'success' : 'error');
+    toast(ok ? t.admin.sso.redirectCopied : t.admin.copyFailed, ok ? 'success' : 'error');
   };
 
   const collect = (): Record<string, unknown>[] =>
@@ -421,38 +423,38 @@ function SsoPanel({ sys }: { sys: SystemSettings }) {
         enabled,
         providers: collect(),
       });
-      toast('SSO configuration saved', 'success');
+      toast(t.admin.sso.saved, 'success');
       setEnabled(updated.sso.enabled);
       setRedirectUri(updated.ssoRedirectUri);
       setProviders(toDrafts(updated.sso.providers));
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Error', 'error');
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
     }
   };
 
   return (
     <div className="panel section-gap">
       <div className="panel-head">
-        <h2>Single sign-on</h2>
+        <h2>{t.admin.sso.heading}</h2>
       </div>
       <div style={BODY_STYLE}>
         <label className="checkbox">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Enable single sign-on
+          {t.admin.sso.enable}
         </label>
         {enabled && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="row" style={{ padding: 0 }}>
               <div className="row-main" style={{ minWidth: 0 }}>
-                <div className="row-title">Redirect URI</div>
-                <div className="row-sub">Register this callback URL with every provider.</div>
+                <div className="row-title">{t.admin.sso.redirectUri}</div>
+                <div className="row-sub">{t.admin.sso.redirectHelp}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                   <div className="mono" style={{ ...MONO_STYLE, flex: 1, minWidth: 0 }}>
                     {redirectUri}
                   </div>
                   <button
                     className="btn btn-ghost btn-sm"
-                    title="Copy redirect URI"
+                    title={t.admin.sso.copyRedirect}
                     onClick={() => void copyRedirect()}
                   >
                     <Icon name="copy" />
@@ -460,11 +462,11 @@ function SsoPanel({ sys }: { sys: SystemSettings }) {
                 </div>
               </div>
             </div>
-            <div style={SUBHEAD_STYLE}>Providers</div>
+            <div style={SUBHEAD_STYLE}>{t.admin.sso.providers}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {providers.length === 0 ? (
                 <div className="row-sub" style={{ padding: '2px 0' }}>
-                  No providers yet. Add one below.
+                  {t.admin.sso.noProviders}
                 </div>
               ) : (
                 providers.map((p) => (
@@ -481,7 +483,7 @@ function SsoPanel({ sys }: { sys: SystemSettings }) {
               <div className="dropdown">
                 <button className="btn btn-ghost btn-sm" onClick={() => setMenuOpen((o) => !o)}>
                   <Icon name="plus" />
-                  Add provider
+                  {t.admin.sso.addProvider}
                 </button>
                 {menuOpen && (
                   <div className="dropdown-menu">
@@ -505,7 +507,7 @@ function SsoPanel({ sys }: { sys: SystemSettings }) {
         )}
         <div style={ACTIONS_STYLE}>
           <button className="btn btn-primary btn-sm" onClick={() => void save()}>
-            Save SSO
+            {t.admin.sso.save}
           </button>
         </div>
       </div>
@@ -522,17 +524,18 @@ function ProviderCard({
   onChange: (patch: Partial<ProviderDraft>) => void;
   onRemove: () => void;
 }) {
+  const t = useT();
   const meta = SSO_PROVIDER_META.find((m) => m.type === draft.type)!;
   return (
     <div style={CARD_STYLE}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontWeight: 600, fontSize: 13.5 }}>{meta.name}</div>
-        <button className="btn btn-ghost btn-sm" title="Remove provider" onClick={onRemove}>
+        <button className="btn btn-ghost btn-sm" title={t.admin.sso.removeProvider} onClick={onRemove}>
           <Icon name="trash" />
         </button>
       </div>
       {meta.issuer && (
-        <Field label="Issuer URL" help="Base URL exposing /.well-known/openid-configuration.">
+        <Field label={t.admin.sso.issuerUrl} help={t.admin.sso.issuerUrlHelp}>
           <input
             className="input"
             type="text"
@@ -543,17 +546,17 @@ function ProviderCard({
         </Field>
       )}
       {meta.tenant && (
-        <Field label="Directory (tenant) ID">
+        <Field label={t.admin.sso.tenantId}>
           <input
             className="input"
             type="text"
             value={draft.tenantId}
-            placeholder="directory (tenant) id"
+            placeholder={t.admin.sso.tenantIdPlaceholder}
             onChange={(e) => onChange({ tenantId: e.target.value })}
           />
         </Field>
       )}
-      <Field label="Client ID">
+      <Field label={t.admin.sso.clientId}>
         <input
           className="input"
           type="text"
@@ -562,18 +565,18 @@ function ProviderCard({
         />
       </Field>
       <Field
-        label="Client secret"
-        help={draft.clientSecretSet ? 'A secret is stored. Leave blank to keep it.' : undefined}
+        label={t.admin.sso.clientSecret}
+        help={draft.clientSecretSet ? t.admin.sso.secretStored : undefined}
       >
         <input
           className="input"
           type="password"
-          placeholder={draft.clientSecretSet ? '•••••••• (unchanged)' : 'Client secret'}
+          placeholder={draft.clientSecretSet ? t.admin.sso.secretUnchanged : t.admin.sso.clientSecret}
           value={draft.clientSecret}
           onChange={(e) => onChange({ clientSecret: e.target.value })}
         />
       </Field>
-      <Field label="Login button label (optional)" help={`Defaults to "${meta.name}".`}>
+      <Field label={t.admin.sso.buttonLabel} help={t.admin.sso.buttonLabelHelp(meta.name)}>
         <input
           className="input"
           type="text"

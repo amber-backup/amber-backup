@@ -16,6 +16,8 @@ import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
 import { BackendFields } from '../ui/backend-fields';
+import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 
 /** Sentinel target value for a local-filesystem repository (no connection). */
 const LOCAL_REPO = '__local__';
@@ -32,8 +34,9 @@ export function Jobs() {
     ]),
   );
   const { open } = useModal();
+  const t = useT();
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const [jobs, targets, agents, channels, backends] = data;
 
   const newJob = () =>
@@ -51,16 +54,16 @@ export function Jobs() {
   return (
     <div>
       <PageHeader
-        title="Jobs"
-        subtitle={`${jobs.length} backup jobs`}
-        actions={<ActionButton label="New job" icon="plus" variant="primary" onClick={newJob} />}
+        title={t.jobs.title}
+        subtitle={t.jobs.subtitle(jobs.length)}
+        actions={<ActionButton label={t.jobs.newJob} icon="plus" variant="primary" onClick={newJob} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Backup jobs</h2>
+          <h2>{t.jobs.panelTitle}</h2>
         </div>
         {jobs.length === 0 ? (
-          <Empty>No jobs yet. Define what to back up, where to, and on which schedule.</Empty>
+          <Empty>{t.jobs.empty}</Empty>
         ) : (
           jobs.map((j) => (
             <JobRow
@@ -96,12 +99,14 @@ function JobRow({
 }) {
   const toast = useToast();
   const { open, confirmDialog } = useModal();
+  const t = useT();
+  const m = t.jobs.row;
 
-  const tgt = targets.find((t) => t.id === j.target_id);
+  const tgt = targets.find((x) => x.id === j.target_id);
   const agent = agents.find((a) => a.id === j.agent_id);
-  const agentName = j.location === 'agent' ? (agent?.name ?? 'unknown') : 'Server';
+  const agentName = j.location === 'agent' ? (agent?.name ?? m.unknownAgent) : m.server;
   // A null target is a local-filesystem repository.
-  const targetName = j.target_id ? (tgt?.name ?? '?') : 'Local filesystem';
+  const targetName = j.target_id ? (tgt?.name ?? '?') : m.localFilesystem;
   // The repository is identified by the job-scoped fields (bucket, prefix, path…),
   // joined in the order the backend declares them.
   const repoConfig = j.repo_config ?? {};
@@ -123,31 +128,31 @@ function JobRow({
       <div className="row-main">
         <div className="row-title">{j.name}</div>
         <div className="row-sub">
-          Agent: <span style={{ color: 'var(--amber)' }}>{agentName}</span>
-          {' · '}Target: <span style={{ color: 'var(--amber)' }}>{targetName}</span>
-          {' · '}Repository: <span style={{ color: 'var(--amber)' }}>{repoName}</span>
+          {m.agent} <span style={{ color: 'var(--amber)' }}>{agentName}</span>
+          {' · '}{m.target} <span style={{ color: 'var(--amber)' }}>{targetName}</span>
+          {' · '}{m.repository} <span style={{ color: 'var(--amber)' }}>{repoName}</span>
         </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         {j.enabled && j.next_run ? (
           <span>
-            next <span style={{ color: 'var(--amber)' }}>{fmtRelative(j.next_run)}</span>
+            {m.next} <span style={{ color: 'var(--amber)' }}>{fmtRelative(j.next_run)}</span>
           </span>
         ) : (
-          <span className="muted">disabled</span>
+          <span className="muted">{m.disabled}</span>
         )}
         <RepoSize job={j} />
       </div>
       <div className="row-actions">
         <BusyButton
           className="btn btn-primary btn-sm"
-          title="Back up now"
+          title={m.backUpNow}
           onClick={async () => {
             try {
               await api.post(`/jobs/${j.id}/run`);
-              toast('Backup started', 'success');
+              toast(m.backupStarted, 'success');
             } catch (err) {
-              toast(err instanceof Error ? err.message : 'Start failed', 'error');
+              toast(err instanceof Error ? err.message : m.startFailed, 'error');
             }
           }}
         >
@@ -155,7 +160,7 @@ function JobRow({
         </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
-          title="Edit"
+          title={m.edit}
           onClick={() =>
             open((close) => (
               <JobEditor
@@ -174,7 +179,7 @@ function JobRow({
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title="Duplicate"
+          title={m.duplicate}
           onClick={() =>
             open((close) => (
               <JobEditor
@@ -194,14 +199,14 @@ function JobRow({
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title="Delete"
+          title={t.common.delete}
           onClick={() =>
             confirmDialog(
-              'Delete job',
-              `"${j.name}" will be removed.`,
+              m.deleteTitle,
+              m.deleteConfirm(j.name),
               async () => {
                 await api.del(`/jobs/${j.id}`);
-                toast('Job deleted', 'success');
+                toast(m.deleted, 'success');
                 reload();
               },
               true,
@@ -227,30 +232,31 @@ function RepoSize({ job }: { job: Job }) {
     stats_at: job.repo_stats_at ?? null,
     stats_error: job.repo_stats_error ?? null,
   });
+  const m = useT().jobs.repoSize;
 
   const title = stats.stats_error
-    ? `Could not read repository stats: ${stats.stats_error}`
+    ? m.statsError(stats.stats_error)
     : stats.stats_at
-      ? `Repository size as of ${fmtDateTime(stats.stats_at)}`
-      : 'Repository size not read yet';
+      ? m.asOf(fmtDateTime(stats.stats_at))
+      : m.notRead;
   const label =
     stats.size_bytes == null
-      ? 'size unknown'
-      : `${fmtBytes(stats.size_bytes)} · ${stats.snapshot_count ?? '?'} snapshots`;
+      ? m.unknown
+      : `${fmtBytes(stats.size_bytes)} · ${m.snapshots(stats.snapshot_count ?? null)}`;
 
   return (
     <div className="repo-size" title={title}>
       <span className={stats.stats_error ? 'repo-size-stale' : undefined}>{label}</span>
       <BusyButton
         className="btn btn-ghost"
-        title="Refresh repository size"
+        title={m.refresh}
         onClick={async () => {
           try {
             const fresh = await api.post<RepositoryStats>(`/repositories/${job.repository_id}/stats`);
             setStats(fresh);
-            if (fresh.stats_error) toast(`Stats refresh failed: ${fresh.stats_error}`, 'error');
+            if (fresh.stats_error) toast(m.refreshError(fresh.stats_error), 'error');
           } catch (err) {
-            toast(err instanceof Error ? err.message : 'Refresh failed', 'error');
+            toast(err instanceof Error ? err.message : m.refreshFailed, 'error');
           }
         }}
       >
@@ -274,13 +280,13 @@ function Section({ title, sub, children }: { title: string; sub: string; childre
 }
 
 /** Common cron schedules offered as presets; 'custom' frees the raw field. */
-const CRON_PRESETS: { label: string; value: string }[] = [
-  { label: 'Hourly', value: '0 * * * *' },
-  { label: 'Every 6 hours', value: '0 */6 * * *' },
-  { label: 'Daily at 03:00', value: '0 3 * * *' },
-  { label: 'Weekly — Sunday 03:00', value: '0 3 * * 0' },
-  { label: 'Monthly — 1st, 03:00', value: '0 3 1 * *' },
-  { label: 'Custom…', value: 'custom' },
+const cronPresets = (t: Messages): { label: string; value: string }[] => [
+  { label: t.jobs.presets.hourly, value: '0 * * * *' },
+  { label: t.jobs.presets.every6Hours, value: '0 */6 * * *' },
+  { label: t.jobs.presets.daily, value: '0 3 * * *' },
+  { label: t.jobs.presets.weekly, value: '0 3 * * 0' },
+  { label: t.jobs.presets.monthly, value: '0 3 1 * *' },
+  { label: t.jobs.presets.custom, value: 'custom' },
 ];
 
 function NumInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -309,6 +315,9 @@ function JobEditor({
   onSaved: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
+  const m = t.jobs.editor;
+  const presets = cronPresets(t);
   // Duplicate: prefill from an existing job but create a new one (POST).
   const isEdit = !!job && !duplicate;
   const isDuplicate = !!job && duplicate;
@@ -316,7 +325,7 @@ function JobEditor({
   const ret = (opts.retention ?? {}) as Record<string, any>;
   const notify = job?.notify ?? {};
 
-  const [name, setName] = useState(isDuplicate ? `Copy of ${job!.name}` : job?.name ?? '');
+  const [name, setName] = useState(isDuplicate ? m.copyOf(job!.name) : job?.name ?? '');
   const [tags, setTags] = useState<string>((opts.tags ?? []).join(', '));
   const [enabled, setEnabled] = useState(job ? job.enabled : true);
 
@@ -361,7 +370,7 @@ function JobEditor({
   // what is typed here is sent.
   const credFields = (repoBackend?.fields.filter((f) => f.overridable) ?? []).map((f) =>
     isEdit && job?.has_credential_override
-      ? { ...f, placeholder: '(leave unchanged)' }
+      ? { ...f, placeholder: m.leaveUnchanged }
       : f,
   );
   const setRepoValue = (n: string, v: string) =>
@@ -388,7 +397,7 @@ function JobEditor({
   // Schedule: a preset dropdown fills the cron field, and a live description
   // makes the raw expression legible.
   const [cron, setCron] = useState<string>(job?.cron_expr ?? '0 3 * * *');
-  const matchPreset = (): string => CRON_PRESETS.find((p) => p.value === cron.trim())?.value ?? 'custom';
+  const matchPreset = (): string => presets.find((p) => p.value === cron.trim())?.value ?? 'custom';
   const cronDesc = describeCron(cron);
 
   const [keepLast, setKeepLast] = useState<string>(ret.keepLast != null ? String(ret.keepLast) : '');
@@ -427,8 +436,8 @@ function JobEditor({
     if (prune) retention.prune = true;
 
     const resticOptions: Record<string, unknown> = {
-      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      exclude: excludes.split('\n').map((t) => t.trim()).filter(Boolean),
+      tags: tags.split(',').map((s) => s.trim()).filter(Boolean),
+      exclude: excludes.split('\n').map((s) => s.trim()).filter(Boolean),
     };
     if (Object.keys(retention).length) resticOptions.retention = retention;
     if (preScript.trim()) resticOptions.preScript = preScript.trim();
@@ -511,78 +520,74 @@ function JobEditor({
         if (repoCredentials) payload.repoCredentials = repoCredentials;
         await api.post('/jobs', payload);
       }
-      toast('Job saved', 'success');
+      toast(m.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Save failed', 'error');
+      toast(err instanceof Error ? err.message : m.saveFailed, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title={isEdit ? 'Edit job' : isDuplicate ? 'Duplicate job' : 'New job'}
+      title={isEdit ? m.titleEdit : isDuplicate ? m.titleDuplicate : m.titleNew}
       wide
-      confirmLabel={isEdit ? 'Save' : 'Create'}
+      confirmLabel={isEdit ? t.common.save : m.create}
       onClose={onClose}
       onSubmit={submit}
     >
       <div className="modal-form">
-        <Section title="General" sub="">
-          <Field label="Name">
+        <Section title={m.general.title} sub="">
+          <Field label={m.general.name}>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Tags" help="Comma-separated labels added to each snapshot">
+          <Field label={m.general.tags} help={m.general.tagsHelp}>
             <input
               type="text"
               value={tags}
-              placeholder="daily, important"
+              placeholder={m.general.tagsPlaceholder}
               onChange={(e) => setTags(e.target.value)}
             />
           </Field>
           <label className="checkbox">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Job enabled
+            {m.general.enabled}
           </label>
         </Section>
 
-        <Section title="Source" sub="what to back up">
-          <Field label="Run on" help="The server itself, or a remote agent">
+        <Section title={m.source.title} sub={m.source.sub}>
+          <Field label={m.source.runOn} help={m.source.runOnHelp}>
             <select value={where} onChange={(e) => changeWhere(e.target.value)}>
-              <option value="local">Server (this host)</option>
+              <option value="local">{m.source.serverOption}</option>
               {agents.map((a) => (
-                <option key={a.id} value={a.id}>{`${a.name} (${a.status})`}</option>
+                <option key={a.id} value={a.id}>{`${a.name} (${t.common.status[a.status] ?? a.status})`}</option>
               ))}
             </select>
           </Field>
-          <Field label="Paths" help="One path per line">
+          <Field label={m.source.paths} help={m.source.pathsHelp}>
             <textarea placeholder={'/home\n/etc\n/var/www'} value={paths} onChange={(e) => setPaths(e.target.value)} />
           </Field>
-          <Field label="Excludes" help="One glob or path per line">
+          <Field label={m.source.excludes} help={m.source.excludesHelp}>
             <textarea placeholder={'*.tmp\n/var/cache'} value={excludes} onChange={(e) => setExcludes(e.target.value)} />
           </Field>
         </Section>
 
-        <Section title="Repository" sub="where to store it">
+        <Section title={m.repository.title} sub={m.repository.sub}>
           <Field
-            label="Target"
-            help={
-              localRepoAllowed
-                ? 'A shared connection, or the local filesystem'
-                : 'A shared connection (local filesystem is only available for server-run jobs)'
-            }
+            label={m.repository.target}
+            help={localRepoAllowed ? m.repository.targetHelpLocal : m.repository.targetHelpAgent}
           >
             <select value={targetId} onChange={(e) => changeTarget(e.target.value)}>
-              {localRepoAllowed && <option value={LOCAL_REPO}>Local filesystem</option>}
-              {targets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {localRepoAllowed && <option value={LOCAL_REPO}>{m.repository.localFilesystem}</option>}
+              {targets.map((tg) => (
+                <option key={tg.id} value={tg.id}>
+                  {tg.name}
                 </option>
               ))}
             </select>
           </Field>
           {isLocalRepo ? (
-            <Field label="Path *" help="Local directory on the server for the repository">
+            <Field label={m.repository.path} help={m.repository.pathHelp}>
               <input
                 type="text"
                 placeholder="/srv/restic-repo"
@@ -604,7 +609,7 @@ function JobEditor({
                     if (!e.target.checked) setCredValues({});
                   }}
                 />
-                Use different credentials than the connection
+                {m.repository.overrideCredentials}
               </label>
               {overrideCreds && (
                 <BackendFields
@@ -615,38 +620,38 @@ function JobEditor({
               )}
             </>
           )}
-          <Field label={isEdit ? 'Change repository password' : 'Repository password'}>
+          <Field label={isEdit ? m.repository.changePassword : m.repository.password}>
             <input
               type="password"
-              placeholder={isEdit ? '(leave unchanged)' : 'Repository password'}
+              placeholder={isEdit ? m.leaveUnchanged : m.repository.password}
               value={repoPassword}
               onChange={(e) => setRepoPassword(e.target.value)}
             />
           </Field>
         </Section>
 
-        <Section title="Schedule" sub="when it runs">
-          <Field label="Preset">
+        <Section title={m.schedule.title} sub={m.schedule.sub}>
+          <Field label={m.schedule.preset}>
             <select
               value={matchPreset()}
               onChange={(e) => {
                 if (e.target.value !== 'custom') setCron(e.target.value);
               }}
             >
-              {CRON_PRESETS.map((p) => (
+              {presets.map((p) => (
                 <option key={p.value} value={p.value}>
                   {p.label}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="Cron" help="minute hour day month weekday">
+          <Field label={m.schedule.cron} help={m.schedule.cronHelp}>
             <input type="text" value={cron} placeholder="0 3 * * *" onChange={(e) => setCron(e.target.value)} />
           </Field>
-          <div className={`cron-preview${cronDesc ? '' : ' invalid'}`}>{`→ ${cronDesc ?? 'Custom schedule'}`}</div>
+          <div className={`cron-preview${cronDesc ? '' : ' invalid'}`}>{`→ ${cronDesc ?? m.schedule.custom}`}</div>
         </Section>
 
-        <Section title="Retention" sub="how long to keep snapshots">
+        <Section title={m.retention.title} sub={m.retention.sub}>
           <div className="field-row">
             <Field label="keep-last">
               <NumInput value={keepLast} onChange={setKeepLast} />
@@ -665,14 +670,14 @@ function JobEditor({
           </div>
           <label className="checkbox">
             <input type="checkbox" checked={prune} onChange={(e) => setPrune(e.target.checked)} />
-            Prune after forget (reclaim storage)
+            {m.retention.prune}
           </label>
         </Section>
 
-        <Section title="Scripts" sub="run custom scripts around the backup">
+        <Section title={m.scripts.title} sub={m.scripts.sub}>
           <Field
-            label="Pre-backup script"
-            help="Path on the executing host (server or agent), run directly. A non-zero exit aborts the backup."
+            label={m.scripts.pre}
+            help={m.scripts.preHelp}
           >
             <input
               type="text"
@@ -681,7 +686,7 @@ function JobEditor({
               onChange={(e) => setPreScript(e.target.value)}
             />
           </Field>
-          <Field label="On-success script" help="Runs after a successful backup. Receives AMBER_SNAPSHOT_ID.">
+          <Field label={m.scripts.onSuccess} help={m.scripts.onSuccessHelp}>
             <input
               type="text"
               value={postSuccessScript}
@@ -689,7 +694,7 @@ function JobEditor({
               onChange={(e) => setPostSuccessScript(e.target.value)}
             />
           </Field>
-          <Field label="On-failure script" help="Runs after a failed backup or pre-script. Receives AMBER_ERROR.">
+          <Field label={m.scripts.onFailure} help={m.scripts.onFailureHelp}>
             <input
               type="text"
               value={postFailureScript}
@@ -699,22 +704,22 @@ function JobEditor({
           </Field>
         </Section>
 
-        <Section title="Notifications" sub="alert on job result">
+        <Section title={m.notifications.title} sub={m.notifications.sub}>
           {channels.length === 0 ? (
-            <div className="help">No channels configured. An admin can add them under Notifications.</div>
+            <div className="help">{m.notifications.noChannels}</div>
           ) : (
             <>
               <div className="field-row">
                 <label className="checkbox">
                   <input type="checkbox" checked={onFailure} onChange={(e) => setOnFailure(e.target.checked)} />
-                  On failure
+                  {m.notifications.onFailure}
                 </label>
                 <label className="checkbox">
                   <input type="checkbox" checked={onSuccess} onChange={(e) => setOnSuccess(e.target.checked)} />
-                  On success
+                  {m.notifications.onSuccess}
                 </label>
               </div>
-              <Field label="Channels">
+              <Field label={m.notifications.channels}>
                 <div className="channel-picker">
                   {channels.map((c) => (
                     <label key={c.id} className="checkbox">

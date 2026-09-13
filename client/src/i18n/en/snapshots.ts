@@ -1,0 +1,67 @@
+export const snapshots = {
+  page: {
+    back: 'Back',
+    title: 'Snapshots',
+    subtitleJob: 'Verify the repository, browse snapshots and restore selectively or in full',
+    subtitleList: 'Pick a job to browse its snapshots and check its repository',
+    jobNotFound: 'This job does not exist or you have no access to it.',
+  },
+  jobList: {
+    title: (count: number) => `Jobs (${count})`,
+    empty: 'No backup jobs yet.',
+    agent: 'Agent',
+    local: 'Local',
+    sizeUnknown: 'size unknown',
+    sizeSummary: (size: string, count: number | string) => `${size} · ${count} snapshots`,
+  },
+  list: {
+    loading: 'Loading snapshots…',
+    empty: 'No snapshots in this repository.',
+    title: (job: string, count?: number) => `${job} — Snapshots${count != null ? ` (${count})` : ''}`,
+    browse: 'Browse',
+    restore: 'Restore',
+    deleteSnapshot: 'Delete snapshot',
+  },
+  deleteDialog: {
+    title: 'Delete snapshot',
+    deleted: 'Snapshot deleted',
+    deletedPruning: 'Snapshot deleted — prune started, see recent activities',
+    failed: 'Delete failed',
+    warning: (shortId: string, time: string) =>
+      `Snapshot ${shortId} (${time}) will be permanently removed. This cannot be undone.`,
+    prune: 'Also prune now — reclaim storage immediately (slower, locks the repository)',
+  },
+  browser: {
+    title: (shortId: string) => `Browse snapshot ${shortId}`,
+    restoreSelected: 'Restore selected',
+    emptyDir: 'Empty directory.',
+    selected: (count: number) => `${count} selected`,
+  },
+  restore: {
+    title: (paths: number) => (paths ? `Restore (${paths} ${paths === 1 ? 'path' : 'paths'})` : 'Restore'),
+    confirm: 'Restore',
+    dryRunStarted: 'Dry run started — see the history',
+    started: 'Restore started',
+    mode: 'Mode',
+    modeDownload: 'Download (archive)',
+    modeAlternate: 'Alternate path (server)',
+    modeOriginal: 'Original location',
+    targetPath: 'Target path',
+    overwrite: 'Overwrite',
+    overwriteAlways: 'always (overwrite everything)',
+    verify: 'Verify (--verify)',
+    deleteForeign: 'Delete foreign files (--delete)',
+    deleteWarning: '⚠ Warning: --delete removes files in the target that are not in the snapshot.',
+    dryRun: 'Dry run',
+  },
+  history: {
+    title: 'Restore history',
+    empty: 'No restores yet.',
+    modeOriginal: 'Original',
+    modeAlternate: 'Alt. path',
+    modeDownload: 'Download',
+    download: 'Download',
+  },
+};
+
+export type SnapshotsMessages = typeof snapshots;

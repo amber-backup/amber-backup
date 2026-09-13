@@ -1,0 +1,112 @@
+import type { IntegrityMessages } from '../en/integrity';
+
+export const integrity: IntegrityMessages = {
+  levels: {
+    quick: {
+      title: 'Nur Struktur',
+      desc: 'Prüft Snapshots, Verzeichnisbäume und den Index. Schnell — liest keine Dateidaten.',
+    },
+    rotating: {
+      title: 'Rotierender Datenteil',
+      desc: 'Lädt zusätzlich einen Teil der Daten herunter und prüft ihn. Jede Ausführung setzt mit dem nächsten Teil fort, sodass mit der Zeit alle Daten zurückgelesen werden.',
+    },
+    full: {
+      title: 'Alle Daten',
+      desc: 'Lädt jedes Datenpaket herunter und prüft es. Langsam und bei Cloud-Speicher unter Umständen mit erheblichen Egress-Kosten verbunden.',
+    },
+    nextPart: (next: number, parts: number) => `Als Nächstes: Teil ${next} von ${parts}.`,
+  },
+  presets: {
+    daily: 'Täglich um 04:00',
+    weekly: 'Wöchentlich — Sonntag 04:00',
+    monthly: 'Monatlich — am 1., 04:00',
+    custom: 'Benutzerdefiniert…',
+  },
+  levelLabel: {
+    check: 'Prüfung',
+    full: 'Vollständig · alle Daten',
+    rotating: 'Rotierend',
+    rotatingPart: (part: number, parts: number) => `Rotierend · Teil ${part}/${parts}`,
+    quick: 'Schnell · Struktur',
+  },
+  verdict: {
+    failedNote: (error: string) => ` — der letzte Versuch konnte nicht abgeschlossen werden: ${error}`,
+    damaged: 'Beschädigt',
+    damagedTitle: (at: string) => `Restic hat am ${at} Integritätsfehler gefunden`,
+    verified: (relative: string) => `Geprüft ${relative}`,
+    passedTitle: (at: string, level: string) => `Keine Fehler gefunden am ${at} (${level})`,
+    checkFailed: 'Prüfung fehlgeschlagen',
+    notVerified: 'Nicht geprüft',
+    checkFailedTitle: (error: string) => `Die Integritätsprüfung konnte nicht abgeschlossen werden: ${error}`,
+    neverCheckedTitle: 'Das Repository wurde noch nie auf Integrität geprüft',
+  },
+  panel: {
+    title: 'Integrität',
+    schedule: 'Zeitplan',
+    checkRunning: 'Prüfung läuft…',
+    checkNow: 'Jetzt prüfen',
+    damagedAlert: (at: string) =>
+      `Restic hat beschädigte Daten in diesem Repository gefunden (${at}). Snapshots, die darauf verweisen, lassen sich möglicherweise nicht vollständig wiederherstellen. Öffnen Sie unten das Log der fehlgeschlagenen Prüfung, um die betroffenen Daten und die von Restic vorgeschlagenen Reparaturbefehle zu sehen. Führen Sie anschließend ein neues Backup aus und prüfen Sie erneut.`,
+    lastVerdict: 'Letztes Ergebnis',
+    startCheckHint: 'Starten Sie eine Prüfung, um das Repository zu verifizieren',
+    notScheduled: 'Nicht geplant',
+    next: (relative: string) => ` · nächste ${relative}`,
+    jobDisabled: ' · Job deaktiviert',
+    manualOnly: 'Prüfungen laufen nur bei manuellem Start',
+    lastAttemptFailed: (summary: string) => `Letzter Versuch konnte nicht abgeschlossen werden: ${summary}`,
+    recentChecks: 'Letzte Prüfungen',
+    noChecks: 'Noch keine Prüfungen.',
+    noErrorsFound: 'Keine Fehler gefunden',
+    integrityErrorsFound: 'Integritätsfehler gefunden',
+    neverChecked: 'Noch nie geprüft',
+  },
+  data: {
+    label: 'Alle Daten zurückgelesen',
+    never: 'Nie',
+    rotationComplete: (parts: number) => `Rotation abgeschlossen — die nächste Ausführung beginnt wieder bei Teil 1 von ${parts}`,
+    rotationProgress: (done: number, parts: number) => `Rotation: ${done} von ${parts} Teilen gelesen`,
+    readBackHint: 'Führen Sie eine vollständige oder rotierende Prüfung aus, um die Daten zurückzulesen',
+    partsTitle: (shown: number, parts: number) => `${shown} von ${parts} Teilen`,
+  },
+  run: {
+    cancelled: 'Prüfung abgebrochen',
+    cancelFailed: 'Die Prüfung konnte nicht abgebrochen werden',
+    noErrorsFound: 'keine Fehler gefunden',
+    integrityErrorsFound: 'Integritätsfehler gefunden',
+    scheduled: 'geplant',
+    damaged: 'beschädigt',
+    passed: 'bestanden',
+    duration: 'Dauer',
+    log: 'Log',
+    logTitle: (title: string) => `Prüfungs-Log — ${title}`,
+    noOutput: 'Keine Ausgabe aufgezeichnet.',
+  },
+  checkDialog: {
+    title: (job: string) => `Integrität prüfen — ${job}`,
+    start: 'Prüfung starten',
+    started: 'Integritätsprüfung gestartet',
+    startFailed: 'Die Prüfung konnte nicht gestartet werden',
+    fullWarning:
+      'Jedes Datenpaket wird vom Speicher-Backend heruntergeladen. Je nach Größe des Repositorys kann das Stunden dauern und Egress-Kosten verursachen.',
+    lockAgent:
+      'Die Prüfung läuft auf dem Agent des Jobs und sperrt das Repository währenddessen — Backups dieses Jobs schlagen in dieser Zeit fehl.',
+    lockLocal: 'Die Prüfung sperrt das Repository währenddessen — Backups dieses Jobs schlagen in dieser Zeit fehl.',
+  },
+  scheduleDialog: {
+    title: (job: string) => `Prüfungszeitplan — ${job}`,
+    partsInvalid: 'Die Anzahl der Teile muss eine ganze Zahl zwischen 2 und 100 sein',
+    saved: 'Prüfungszeitplan gespeichert',
+    saveFailed: 'Der Zeitplan konnte nicht gespeichert werden',
+    enable: 'Dieses Repository nach Zeitplan prüfen',
+    preset: 'Vorlage',
+    cron: 'Cron',
+    cronHelp: 'Minute Stunde Tag Monat Wochentag',
+    customSchedule: 'Benutzerdefinierter Zeitplan',
+    parts: 'Teile',
+    partsHelp: (parts: number) =>
+      `Jede Ausführung liest 1/${parts} der Daten — nach ${parts} erfolgreichen Ausführungen wurden alle Daten einmal zurückgelesen.`,
+    partsRange: 'Eine ganze Zahl zwischen 2 und 100',
+    lockNote:
+      'Prüfungen sperren das Repository. Wählen Sie eine Zeit, zu der dieser Job kein Backup ausführt; findet eine Prüfung das Repository belegt vor, wird sie bis zum nächsten Termin übersprungen.',
+  },
+};

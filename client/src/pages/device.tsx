@@ -7,6 +7,7 @@ import { fmtDateTime, fmtRelative } from '../core/format';
 import { clearDeviceCode } from '../core/device-login';
 import { useToast } from '../ui/toast';
 import { BusyButton, Field, Loading, PageHeader } from '../ui/primitives';
+import { useT } from '../i18n';
 
 interface DeviceRequest {
   clientName: string;
@@ -30,11 +31,11 @@ function formatCode(input: string): string {
 }
 
 const EXPIRY_OPTIONS = [
-  { value: '30', label: '30 days' },
-  { value: '90', label: '90 days' },
-  { value: '365', label: '1 year' },
-  { value: '', label: 'Never' },
-];
+  { value: '30', label: 'days30' },
+  { value: '90', label: 'days90' },
+  { value: '365', label: 'year1' },
+  { value: '', label: 'never' },
+] as const;
 
 /**
  * Approval screen for `ambb login`: the CLI shows a code and a link to this
@@ -42,6 +43,7 @@ const EXPIRY_OPTIONS = [
  * key with the chosen access and lifetime.
  */
 export function DeviceLogin() {
+  const t = useT();
   const { user } = useAuth();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
@@ -68,10 +70,10 @@ export function DeviceLogin() {
     } catch (e) {
       setError(
         e instanceof ApiError && e.status === 404
-          ? 'This code is unknown, expired or already used. Run ambb login again for a new one.'
+          ? t.device.unknownCode
           : e instanceof Error
             ? e.message
-            : 'Lookup failed',
+            : t.device.lookupFailed,
       );
       setPhase({ kind: 'enter' });
     }
@@ -98,20 +100,20 @@ export function DeviceLogin() {
         setPhase({ kind: 'denied', clientName });
       }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Error', 'error');
+      toast(e instanceof Error ? e.message : t.common.error, 'error');
     }
   };
 
   return (
     <div>
-      <PageHeader title="Device login" subtitle="Sign in the Amber Backup CLI (ambb) on another device" />
+      <PageHeader title={t.device.title} subtitle={t.device.subtitle} />
 
-      {phase.kind === 'loading' && <Loading label="Looking up the request…" />}
+      {phase.kind === 'loading' && <Loading label={t.device.lookingUp} />}
 
       {phase.kind === 'enter' && (
         <div className="panel device-panel">
           <div className="panel-head">
-            <h2>Enter the code from your terminal</h2>
+            <h2>{t.device.enter.title}</h2>
           </div>
           <form
             className="device-body"
@@ -121,7 +123,7 @@ export function DeviceLogin() {
             }}
           >
             {error && <div className="warn-box">{error}</div>}
-            <Field label="Code" help="Shown by ambb login, e.g. BCDF-GHJK">
+            <Field label={t.device.enter.code} help={t.device.enter.codeHelp}>
               <input
                 type="text"
                 className="mono device-code-input"
@@ -136,7 +138,7 @@ export function DeviceLogin() {
             </Field>
             <div>
               <button className="btn btn-primary" type="submit" disabled={!code.trim()}>
-                Continue
+                {t.device.enter.continue}
               </button>
             </div>
           </form>
@@ -146,51 +148,49 @@ export function DeviceLogin() {
       {phase.kind === 'review' && (
         <div className="panel device-panel">
           <div className="panel-head">
-            <h2>Approve this device?</h2>
+            <h2>{t.device.review.title}</h2>
           </div>
           <div className="device-body">
             <div className="device-code mono">{code}</div>
             <div className="warn-box">
-              Only continue if you started <span className="mono">ambb login</span> yourself just now
-              and your terminal shows exactly this code. If someone sent you this link, deny it — approving
-              gives that device access to Amber Backup as <strong>{user?.email}</strong>.
+              {t.device.review.warningBefore}
+              <span className="mono">ambb login</span>
+              {t.device.review.warningMiddle}
+              <strong>{user?.email}</strong>
+              {t.device.review.warningAfter}
             </div>
 
             <div className="integrity-facts device-facts">
               <div className="integrity-fact">
-                <div className="integrity-fact-label">Device</div>
+                <div className="integrity-fact-label">{t.device.review.device}</div>
                 <div className="integrity-fact-value">{phase.request.clientName}</div>
               </div>
               <div className="integrity-fact">
-                <div className="integrity-fact-label">Requested from</div>
-                <div className="integrity-fact-value mono">{phase.request.requestIp ?? 'unknown'}</div>
+                <div className="integrity-fact-label">{t.device.review.requestedFrom}</div>
+                <div className="integrity-fact-value mono">{phase.request.requestIp ?? t.device.review.unknown}</div>
                 <div className="integrity-fact-sub device-ua">{phase.request.requestUserAgent ?? ''}</div>
               </div>
               <div className="integrity-fact">
-                <div className="integrity-fact-label">Requested</div>
+                <div className="integrity-fact-label">{t.device.review.requested}</div>
                 <div className="integrity-fact-value">{fmtRelative(phase.request.createdAt)}</div>
-                <div className="integrity-fact-sub">{`Expires ${fmtDateTime(phase.request.expiresAt)}`}</div>
+                <div className="integrity-fact-sub">{t.device.review.expires(fmtDateTime(phase.request.expiresAt))}</div>
               </div>
             </div>
 
             <Field
-              label="Access"
-              help={
-                access === 'read'
-                  ? 'The device can list and inspect, but not run jobs or change anything.'
-                  : 'The device can do everything your account can, except administration.'
-              }
+              label={t.device.review.access}
+              help={access === 'read' ? t.device.review.readHelp : t.device.review.fullHelp}
             >
               <select value={access} onChange={(e) => setAccess(e.target.value as 'read' | 'full')}>
-                <option value="read">Read-only</option>
-                <option value="full">Full access</option>
+                <option value="read">{t.device.review.readOnly}</option>
+                <option value="full">{t.device.review.fullAccess}</option>
               </select>
             </Field>
-            <Field label="Key expires after" help="The device has to sign in again afterwards.">
+            <Field label={t.device.review.expiresAfter} help={t.device.review.expiresAfterHelp}>
               <select value={expiry} onChange={(e) => setExpiry(e.target.value)}>
                 {EXPIRY_OPTIONS.map((o) => (
                   <option key={o.label} value={o.value}>
-                    {o.label}
+                    {t.device.review[o.label]}
                   </option>
                 ))}
               </select>
@@ -198,14 +198,14 @@ export function DeviceLogin() {
 
             <div className="device-actions">
               <BusyButton className="btn btn-ghost" onClick={() => decide(false, phase.request.clientName)}>
-                Deny
+                {t.device.review.deny}
               </BusyButton>
               <BusyButton
                 className="btn btn-primary"
-                busyLabel="Approving…"
+                busyLabel={t.device.review.approving}
                 onClick={() => decide(true, phase.request.clientName)}
               >
-                Approve
+                {t.device.review.approve}
               </BusyButton>
             </div>
           </div>
@@ -227,13 +227,13 @@ export function DeviceLogin() {
             <div className="row-main">
               <div className="row-title">
                 {phase.kind === 'approved'
-                  ? `${phase.clientName} is signed in`
-                  : `Sign-in of ${phase.clientName} denied`}
+                  ? t.device.result.approvedTitle(phase.clientName)
+                  : t.device.result.deniedTitle(phase.clientName)}
               </div>
               <div className="row-sub">
                 {phase.kind === 'approved'
-                  ? 'The CLI finishes on its own within a few seconds. You can close this tab. The key is listed under Settings → API keys, where you can revoke it.'
-                  : 'The CLI stops waiting. No key was issued.'}
+                  ? t.device.result.approvedHelp
+                  : t.device.result.deniedHelp}
               </div>
             </div>
           </div>

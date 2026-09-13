@@ -4,6 +4,8 @@ import { fmtDateTime, fmtRelative } from '../core/format';
 import { useModal, ModalFrame } from '../ui/modal';
 import { PageHeader, Loading, Empty } from '../ui/primitives';
 import { useAsync } from '../hooks/useAsync';
+import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 
 interface AuditEntry {
   id: string;
@@ -33,6 +35,7 @@ interface AuditPage {
 
 /** Admin-only audit log: paginated table, click a row for full details. */
 export function AuditLog() {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -65,14 +68,14 @@ export function AuditLog() {
   return (
     <div>
       <PageHeader
-        title="Audit Log"
-        subtitle="Writes and operations by users, admins, and API keys"
+        title={t.audit.title}
+        subtitle={t.audit.subtitle}
       />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
         <input
           className="input"
           type="search"
-          placeholder="Search action, actor, path…"
+          placeholder={t.audit.searchPlaceholder}
           style={{ maxWidth: 280, flex: 1 }}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -86,28 +89,28 @@ export function AuditLog() {
             setPage(1);
           }}
         >
-          <option value="">All outcomes</option>
-          <option value="success">Success</option>
-          <option value="failure">Failure</option>
+          <option value="">{t.audit.allOutcomes}</option>
+          <option value="success">{t.audit.outcomes.success}</option>
+          <option value="failure">{t.audit.outcomes.failure}</option>
         </select>
       </div>
       <div>
         <div className="panel">
           {loading ? (
-            <Loading label="Loading…" />
+            <Loading label={t.common.loading} />
           ) : error || !data ? (
-            <Empty>Failed to load the audit log.</Empty>
+            <Empty>{t.audit.loadFailed}</Empty>
           ) : (
             <>
               <div className="table-head audit-grid">
-                <span>Time</span>
-                <span className="audit-hide-mobile">Actor</span>
-                <span>Action</span>
-                <span className="audit-hide-mobile">Resource</span>
-                <span>Status</span>
+                <span>{t.audit.columns.time}</span>
+                <span className="audit-hide-mobile">{t.audit.columns.actor}</span>
+                <span>{t.audit.columns.action}</span>
+                <span className="audit-hide-mobile">{t.audit.columns.resource}</span>
+                <span>{t.audit.columns.status}</span>
               </div>
               {data.items.length === 0 ? (
-                <div className="empty">No audit entries match.</div>
+                <div className="empty">{t.audit.noMatches}</div>
               ) : (
                 data.items.map((e) => (
                   <AuditRow key={e.id} entry={e} onOpen={openDetail} />
@@ -125,6 +128,7 @@ export function AuditLog() {
 }
 
 function Pager({ data, onPage }: { data: AuditPage; onPage: (p: number) => void }) {
+  const t = useT();
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
   const from = data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1;
   const to = Math.min(data.page * data.pageSize, data.total);
@@ -141,7 +145,7 @@ function Pager({ data, onPage }: { data: AuditPage; onPage: (p: number) => void 
       }}
     >
       <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
-        {data.total === 0 ? 'No entries' : `${from}–${to} of ${data.total}`}
+        {data.total === 0 ? t.audit.noEntries : t.audit.range(from, to, data.total)}
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
@@ -151,10 +155,10 @@ function Pager({ data, onPage }: { data: AuditPage; onPage: (p: number) => void 
             if (data.page > 1) onPage(data.page - 1);
           }}
         >
-          ‹ Prev
+          {t.audit.prev}
         </button>
         <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>
-          {`Page ${data.page} / ${totalPages}`}
+          {t.audit.pageOf(data.page, totalPages)}
         </span>
         <button
           className="btn btn-ghost btn-sm"
@@ -163,7 +167,7 @@ function Pager({ data, onPage }: { data: AuditPage; onPage: (p: number) => void 
             if (data.page < totalPages) onPage(data.page + 1);
           }}
         >
-          Next ›
+          {t.audit.next}
         </button>
       </div>
     </div>
@@ -177,11 +181,12 @@ function AuditRow({
   entry: AuditEntry;
   onOpen: (e: AuditEntry) => void;
 }) {
+  const t = useT();
   return (
     <div
       className="row audit-grid"
       style={{ cursor: 'pointer' }}
-      title="Click for details"
+      title={t.audit.clickForDetails}
       onClick={() => onOpen(e)}
     >
       <div style={{ minWidth: 0 }}>
@@ -190,7 +195,7 @@ function AuditRow({
       </div>
       <div className="audit-hide-mobile" style={{ minWidth: 0 }}>
         <div className="row-title">{e.actor_email ?? '—'}</div>
-        <div className="row-sub">{actorKind(e)}</div>
+        <div className="row-sub">{actorKind(e, t)}</div>
       </div>
       <div className="row-title" style={{ whiteSpace: 'normal' }}>
         {e.action}
@@ -209,19 +214,19 @@ function AuditRow({
           ? `${e.resource_type}${e.resource_id ? ` · ${short(e.resource_id)}` : ''}`
           : '—'}
       </div>
-      {outcomeBadge(e)}
+      {outcomeBadge(e, t)}
     </div>
   );
 }
 
-function actorKind(e: AuditEntry): string {
-  if (e.actor_type === 'apikey') return 'API key';
-  return e.actor_is_admin ? 'Administrator' : 'User';
+function actorKind(e: AuditEntry, t: Messages): string {
+  if (e.actor_type === 'apikey') return t.audit.apiKey;
+  return e.actor_is_admin ? t.common.administrator : t.common.user;
 }
 
-function outcomeBadge(e: AuditEntry) {
+function outcomeBadge(e: AuditEntry, t: Messages) {
   const cls = e.outcome === 'failure' ? 'danger' : 'success';
-  const label = e.status_code ? String(e.status_code) : e.outcome;
+  const label = e.status_code ? String(e.status_code) : (t.audit.outcomes[e.outcome] ?? e.outcome);
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
@@ -230,18 +235,23 @@ function short(id: string): string {
 }
 
 function AuditDetail({ entry: e, onClose }: { entry: AuditEntry; onClose: () => void }) {
+  const t = useT();
+  const d = t.audit.detail;
   const rows = [
-    def('Time', fmtDateTime(e.created_at)),
-    def('Action', e.action),
-    def('Outcome', e.outcome + (e.status_code ? ` (${e.status_code})` : '')),
-    def('Actor', e.actor_email ?? '—'),
-    def('Actor type', actorKind(e)),
-    e.method || e.path ? def('Request', `${e.method ?? ''} ${e.path ?? ''}`.trim()) : null,
+    def(d.time, fmtDateTime(e.created_at)),
+    def(d.action, e.action),
+    def(
+      d.outcome,
+      (t.audit.outcomes[e.outcome] ?? e.outcome) + (e.status_code ? ` (${e.status_code})` : ''),
+    ),
+    def(d.actor, e.actor_email ?? '—'),
+    def(d.actorType, actorKind(e, t)),
+    e.method || e.path ? def(d.request, `${e.method ?? ''} ${e.path ?? ''}`.trim()) : null,
     e.resource_type
-      ? def('Resource', `${e.resource_type}${e.resource_id ? ` · ${e.resource_id}` : ''}`)
+      ? def(d.resource, `${e.resource_type}${e.resource_id ? ` · ${e.resource_id}` : ''}`)
       : null,
-    e.ip ? def('IP address', e.ip) : null,
-    e.user_agent ? def('User agent', e.user_agent) : null,
+    e.ip ? def(d.ip, e.ip) : null,
+    e.user_agent ? def(d.userAgent, e.user_agent) : null,
   ].filter(Boolean);
 
   const hasDetails = e.details && Object.keys(e.details).length > 0;
@@ -253,7 +263,7 @@ function AuditDetail({ entry: e, onClose }: { entry: AuditEntry; onClose: () => 
       onClose={onClose}
       footer={
         <button className="btn btn-ghost" onClick={onClose}>
-          Close
+          {t.common.close}
         </button>
       }
     >
@@ -268,7 +278,7 @@ function AuditDetail({ entry: e, onClose }: { entry: AuditEntry; onClose: () => 
               marginTop: 6,
             }}
           >
-            Details
+            {d.details}
           </div>
           <pre
             className="mono"

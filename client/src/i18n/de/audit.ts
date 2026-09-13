@@ -1,0 +1,37 @@
+import type { AuditMessages } from '../en/audit';
+
+export const audit: AuditMessages = {
+  title: 'Audit-Log',
+  subtitle: 'Schreibzugriffe und Vorgänge von Benutzern, Administratoren und API-Schlüsseln',
+  searchPlaceholder: 'Aktion, Akteur, Pfad suchen…',
+  allOutcomes: 'Alle Ergebnisse',
+  outcomes: { success: 'erfolgreich', failure: 'fehlgeschlagen' },
+  loadFailed: 'Das Audit-Log konnte nicht geladen werden.',
+  columns: {
+    time: 'Zeitpunkt',
+    actor: 'Akteur',
+    action: 'Aktion',
+    resource: 'Ressource',
+    status: 'Status',
+  },
+  noMatches: 'Keine passenden Audit-Einträge.',
+  noEntries: 'Keine Einträge',
+  range: (from: number, to: number, total: number) => `${from}–${to} von ${total}`,
+  prev: '‹ Zurück',
+  next: 'Weiter ›',
+  pageOf: (page: number, total: number) => `Seite ${page} / ${total}`,
+  clickForDetails: 'Für Details klicken',
+  apiKey: 'API-Schlüssel',
+  detail: {
+    time: 'Zeitpunkt',
+    action: 'Aktion',
+    outcome: 'Ergebnis',
+    actor: 'Akteur',
+    actorType: 'Akteurtyp',
+    request: 'Anfrage',
+    resource: 'Ressource',
+    ip: 'IP-Adresse',
+    userAgent: 'User-Agent',
+    details: 'Details',
+  },
+};

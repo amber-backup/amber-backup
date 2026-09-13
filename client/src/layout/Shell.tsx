@@ -3,26 +3,28 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { Icon, BRAND_MARK_SRC } from '../core/icons';
 import { useAuth } from '../core/auth';
 import { useUpdateCheck } from '../hooks/useUpdateCheck';
+import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 
 interface NavEntry {
   path: string;
-  label: string;
+  label: (t: Messages) => string;
   iconName: string;
   adminOnly?: boolean;
 }
 
 const NAV: NavEntry[] = [
-  { path: '/', label: 'Overview', iconName: 'dashboard' },
-  { path: '/agents', label: 'Agents', iconName: 'agent', adminOnly: true },
-  { path: '/targets', label: 'Targets', iconName: 'target' },
-  { path: '/jobs', label: 'Jobs', iconName: 'job' },
-  { path: '/snapshots', label: 'Snapshots', iconName: 'snapshot' },
-  { path: '/notifications', label: 'Notifications', iconName: 'bell', adminOnly: true },
-  { path: '/reports', label: 'Reports', iconName: 'chart', adminOnly: true },
-  { path: '/users', label: 'Users', iconName: 'users', adminOnly: true },
-  { path: '/admin', label: 'Admin', iconName: 'shield', adminOnly: true },
-  { path: '/audit', label: 'Audit Log', iconName: 'clock', adminOnly: true },
-  { path: '/settings', label: 'Settings', iconName: 'settings' },
+  { path: '/', label: (t) => t.common.nav.overview, iconName: 'dashboard' },
+  { path: '/agents', label: (t) => t.common.nav.agents, iconName: 'agent', adminOnly: true },
+  { path: '/targets', label: (t) => t.common.nav.targets, iconName: 'target' },
+  { path: '/jobs', label: (t) => t.common.nav.jobs, iconName: 'job' },
+  { path: '/snapshots', label: (t) => t.common.nav.snapshots, iconName: 'snapshot' },
+  { path: '/notifications', label: (t) => t.common.nav.notifications, iconName: 'bell', adminOnly: true },
+  { path: '/reports', label: (t) => t.common.nav.reports, iconName: 'chart', adminOnly: true },
+  { path: '/users', label: (t) => t.common.nav.users, iconName: 'users', adminOnly: true },
+  { path: '/admin', label: (t) => t.common.nav.admin, iconName: 'shield', adminOnly: true },
+  { path: '/audit', label: (t) => t.common.nav.audit, iconName: 'clock', adminOnly: true },
+  { path: '/settings', label: (t) => t.common.nav.settings, iconName: 'settings' },
 ];
 
 function BrandMark() {
@@ -41,6 +43,7 @@ export function Shell() {
   const { user, isAdmin, logout } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const update = useUpdateCheck();
+  const t = useT();
   const closeNav = () => setNavOpen(false);
 
   const navItems = NAV.filter((n) => !n.adminOnly || isAdmin).map((n) => (
@@ -52,7 +55,7 @@ export function Shell() {
       onClick={closeNav}
     >
       <Icon name={n.iconName} />
-      {n.label}
+      {n.label(t)}
     </NavLink>
   ));
 
@@ -61,7 +64,7 @@ export function Shell() {
       <header className="mobile-topbar">
         <button
           className="btn-icon hamburger"
-          aria-label="Toggle navigation"
+          aria-label={t.common.nav.toggleNavigation}
           onClick={() => setNavOpen((o) => !o)}
         >
           <Icon name="menu" />
@@ -79,16 +82,16 @@ export function Shell() {
         </div>
         {navItems}
         <div className="sidebar-footer">
-          <div className="nav-label">Signed in as</div>
+          <div className="nav-label">{t.common.nav.signedInAs}</div>
           <div className="user-switch">
             <span className="user-dot" />
             <div className="user-meta">
               <div className="user-name">{user?.display_name ?? ''}</div>
-              <div className="user-sub">{isAdmin ? 'Administrator' : 'User'}</div>
+              <div className="user-sub">{isAdmin ? t.common.administrator : t.common.user}</div>
             </div>
             <button
               className="btn-icon"
-              title="Sign out"
+              title={t.common.nav.signOut}
               onClick={() => {
                 void logout();
               }}
@@ -104,8 +107,8 @@ export function Shell() {
                 href={update.releaseUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={`Version ${update.version} available`}
-                aria-label={`Version ${update.version} available`}
+                title={t.common.nav.versionAvailable(update.version)}
+                aria-label={t.common.nav.versionAvailable(update.version)}
               >
                 <Icon name="upgrade" />
               </a>

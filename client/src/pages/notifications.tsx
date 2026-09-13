@@ -5,8 +5,10 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { useT } from '../i18n';
 
 export function Notifications() {
+  const t = useT();
   const { data, loading, reload } = useAsync(() =>
     Promise.all([
       api.get<NotificationChannel[]>('/notification-channels'),
@@ -15,7 +17,7 @@ export function Notifications() {
   );
   const { open } = useModal();
 
-  if (loading || !data) return <Loading label="Loading…" />;
+  if (loading || !data) return <Loading label={t.common.loading} />;
   const [channels, providers] = data;
 
   const newChannel = () =>
@@ -24,19 +26,16 @@ export function Notifications() {
   return (
     <div>
       <PageHeader
-        title="Notifications"
-        subtitle={`${channels.length} channels · alert on job success or failure`}
-        actions={<ActionButton label="New channel" icon="plus" variant="primary" onClick={newChannel} />}
+        title={t.notifications.title}
+        subtitle={t.notifications.subtitle(channels.length)}
+        actions={<ActionButton label={t.notifications.newChannel} icon="plus" variant="primary" onClick={newChannel} />}
       />
       <div className="panel">
         <div className="panel-head">
-          <h2>Channels</h2>
+          <h2>{t.notifications.channels}</h2>
         </div>
         {channels.length === 0 ? (
-          <Empty>
-            No channels yet. Add email, Slack, Discord, Telegram, Teams, Gotify or a webhook — then attach
-            them to jobs.
-          </Empty>
+          <Empty>{t.notifications.empty}</Empty>
         ) : (
           channels.map((c) => (
             <ChannelRow key={c.id} channel={c} providers={providers} reload={reload} />
@@ -56,6 +55,7 @@ function ChannelRow({
   providers: ChannelDef[];
   reload: () => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const { open, confirmDialog } = useModal();
   const provider = providers.find((p) => p.type === c.type);
@@ -69,14 +69,14 @@ function ChannelRow({
       <div className="row-main">
         <div className="row-title">{c.name}</div>
         <div className="row-sub">
-          {`${provider?.label ?? c.type}${c.enabled ? '' : ' · disabled'}`}
+          {`${provider?.label ?? c.type}${c.enabled ? '' : ` · ${t.notifications.disabled}`}`}
         </div>
       </div>
       <div className="row-actions">
         <BusyButton
           className="btn btn-ghost btn-sm"
-          title="Send a test notification"
-          busyLabel="Testing…"
+          title={t.notifications.sendTest}
+          busyLabel={t.notifications.testing}
           onClick={async () => {
             try {
               const res = await api.post<{ ok: boolean; message: string }>(
@@ -84,11 +84,11 @@ function ChannelRow({
               );
               toast(res.message, res.ok ? 'success' : 'error');
             } catch (err) {
-              toast(err instanceof Error ? err.message : 'Test failed', 'error');
+              toast(err instanceof Error ? err.message : t.notifications.testFailed, 'error');
             }
           }}
         >
-          Test
+          {t.notifications.test}
         </BusyButton>
         <button
           className="btn btn-ghost btn-sm"
@@ -104,11 +104,11 @@ function ChannelRow({
           className="btn btn-ghost btn-sm"
           onClick={() =>
             confirmDialog(
-              'Delete channel',
-              `"${c.name}" will be removed and detached from all jobs.`,
+              t.notifications.deleteTitle,
+              t.notifications.deleteConfirm(c.name),
               async () => {
                 await api.del(`/notification-channels/${c.id}`);
-                toast('Channel deleted', 'success');
+                toast(t.notifications.deleted, 'success');
                 reload();
               },
               true,
@@ -133,6 +133,7 @@ function ChannelFieldInput({
   onChange: (v: string) => void;
   isEdit: boolean;
 }) {
+  const t = useT();
   if (f.type === 'textarea') {
     return (
       <textarea
@@ -155,7 +156,7 @@ function ChannelFieldInput({
     );
   }
   // Secret fields are never sent back to the client; show a placeholder on edit.
-  const placeholder = f.secret && isEdit ? '(leave unchanged)' : f.placeholder ?? '';
+  const placeholder = f.secret && isEdit ? t.notifications.editor.leaveUnchanged : f.placeholder ?? '';
   return (
     <input
       name={f.name}
@@ -178,6 +179,7 @@ function ChannelEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const isEdit = !!channel;
 
@@ -219,26 +221,26 @@ function ChannelEditor({
           enabled,
         });
       }
-      toast('Channel saved', 'success');
+      toast(t.notifications.editor.saved, 'success');
       onSaved();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Save failed', 'error');
+      toast(err instanceof Error ? err.message : t.notifications.editor.saveFailed, 'error');
       return false;
     }
   };
 
   return (
     <FormModal
-      title={isEdit ? 'Edit channel' : 'New channel'}
-      confirmLabel={isEdit ? 'Save' : 'Create'}
+      title={isEdit ? t.notifications.editor.editTitle : t.notifications.editor.newTitle}
+      confirmLabel={isEdit ? t.common.save : t.notifications.editor.create}
       onClose={onClose}
       onSubmit={submit}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Name">
-          <input type="text" value={name} placeholder="e.g. Ops Slack" onChange={(e) => setName(e.target.value)} />
+        <Field label={t.notifications.editor.name}>
+          <input type="text" value={name} placeholder={t.notifications.editor.namePlaceholder} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Provider">
+        <Field label={t.notifications.editor.provider}>
           <select name="__type" disabled={isEdit} value={type} onChange={(e) => setType(e.target.value)}>
             {providers.map((p) => (
               <option key={p.type} value={p.type}>
@@ -261,7 +263,7 @@ function ChannelEditor({
         </div>
         <label className="checkbox">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Channel enabled
+          {t.notifications.editor.enabled}
         </label>
       </div>
     </FormModal>
