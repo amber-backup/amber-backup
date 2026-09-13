@@ -97,17 +97,28 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Amber Backup API')
-    .setDescription('Central management of Restic backups')
-    .setVersion('0.1.0')
-    .addBearerAuth()
-    .build();
-  SwaggerModule.setup(
-    'api/explorer',
-    app,
-    SwaggerModule.createDocument(app, swaggerConfig),
-  );
+  // The Swagger UI and JSON are unauthenticated (they sit outside the Nest
+  // guards), so exposing them in production discloses the full API surface.
+  // Register them only outside production; opt back in with SWAGGER_ENABLED=true.
+  const swaggerEnabled =
+    process.env.SWAGGER_ENABLED !== undefined
+      ? ['1', 'true', 'yes', 'on'].includes(
+          process.env.SWAGGER_ENABLED.toLowerCase(),
+        )
+      : config.nodeEnv !== 'production';
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Amber Backup API')
+      .setDescription('Central management of Restic backups')
+      .setVersion('0.1.0')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup(
+      'api/explorer',
+      app,
+      SwaggerModule.createDocument(app, swaggerConfig),
+    );
+  }
 
   // Gracefully close the HTTP server, DB pool and in-flight runs on SIGTERM/
   // SIGINT. Without an explicit handler, Node as PID 1 in a container ignores
