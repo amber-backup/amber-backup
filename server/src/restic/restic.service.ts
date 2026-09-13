@@ -6,6 +6,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { loadConfig } from '../config/configuration';
 import { substituteCredentialPaths } from '../targets/backend-registry';
+import { sanitizedChildEnv } from '../common/child-env';
 import { RunStats, ResticOptions } from '../database/database.types';
 import {
   BackupResult,
@@ -63,7 +64,7 @@ export class ResticService {
   ): Promise<RunOutcome> {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-restic-'));
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...sanitizedChildEnv(),
       RESTIC_REPOSITORY: ctx.repository,
       RESTIC_PASSWORD: ctx.password,
       RESTIC_CACHE_DIR: this.cacheDir,
@@ -459,7 +460,7 @@ export class ResticService {
 
   async version(): Promise<string> {
     try {
-      const res = await this.spawn(['version'], process.env, {});
+      const res = await this.spawn(['version'], sanitizedChildEnv(), {});
       const match = res.stdout.match(/restic\s+([\d.]+)/);
       return match ? match[1] : res.stdout.trim();
     } catch {
