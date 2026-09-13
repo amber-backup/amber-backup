@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -9,7 +10,9 @@ import {
   IsOptional,
   IsString,
   Length,
+  Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 export class LoginDto {
@@ -132,16 +135,29 @@ export class UpdateUserDto {
 
 export class CreateGrantDto {
   @ApiProperty({ enum: ['target', 'source', 'job'] })
-  @IsString()
+  @IsIn(['target', 'source', 'job'])
   resourceType!: 'target' | 'source' | 'job';
 
   @ApiProperty()
   @IsString()
+  @Length(1, 200)
   resourceId!: string;
 
   @ApiProperty({ enum: ['view', 'operate', 'manage'] })
-  @IsString()
+  @IsIn(['view', 'operate', 'manage'])
   accessLevel!: 'view' | 'operate' | 'manage';
+}
+
+/** One resource an API key is restricted to. */
+export class ApiKeyScopeResourceDto {
+  @ApiProperty({ enum: ['target', 'source', 'job'] })
+  @IsIn(['target', 'source', 'job'])
+  type!: 'target' | 'source' | 'job';
+
+  @ApiProperty()
+  @IsString()
+  @Length(1, 200)
+  id!: string;
 }
 
 export class ApiKeyScopeDto {
@@ -150,23 +166,29 @@ export class ApiKeyScopeDto {
   @IsString({ each: true })
   actions!: string[];
 
-  @ApiPropertyOptional({ type: [Object] })
+  @ApiPropertyOptional({ type: [ApiKeyScopeResourceDto] })
   @IsOptional()
   @IsArray()
-  resources?: { type: 'target' | 'source' | 'job'; id: string }[];
+  @ValidateNested({ each: true })
+  @Type(() => ApiKeyScopeResourceDto)
+  resources?: ApiKeyScopeResourceDto[];
 }
 
 export class CreateApiKeyDto {
   @ApiProperty()
   @IsString()
+  @Length(1, 200)
   name!: string;
 
   @ApiPropertyOptional({ type: ApiKeyScopeDto })
   @IsOptional()
+  @ValidateNested()
+  @Type(() => ApiKeyScopeDto)
   scopes?: ApiKeyScopeDto;
 
   @ApiPropertyOptional({ description: 'Days until expiry; omit = never' })
   @IsOptional()
   @IsInt()
+  @Min(1)
   expiresInDays?: number;
 }
