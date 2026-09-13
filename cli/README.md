@@ -34,10 +34,48 @@ go build -o bin/ambb .
 
 The binary is self-contained (standard library only).
 
+## Login
+
+```bash
+ambb login amber.example.com     # https:// is assumed
+ambb job list                    # uses the saved login
+ambb logout                      # revokes the key and forgets it
+```
+
+`login` pairs this device with your account without copying an API key by hand
+(OAuth device flow, RFC 8628): it prints a link and a code such as `BCDF-GHJK`
+and opens the link in your browser if a desktop is available. Sign in there,
+check that the page shows the same code and approve the request — choosing
+**read-only** (default) or **full** access and when the key expires. The CLI
+then receives a newly issued API key (named `CLI: <hostname>`, listed and
+revocable under *Settings → API keys*).
+
+| Flag | Effect |
+|------|--------|
+| `--name <name>` | Device name shown on the approval page (default: hostname) |
+| `--no-browser` | Only print the link |
+| `--insecure-http` | Allow login over plain HTTP to a non-local server |
+
+Security notes:
+
+- Only approve a request you started yourself and whose code matches your
+  terminal — never one from a link someone sent you.
+- The request expires after 10 minutes and yields at most one key; approval
+  requires a signed-in browser session and cannot be done with an API key.
+- Login over plain HTTP is refused unless the server is on this machine or
+  `--insecure-http` is given.
+- Credentials are stored per server in `credentials.json` under the user config
+  directory (`~/.config/ambb` on Linux; override with `AMBB_CONFIG_DIR`), with
+  owner-only permissions (`0600`). A file readable by others is refused. A saved
+  key is only ever sent to the server it was issued by.
+- `logout` revokes the key on the server before deleting it locally; if the
+  server cannot be reached, the local copy is kept so you can retry.
+
 ## Configuration
 
 The CLI needs a server base URL and an API key (prefix `ak_`). Provide them as
-flags or environment variables — flags win.
+flags or environment variables — flags win — or use the login saved by
+`ambb login`, which applies when no API key is given.
 
 | Setting       | Flag              | Environment variable            |
 |---------------|-------------------|---------------------------------|
@@ -55,6 +93,8 @@ after the command.
 ## Commands
 
 ```text
+ambb login <server>                 Sign in this device via the browser
+ambb logout [server]                Revoke and forget the saved login
 ambb agent list                     List enrolled agents
 ambb agent inspect <id|slug>        Show a single agent
 ambb job list                       List backup jobs
@@ -66,7 +106,7 @@ ambb repo inspect <id|slug>         Show a repository (with size and snapshot co
 ambb repo use <id|slug> -- <args>   Run restic against the repository
 ambb target list                    List connections (shared backends)
 ambb target inspect <id|slug>       Show a single target
-ambb update [--check] [--force]    Install the latest release from GitHub
+ambb update [--check] [--force]     Install the latest release from GitHub
 ```
 
 Single-entity commands accept either the entity's UUID or its **slug** — a

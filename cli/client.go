@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"time"
 )
 
@@ -22,7 +23,20 @@ func NewClient(cfg *Config) *Client {
 	return &Client{
 		baseURL: cfg.URL,
 		apiKey:  cfg.APIKey,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+			// Go already drops the Authorization header on redirects to another
+			// host; also refuse a downgrade from HTTPS to plain HTTP.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return fmt.Errorf("too many redirects")
+				}
+				if via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+					return fmt.Errorf("refusing redirect from HTTPS to %s", req.URL.Redacted())
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -55,7 +69,10 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	req.Header.Set("User-Agent", fmt.Sprintf("ambb/%s (%s/%s)", Version, runtime.GOOS, runtime.GOARCH))
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

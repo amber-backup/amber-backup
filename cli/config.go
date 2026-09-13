@@ -33,6 +33,11 @@ type CommandFlags struct {
 	// Check and Force belong to 'update'.
 	Check bool
 	Force bool
+
+	// Name, NoBrowser and InsecureHTTP belong to 'login'.
+	Name         *string
+	NoBrowser    bool
+	InsecureHTTP bool
 }
 
 // credentialsUsed reports whether any 'job credentials' flag was given.
@@ -43,6 +48,26 @@ func (f *CommandFlags) credentialsUsed() bool {
 // updateUsed reports whether any 'update' flag was given.
 func (f *CommandFlags) updateUsed() bool {
 	return f.Check || f.Force
+}
+
+// loginUsed reports whether any 'login' flag was given.
+func (f *CommandFlags) loginUsed() bool {
+	return f.Name != nil || f.NoBrowser || f.InsecureHTTP
+}
+
+// rejectFlagsExcept fails when a command flag belonging to another command
+// than `allowed` ("credentials", "update", "login" or "") was given.
+func (f *CommandFlags) rejectFlagsExcept(allowed string) error {
+	if allowed != "credentials" && f.credentialsUsed() {
+		return usageErrorf("--username/--password/--password-stdin/--clear are only valid for 'job credentials'")
+	}
+	if allowed != "update" && f.updateUsed() {
+		return usageErrorf("--check/--force are only valid for 'update'")
+	}
+	if allowed != "login" && f.loginUsed() {
+		return usageErrorf("--name/--no-browser/--insecure-http are only valid for 'login'")
+	}
+	return nil
 }
 
 // strPtr returns a pointer to v (flag values are optional by pointer).
@@ -95,12 +120,31 @@ func (c *Config) resolve() error {
 }
 
 // requireCredentials ensures the URL and API key are present before a request.
+// Without an explicit API key it falls back to the credentials saved by
+// `ambb login` — for the given server only, or for the current login when no
+// server was given — so a stored key never reaches another server.
 func (c *Config) requireCredentials() error {
+	if c.APIKey == "" {
+		store, err := loadCredentials()
+		if err != nil {
+			return err
+		}
+		if c.URL == "" {
+			c.URL = store.Current
+		}
+		if c.URL != "" {
+			if base, err := normalizeServerURL(c.URL); err == nil {
+				if login, ok := store.Servers[base]; ok {
+					c.URL, c.APIKey = base, login.APIKey
+				}
+			}
+		}
+	}
 	if c.URL == "" {
-		return fmt.Errorf("no server URL: pass --url or set AMBER_URL")
+		return fmt.Errorf("no server: run 'ambb login <server>', or pass --url or set AMBER_URL")
 	}
 	if c.APIKey == "" {
-		return fmt.Errorf("no API key: pass --api-key or set AMBER_API_KEY")
+		return fmt.Errorf("not logged in to %s: run 'ambb login %s', or pass --api-key or set AMBER_API_KEY", c.URL, c.URL)
 	}
 	return nil
 }

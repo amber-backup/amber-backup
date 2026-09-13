@@ -14,6 +14,8 @@ Usage:
   ambb [global flags] <command> <action> [id|slug]
 
 Commands:
+  login <server>                  Sign in this device via the browser (no API key needed)
+  logout [server]                 Revoke and forget the key saved by login
   agent list                      List enrolled agents (requires an admin API key)
   agent inspect <id|slug>         Show a single agent
   job list                        List backup jobs
@@ -33,6 +35,8 @@ identifier derived from the entity's name (shown in list output).
 Global flags:
   --url <url>                Server base URL         (env AMBER_URL / AMBB_URL)
   --api-key <key>            API key (ak_...)        (env AMBER_API_KEY / AMBB_API_KEY)
+                             Without either, the server and key saved by
+                             'ambb login' are used.
   --output-format <fmt>      Output format: text|json  (default text)
   -o <fmt>                   Alias for --output-format
   -h, --help                 Show this help
@@ -46,12 +50,19 @@ its own credentials, e.g. a REST server with per-repository accounts):
   --clear                    Remove the override; the connection's own
                              credentials apply again
 
+Flags for 'login' (prints a link and a code; approve the request in the web UI,
+where you also choose read-only or full access and the key's lifetime):
+  --name <name>              Device name shown for approval (default: hostname)
+  --no-browser               Only print the link, do not open a browser
+  --insecure-http            Allow login over plain HTTP to a non-local server
+
 Flags for 'update' (downloads the latest GitHub release, verifies its SHA-256
 checksum and replaces this binary in place):
   --check                    Only report whether a newer release exists
   --force                    Reinstall even if up to date (or over a dev build)
 
 Examples:
+  ambb login amber.example.com
   ambb --url http://localhost:3000 --api-key ak_xxxx agent list
   ambb agent inspect web-1
   ambb --output-format json target list
@@ -90,19 +101,13 @@ func main() {
 	}
 
 	resource := positionals[0]
-	if resource == "update" {
-		if len(positionals) > 1 {
-			fail(usageErrorf("update takes no arguments"))
-		}
-		if cfg.Flags.credentialsUsed() {
-			fail(usageErrorf("--username/--password/--password-stdin/--clear are only valid for 'job credentials'"))
-		}
-		if err := runUpdate(&cfg.Flags); err != nil {
+	switch resource {
+	case "update", "login", "logout":
+		if err := runTopLevel(cfg, resource, positionals[1:]); err != nil {
 			fail(err)
 		}
 		return
 	}
-
 	action := ""
 	id := ""
 	if len(positionals) > 1 {
@@ -126,6 +131,37 @@ func main() {
 			os.Exit(ec.code)
 		}
 		fail(err)
+	}
+}
+
+// runTopLevel runs the commands that take no resource/action pair.
+func runTopLevel(cfg *Config, command string, args []string) error {
+	allowed := ""
+	switch command {
+	case "update", "login":
+		allowed = command
+	}
+	if err := cfg.Flags.rejectFlagsExcept(allowed); err != nil {
+		return err
+	}
+	maxArgs := 1
+	if command == "update" {
+		maxArgs = 0
+	}
+	if len(args) > maxArgs {
+		return usageErrorf("too many arguments for %s", command)
+	}
+	server := ""
+	if len(args) == 1 {
+		server = args[0]
+	}
+	switch command {
+	case "update":
+		return runUpdate(&cfg.Flags)
+	case "login":
+		return runLogin(cfg, server)
+	default:
+		return runLogout(cfg, server)
 	}
 }
 
@@ -209,6 +245,16 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 			cfg.Flags.Check = true
 		case "--force":
 			cfg.Flags.Force = true
+		case "--name":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Name = strPtr(v)
+		case "--no-browser":
+			cfg.Flags.NoBrowser = true
+		case "--insecure-http":
+			cfg.Flags.InsecureHTTP = true
 		default:
 			if strings.HasPrefix(arg, "-") && arg != "-" {
 				return nil, usageErrorf("unknown flag %q", arg)
