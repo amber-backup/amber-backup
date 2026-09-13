@@ -63,24 +63,30 @@ function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => v
         <div className="empty">No backup jobs yet.</div>
       ) : (
         jobs.map((j) => (
+          // The whole row opens the job; the chevron only hints at that. Without
+          // a button inside, the row itself takes keyboard focus.
           <div
-            className="row compact"
+            className="row compact row-link"
             key={j.id}
-            style={{ cursor: 'pointer' }}
+            role="link"
+            tabIndex={0}
             title={`${j.location === 'agent' ? 'Agent' : 'Local'} · ${j.paths.join(', ')}`}
             onClick={() => onSelect(j)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(j);
+              }
+            }}
           >
             <div className="row-main">
               <div className="row-title">{j.name}</div>
               <div className="row-sub">{repoSizeLabel(j)}</div>
             </div>
             <IntegrityBadge job={j} />
-            <div className="row-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => onSelect(j)}>
-                <Icon name="snapshot" />
-                Snapshots
-              </button>
-            </div>
+            <span className="row-chevron" aria-hidden="true">
+              <Icon name="chevron-right" />
+            </span>
           </div>
         ))
       )}

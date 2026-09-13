@@ -22,6 +22,7 @@ export const ICONS: Record<string, string> = {
   check: I('<path d="M20 6L9 17l-5-5"/>', 16),
   x: I('<path d="M18 6L6 18M6 6l12 12"/>', 16),
   'arrow-left': I('<path d="M19 12H5M12 19l-7-7 7-7"/>', 16),
+  'chevron-right': I('<path d="M9 6l6 6-6 6"/>', 20),
   folder: I('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 16),
   file: I('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/>', 16),
   download: I('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>', 16),

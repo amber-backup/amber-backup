@@ -701,6 +701,29 @@ input, select, textarea {
     border-bottom: none;
 }
 
+/* A row that opens a detail view as a whole; the chevron hints at it. */
+.row-link {
+    cursor: pointer;
+}
+
+.row-link:focus-visible {
+    outline: none;
+    background: var(--bg-2);
+    box-shadow: inset 2px 0 0 var(--amber);
+}
+
+.row-chevron {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--text-3);
+    transition: color .15s ease, transform .15s ease;
+}
+
+.row-link:hover .row-chevron, .row-link:focus-visible .row-chevron {
+    color: var(--amber);
+    transform: translateX(2px);
+}
+
 /* Denser rows for the overview's run list. */
 .row.compact {
     gap: 10px;
