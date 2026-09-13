@@ -121,7 +121,11 @@ function JobRow({
       <span className={`status-dot ${j.enabled ? 'online' : 'offline'}`} />
       <div className="row-main">
         <div className="row-title">{j.name}</div>
-        <div className="row-sub">{`Agent: ${agentName} · Target: ${targetName} · Repository: ${repoName}`}</div>
+        <div className="row-sub">
+          Agent: <span style={{ color: 'var(--amber)' }}>{agentName}</span>
+          {' · '}Target: <span style={{ color: 'var(--amber)' }}>{targetName}</span>
+          {' · '}Repository: <span style={{ color: 'var(--amber)' }}>{repoName}</span>
+        </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         {j.enabled && j.next_run ? (
