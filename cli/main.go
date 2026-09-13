@@ -25,6 +25,7 @@ Commands:
   repo use <id|slug> -- <args>    Run restic against the repository (remote repos only)
   target list                     List connections (shared backends)
   target inspect <id|slug>        Show a single target
+  update                          Install the latest release from GitHub
 
 Entities can be addressed by UUID or by their slug — the lowercase kebab-case
 identifier derived from the entity's name (shown in list output).
@@ -45,6 +46,11 @@ its own credentials, e.g. a REST server with per-repository accounts):
   --clear                    Remove the override; the connection's own
                              credentials apply again
 
+Flags for 'update' (downloads the latest GitHub release, verifies its SHA-256
+checksum and replaces this binary in place):
+  --check                    Only report whether a newer release exists
+  --force                    Reinstall even if up to date (or over a dev build)
+
 Examples:
   ambb --url http://localhost:3000 --api-key ak_xxxx agent list
   ambb agent inspect web-1
@@ -53,6 +59,7 @@ Examples:
   ambb job credentials daily-backup --username repo1 --password-stdin < pw.txt
   ambb repo use offsite-s3 -- snapshots --json
   ambb repo use 7cc2... -- mount /mnt/restic
+  ambb update
 
 Everything after '--' is passed verbatim to restic (needs restic on PATH).
 `
@@ -83,6 +90,19 @@ func main() {
 	}
 
 	resource := positionals[0]
+	if resource == "update" {
+		if len(positionals) > 1 {
+			fail(usageErrorf("update takes no arguments"))
+		}
+		if cfg.Flags.credentialsUsed() {
+			fail(usageErrorf("--username/--password/--password-stdin/--clear are only valid for 'job credentials'"))
+		}
+		if err := runUpdate(&cfg.Flags); err != nil {
+			fail(err)
+		}
+		return
+	}
+
 	action := ""
 	id := ""
 	if len(positionals) > 1 {
@@ -185,6 +205,10 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 			cfg.Flags.PasswordStdin = true
 		case "--clear":
 			cfg.Flags.Clear = true
+		case "--check":
+			cfg.Flags.Check = true
+		case "--force":
+			cfg.Flags.Force = true
 		default:
 			if strings.HasPrefix(arg, "-") && arg != "-" {
 				return nil, usageErrorf("unknown flag %q", arg)

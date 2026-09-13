@@ -15,6 +15,9 @@ on:
 
 permissions:
   contents: write
+  # Signed build provenance for the archives (gh attestation verify).
+  id-token: write
+  attestations: write
 
 env:
   ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
@@ -63,6 +66,11 @@ jobs:
             fi
           done
           (cd dist && sha256sum * > checksums.txt)
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: cli/dist/ambb_*
 
       - name: Extract release notes from CHANGELOG
         run: |

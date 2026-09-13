@@ -59,7 +59,10 @@ func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	// The credential flags are parsed globally but belong to one command only.
 	isJobCredentials := (resource == "job" || resource == "jobs") &&
 		(action == "credentials" || action == "creds")
-	if cfg.Flags.used() && !isJobCredentials {
+	if cfg.Flags.updateUsed() {
+		return usageErrorf("--check/--force are only valid for 'update'")
+	}
+	if cfg.Flags.credentialsUsed() && !isJobCredentials {
 		return usageErrorf(
 			"--username/--password/--password-stdin/--clear are only valid for 'job credentials'",
 		)

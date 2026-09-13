@@ -7,7 +7,23 @@ and inspects agents, jobs, repositories and targets, and triggers jobs manually.
 
 Prebuilt binaries for Linux, macOS and Windows (amd64/arm64) are attached to
 every [GitHub Release](https://github.com/amber-backup/amber-backup/releases),
-together with a `checksums.txt`.
+together with a `checksums.txt`. Each archive also carries a signed build
+provenance attestation, verifiable with
+`gh attestation verify <archive> --repo amber-backup/amber-backup`.
+
+## Update
+
+```bash
+ambb update           # install the latest release over this binary
+ambb update --check   # only report whether a newer release exists
+```
+
+`update` downloads the archive for the current OS/architecture from the latest
+GitHub Release — over HTTPS from GitHub only — verifies its SHA-256 against the
+release's `checksums.txt`, checks that the new binary runs and reports the
+release version, and then atomically replaces the running executable. If the
+binary lives in a root-owned directory, run it with `sudo`. A development build
+(`ambb --version` shows `dev`) is only replaced with `--force`.
 
 ## Build
 
@@ -50,6 +66,7 @@ ambb repo inspect <id|slug>         Show a repository (with size and snapshot co
 ambb repo use <id|slug> -- <args>   Run restic against the repository
 ambb target list                    List connections (shared backends)
 ambb target inspect <id|slug>       Show a single target
+ambb update [--check] [--force]    Install the latest release from GitHub
 ```
 
 Single-entity commands accept either the entity's UUID or its **slug** — a

@@ -29,11 +29,20 @@ type CommandFlags struct {
 	Password      *string
 	PasswordStdin bool
 	Clear         bool
+
+	// Check and Force belong to 'update'.
+	Check bool
+	Force bool
 }
 
-// used reports whether any command flag was given.
-func (f *CommandFlags) used() bool {
+// credentialsUsed reports whether any 'job credentials' flag was given.
+func (f *CommandFlags) credentialsUsed() bool {
 	return f.Username != nil || f.Password != nil || f.PasswordStdin || f.Clear
+}
+
+// updateUsed reports whether any 'update' flag was given.
+func (f *CommandFlags) updateUsed() bool {
+	return f.Check || f.Force
 }
 
 // strPtr returns a pointer to v (flag values are optional by pointer).
