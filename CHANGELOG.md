@@ -1,3 +1,10 @@
+## [1.24.3](https://github.com/amber-backup/amber-backup/compare/v1.24.2...v1.24.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **modal:** keep dialogs open on backdrop clicks ([577d818](https://github.com/amber-backup/amber-backup/commit/577d818b62d5378e2d8debcbdbe424c575004fb5))
+
 ## [1.24.2](https://github.com/amber-backup/amber-backup/compare/v1.24.1...v1.24.2) (2026-09-12)
 
 
