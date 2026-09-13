@@ -16,6 +16,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuditModule } from './audit/audit.module';
+import { UpdatesModule } from './updates/updates.module';
 import { StaticModule } from './static.module';
 
 @Module({
@@ -40,6 +41,7 @@ import { StaticModule } from './static.module';
     ReportsModule,
     SettingsModule,
     AuditModule,
+    UpdatesModule,
     StaticModule,
   ],
 })

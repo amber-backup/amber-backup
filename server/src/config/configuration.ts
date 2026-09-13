@@ -41,6 +41,8 @@ export interface AppConfig {
   runQueueTimeoutSeconds: number;
   /** Days to keep audit log entries; <= 0 disables purging (keep forever). */
   auditRetentionDays: number;
+  /** Periodically look up the newest GitHub release for the UI upgrade hint. */
+  updateCheckEnabled: boolean;
   bootstrapAdminEmail: string;
   bootstrapAdminPassword: string;
 }
@@ -121,6 +123,7 @@ export function loadConfig(): AppConfig {
     agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
     runQueueTimeoutSeconds: int(env.RUN_QUEUE_TIMEOUT_SECONDS, 300),
     auditRetentionDays: int(env.AUDIT_RETENTION_DAYS, 90),
+    updateCheckEnabled: bool(env.UPDATE_CHECK_ENABLED, true),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
     bootstrapAdminPassword: env.BOOTSTRAP_ADMIN_PASSWORD ?? '',
   };
