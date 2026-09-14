@@ -5,6 +5,7 @@ import {
   DAMAGED_MESSAGE,
   planCheck,
   repositoryPatch,
+  versionLess,
 } from './check-runner.service';
 import { ResticService, checkArgs, isDamagedCheckOutput } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
@@ -30,6 +31,7 @@ describe('CheckRunnerService', () => {
       job?: Partial<BackupJobRow>;
       activeRun?: unknown;
       activeRestore?: unknown;
+      agent?: unknown;
       check?: jest.Mock;
       updated?: number;
     } = {},
@@ -37,13 +39,15 @@ describe('CheckRunnerService', () => {
     const insert = chain({ executeTakeFirstOrThrow: { id: 'c1' } });
     const runsSelect = chain({ executeTakeFirst: opts.activeRun });
     const restoresSelect = chain({ executeTakeFirst: opts.activeRestore });
+    const agentsSelect = chain({ executeTakeFirst: opts.agent });
     const runUpdate = chain({
       executeTakeFirst: { numUpdatedRows: BigInt(opts.updated ?? 1) },
     });
     const repoUpdate = chain({ execute: [] });
     const { db } = createDbMock({
       insertInto: insert,
-      selectFrom: (t) => (t === 'restore_runs' ? restoresSelect : runsSelect),
+      selectFrom: (t) =>
+        t === 'restore_runs' ? restoresSelect : t === 'agents' ? agentsSelect : runsSelect,
       updateTable: (t) => (t === 'repositories' ? repoUpdate : runUpdate),
     });
     const restic = {
@@ -138,6 +142,31 @@ describe('CheckRunnerService', () => {
         expect.objectContaining({ status: 'queued', started_at: null }),
       );
       expect(restic.check).not.toHaveBeenCalled();
+    });
+
+    it('refuses an agent check when the agent is too old to run it', async () => {
+      const { service, insert } = make({
+        job: { location: 'agent', agent_id: 'a1' },
+        agent: { name: 'RABE', agent_version: '1.25.1' },
+      });
+
+      await expect(service.start('j1', 'manual', 'quick')).rejects.toThrow(
+        /RABE runs version 1\.25\.1/,
+      );
+      expect(insert.values).not.toHaveBeenCalled();
+    });
+
+    it('queues an agent check for an agent that supports it', async () => {
+      const { service, insert } = make({
+        job: { location: 'agent', agent_id: 'a1' },
+        agent: { name: 'AKITA', agent_version: '1.30.0' },
+      });
+
+      await service.start('j1', 'manual', 'quick');
+
+      expect(insert.values).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'queued' }),
+      );
     });
 
     it('refuses while another activity uses the repository', async () => {
@@ -237,6 +266,15 @@ describe('planCheck', () => {
         'rotating',
       ),
     ).toEqual({ level: 'rotating', part: 1, parts: 4 });
+  });
+});
+
+describe('versionLess', () => {
+  it('compares numerically per component', () => {
+    expect(versionLess('1.25.1', '1.26.0')).toBe(true);
+    expect(versionLess('1.26.0', '1.26.0')).toBe(false);
+    expect(versionLess('1.100.0', '1.26.0')).toBe(false);
+    expect(versionLess('v2.0.0', '1.26.0')).toBe(false);
   });
 });
 

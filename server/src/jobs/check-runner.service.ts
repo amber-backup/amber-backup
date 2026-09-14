@@ -25,6 +25,9 @@ const MAX_LOG_LINES = 1000;
 /** Parts a rotating check splits the data into unless the schedule says otherwise. */
 export const DEFAULT_SUBSET_PARTS = 12;
 
+/** First agent release that announces the `check` capability. */
+export const CHECK_MIN_AGENT_VERSION = '1.26.0';
+
 /** Run error recorded when restic reports damage (details are in the log). */
 export const DAMAGED_MESSAGE =
   'Integrity errors found — the log lists the damaged data and how to repair it';
@@ -91,10 +94,11 @@ export class CheckRunnerService implements OnApplicationShutdown {
     level?: IntegrityLevel,
   ): Promise<string> {
     const job = await this.jobs.getRow(jobId);
+    const local = job.location === 'local';
+    if (!local) await this.assertAgentCanCheck(job);
     await this.assertIdle(jobId);
 
     const info = planCheck(job, level);
-    const local = job.location === 'local';
     const row = await this.db
       .insertInto('job_runs')
       .values({
@@ -133,6 +137,25 @@ export class CheckRunnerService implements OnApplicationShutdown {
     if (!run) return;
     const info = parseInfo(run.check_info);
     await this.settle(runId, info, run.repository_id, outcome);
+  }
+
+  /**
+   * Agents older than CHECK_MIN_AGENT_VERSION don't announce the `check`
+   * capability and are never handed the task, so the run would only sit in
+   * the queue until it times out. Refuse up front and name the fix instead.
+   */
+  private async assertAgentCanCheck(job: BackupJobRow): Promise<void> {
+    if (!job.agent_id) return;
+    const agent = await this.db
+      .selectFrom('agents')
+      .select(['name', 'agent_version'])
+      .where('id', '=', job.agent_id)
+      .executeTakeFirst();
+    if (agent?.agent_version && versionLess(agent.agent_version, CHECK_MIN_AGENT_VERSION)) {
+      throw new ConflictException(
+        `Agent ${agent.name} runs version ${agent.agent_version}, which cannot run integrity checks — update it to ${CHECK_MIN_AGENT_VERSION} or newer`,
+      );
+    }
   }
 
   private async assertIdle(jobId: string): Promise<void> {
@@ -241,6 +264,18 @@ function parseInfo(value: unknown): CheckInfo {
   const parsed =
     typeof value === 'string' ? (JSON.parse(value) as CheckInfo) : (value as CheckInfo | null);
   return parsed ?? { level: 'quick' };
+}
+
+/** Compares `major.minor.patch` versions (a leading `v` is ignored). */
+export function versionLess(a: string, b: string): boolean {
+  const parse = (s: string) =>
+    s.trim().replace(/^v/, '').split('.').slice(0, 3).map((p) => parseInt(p, 10) || 0);
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  }
+  return false;
 }
 
 export function parseIntegrityConfig(value: unknown): IntegrityCheckConfig {
