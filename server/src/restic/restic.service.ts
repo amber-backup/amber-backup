@@ -198,7 +198,9 @@ export class ResticService {
     ctx: ResticContext,
     filters: { host?: string; tags?: string[]; paths?: string[] } = {},
   ): Promise<ResticSnapshot[]> {
-    const args = ['snapshots', '--json'];
+    // Read-only listings skip the repository lock, so browsing keeps working
+    // while a check or prune holds the exclusive one.
+    const args = ['snapshots', '--json', '--no-lock'];
     if (filters.host) args.push('--host', filters.host);
     for (const tag of filters.tags ?? []) args.push('--tag', tag);
     for (const p of filters.paths ?? []) args.push('--path', p);
@@ -212,7 +214,7 @@ export class ResticService {
    * compressed size actually stored — the repository's real footprint.
    */
   async stats(ctx: ResticContext): Promise<ResticStats> {
-    const res = await this.run(ctx, ['stats', '--json', '--mode', 'raw-data']);
+    const res = await this.run(ctx, ['stats', '--json', '--no-lock', '--mode', 'raw-data']);
     if (res.code !== 0) throw new Error(res.stderr.trim() || 'stats failed');
     return JSON.parse(res.stdout || '{}') as ResticStats;
   }
@@ -229,7 +231,7 @@ export class ResticService {
     const target = dir && dir !== '' ? dir : '/';
     // `--` terminates option parsing so a snapshot id / path beginning with `-`
     // cannot be smuggled in as a restic flag (e.g. --password-command=…).
-    const args = ['ls', '--json', '--', snapshotId, target];
+    const args = ['ls', '--json', '--no-lock', '--', snapshotId, target];
     const entries: ResticLsEntry[] = [];
     const res = await this.run(ctx, args, {
       onStdoutLine: (line) => {
