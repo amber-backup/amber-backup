@@ -1,3 +1,11 @@
+## [1.30.1](https://github.com/amber-backup/amber-backup/compare/v1.30.0...v1.30.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **integrity:** refuse checks for agents too old to run them ([d3c9ac2](https://github.com/amber-backup/amber-backup/commit/d3c9ac23341b8f48b5955b7f6ecc5fde9f266ad8))
+* **restic:** browse snapshots while a check or prune locks the repository ([781a572](https://github.com/amber-backup/amber-backup/commit/781a572f4967c082cfd1271138f886a9ccf51150))
+
 # [1.30.0](https://github.com/amber-backup/amber-backup/compare/v1.29.0...v1.30.0) (2026-09-13)
 
 
