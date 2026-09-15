@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/amber-backup/amber-backup/compare/v1.30.1...v1.31.0) (2026-09-15)
+
+
+### Features
+
+* **cli:** list, inspect and enroll agents with an admin API key ([51e05ba](https://github.com/amber-backup/amber-backup/commit/51e05ba8be2ace69e6429598d48743d0f78d0f6a))
+
 ## [1.30.1](https://github.com/amber-backup/amber-backup/compare/v1.30.0...v1.30.1) (2026-09-14)
 
 
