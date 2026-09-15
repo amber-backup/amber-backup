@@ -17,6 +17,7 @@ import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
+import { RunRetryService } from '../jobs/run-retry.service';
 import { CheckRunnerService } from '../jobs/check-runner.service';
 import { loadConfig } from '../config/configuration';
 import {
@@ -87,6 +88,7 @@ export class AgentsService {
     private readonly repositories: RepositoriesService,
     private readonly pruneRunner: PruneRunnerService,
     private readonly checkRunner: CheckRunnerService,
+    private readonly retries: RunRetryService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -556,6 +558,13 @@ echo "Amber agent installed and started."
       .where('backup_jobs.agent_id', '=', agentId)
       .where('job_runs.kind', '=', 'backup')
       .where('job_runs.status', '=', 'queued')
+      // A retry waits out its delay before it is handed over.
+      .where((eb) =>
+        eb.or([
+          eb('job_runs.not_before', 'is', null),
+          eb('job_runs.not_before', '<=', new Date()),
+        ]),
+      )
       .execute();
 
     const tasks: AgentTask[] = [];
@@ -783,10 +792,9 @@ echo "Amber agent installed and started."
       });
     }
 
-    // Fire configured notifications for the now-terminal run (best-effort).
-    void this.notifications
-      .notifyJobRun(taskId)
-      .catch((e) => this.logger.warn(`Notify failed for run ${taskId}: ${e}`));
+    // Queue a retry of a failed run, or fire the configured notifications
+    // for the now-terminal run (best-effort).
+    void this.retries.finalize(taskId);
   }
 
   async restoreProgress(

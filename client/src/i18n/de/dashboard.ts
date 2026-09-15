@@ -20,6 +20,8 @@ export const dashboard: DashboardMessages = {
     checkDamaged: (level: string) => `${level} — Integritätsfehler gefunden`,
     checkClean: (level: string) => `${level} — keine Fehler`,
     checkStatus: (level: string, status: string) => `${level} — ${status}`,
+    retryBadge: (n: number) => `Wiederholung ${n}`,
+    retryPending: (n: number, when: string) => `Wiederholung ${n} — startet ${when}`,
     kinds: {
       backup: 'Backup',
       prune: 'Prune',

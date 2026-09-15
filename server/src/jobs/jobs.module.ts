@@ -8,6 +8,7 @@ import { JobRunnerService } from './job-runner.service';
 import { PruneRunnerService } from './prune-runner.service';
 import { CheckRunnerService } from './check-runner.service';
 import { SchedulerService } from './scheduler.service';
+import { RunRetryService } from './run-retry.service';
 
 @Module({
   imports: [TargetsModule, NotificationsModule, RepositoriesModule],
@@ -18,6 +19,7 @@ import { SchedulerService } from './scheduler.service';
     PruneRunnerService,
     CheckRunnerService,
     SchedulerService,
+    RunRetryService,
   ],
   exports: [
     JobsService,
@@ -25,6 +27,7 @@ import { SchedulerService } from './scheduler.service';
     PruneRunnerService,
     CheckRunnerService,
     SchedulerService,
+    RunRetryService,
   ],
 })
 export class JobsModule {}

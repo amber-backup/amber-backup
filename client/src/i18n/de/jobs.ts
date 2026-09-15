@@ -91,6 +91,18 @@ export const jobs: JobsMessages = {
       cronHelp: 'Minute Stunde Tag Monat Wochentag',
       custom: 'Benutzerdefinierter Zeitplan',
     },
+    retries: {
+      title: 'Wiederholungen',
+      sub: 'wenn ein Backup fehlschlägt',
+      max: 'Wiederholungen',
+      maxHelp: '0 = nicht wiederholen, höchstens 10',
+      delay: 'Wartezeit (Sekunden)',
+      delayHelp: 'Pause vor jeder Wiederholung, 10–86400',
+      summary: (n: number, delay: string) =>
+        n === 0
+          ? 'Ein fehlgeschlagenes Backup wird sofort gemeldet.'
+          : `Ein fehlgeschlagenes Backup wird bis zu ${n}-mal erneut gestartet, jeweils ${delay} nach dem Fehler. Gemeldet wird der Fehler erst, wenn keine Wiederholung mehr folgt.`,
+    },
     retention: {
       title: 'Aufbewahrung',
       sub: 'wie lange Snapshots behalten werden',

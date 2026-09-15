@@ -164,6 +164,7 @@ export class NotificationsService {
         'job_runs.kind',
         'job_runs.check_info',
         'job_runs.status',
+        'job_runs.attempt',
         'job_runs.snapshot_id',
         'job_runs.error',
         'job_runs.started_at',
@@ -200,6 +201,7 @@ export class NotificationsService {
             run.error,
             run.started_at,
             run.finished_at,
+            run.attempt,
           );
 
     await Promise.all(
@@ -278,6 +280,7 @@ export class NotificationsService {
     error: string | null,
     startedAt: Date | null,
     finishedAt: Date | null,
+    attempt = 1,
   ): NotificationMessage {
     const ok = status === 'success';
     const meta: { label: string; value: string }[] = [
@@ -294,6 +297,8 @@ export class NotificationsService {
     if (ok && snapshotId) {
       meta.push({ label: 'Snapshot', value: snapshotId.slice(0, 8) });
     }
+    // A retried backup says how many attempts it took (or were spent in vain).
+    if (attempt > 1) meta.push({ label: 'Attempts', value: String(attempt) });
     if (!ok && error) meta.push({ label: 'Error', value: error });
     return {
       status,

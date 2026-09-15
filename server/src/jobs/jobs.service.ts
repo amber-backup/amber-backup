@@ -23,6 +23,7 @@ import {
 import { uniqueSlug } from '../common/slug';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 import { IntegrityCheckConfigDto } from './dto/integrity-check.dto';
+import { DEFAULT_RETRY_DELAY_SECONDS } from './run-retry.service';
 
 @Injectable()
 export class JobsService {
@@ -268,6 +269,8 @@ export class JobsService {
           cron_expr: dto.cronExpr,
           restic_options: JSON.stringify(dto.resticOptions ?? {}),
           notify: JSON.stringify(dto.notify ?? {}),
+          retry_max: dto.retryMax ?? 0,
+          retry_delay_seconds: dto.retryDelaySeconds ?? DEFAULT_RETRY_DELAY_SECONDS,
           enabled: dto.enabled ?? true,
           owner_id: user.id,
         })
@@ -345,6 +348,9 @@ export class JobsService {
     if (dto.resticOptions !== undefined)
       jobPatch.restic_options = JSON.stringify(dto.resticOptions);
     if (dto.notify !== undefined) jobPatch.notify = JSON.stringify(dto.notify);
+    if (dto.retryMax !== undefined) jobPatch.retry_max = dto.retryMax;
+    if (dto.retryDelaySeconds !== undefined)
+      jobPatch.retry_delay_seconds = dto.retryDelaySeconds;
     if (dto.enabled !== undefined) jobPatch.enabled = dto.enabled;
 
     // Repository changes: switching the connection or editing the repo fields

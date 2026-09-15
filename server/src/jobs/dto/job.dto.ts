@@ -4,10 +4,13 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
+  Min,
   MinLength,
   ValidateIf,
 } from 'class-validator';
@@ -76,6 +79,30 @@ export class CreateJobDto {
   @IsOptional()
   @IsObject()
   notify?: JobNotifyConfig;
+
+  @ApiPropertyOptional({
+    description: 'How often a failed backup is retried (0 = never)',
+    minimum: 0,
+    maximum: 10,
+    default: 0,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  retryMax?: number;
+
+  @ApiPropertyOptional({
+    description: 'Seconds to wait before each retry',
+    minimum: 10,
+    maximum: 86400,
+    default: 300,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(86400)
+  retryDelaySeconds?: number;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
@@ -180,6 +207,28 @@ export class UpdateJobDto {
   @IsOptional()
   @IsObject()
   notify?: JobNotifyConfig;
+
+  @ApiPropertyOptional({
+    description: 'How often a failed backup is retried (0 = never)',
+    minimum: 0,
+    maximum: 10,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  retryMax?: number;
+
+  @ApiPropertyOptional({
+    description: 'Seconds to wait before each retry',
+    minimum: 10,
+    maximum: 86400,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(86400)
+  retryDelaySeconds?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

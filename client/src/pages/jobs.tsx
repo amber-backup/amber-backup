@@ -9,7 +9,7 @@ import {
   type RepositoryStats,
 } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtBytes, fmtDateTime, fmtRelative } from '../core/format';
+import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative } from '../core/format';
 import { describeCron } from '../core/cron';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
@@ -400,6 +400,11 @@ function JobEditor({
   const matchPreset = (): string => presets.find((p) => p.value === cron.trim())?.value ?? 'custom';
   const cronDesc = describeCron(cron);
 
+  // Retries of a failed backup: how many, and how long to wait before each.
+  const [retryMax, setRetryMax] = useState<string>(String(job?.retry_max ?? 0));
+  const [retryDelay, setRetryDelay] = useState<string>(String(job?.retry_delay_seconds ?? 300));
+  const retryCount = Math.max(0, Math.floor(Number(retryMax) || 0));
+
   const [keepLast, setKeepLast] = useState<string>(ret.keepLast != null ? String(ret.keepLast) : '');
   const [keepDaily, setKeepDaily] = useState<string>(ret.keepDaily != null ? String(ret.keepDaily) : '');
   const [keepWeekly, setKeepWeekly] = useState<string>(ret.keepWeekly != null ? String(ret.keepWeekly) : '');
@@ -479,6 +484,11 @@ function JobEditor({
       }
     }
 
+    const retryPayload = {
+      retryMax: retryCount,
+      retryDelaySeconds: Math.floor(Number(retryDelay) || 0),
+    };
+
     const notifyPayload = {
       channelIds: channels.filter((c) => selected.has(c.id)).map((c) => c.id),
       onSuccess,
@@ -497,6 +507,7 @@ function JobEditor({
           cronExpr: cron,
           resticOptions,
           notify: notifyPayload,
+          ...retryPayload,
           enabled,
         };
         // Secrets are never returned: only send a new repo password if set.
@@ -514,6 +525,7 @@ function JobEditor({
           cronExpr: cron,
           resticOptions,
           notify: notifyPayload,
+          ...retryPayload,
           enabled,
         };
         if (agentId) payload.agentId = agentId;
@@ -649,6 +661,25 @@ function JobEditor({
             <input type="text" value={cron} placeholder="0 3 * * *" onChange={(e) => setCron(e.target.value)} />
           </Field>
           <div className={`cron-preview${cronDesc ? '' : ' invalid'}`}>{`→ ${cronDesc ?? m.schedule.custom}`}</div>
+        </Section>
+
+        <Section title={m.retries.title} sub={m.retries.sub}>
+          <div className="field-row">
+            <Field label={m.retries.max} help={m.retries.maxHelp}>
+              <input type="number" min="0" max="10" value={retryMax} onChange={(e) => setRetryMax(e.target.value)} />
+            </Field>
+            <Field label={m.retries.delay} help={m.retries.delayHelp}>
+              <input
+                type="number"
+                min="10"
+                max="86400"
+                value={retryDelay}
+                disabled={retryCount === 0}
+                onChange={(e) => setRetryDelay(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="cron-preview">{m.retries.summary(retryCount, fmtDuration(Number(retryDelay) * 1000))}</div>
         </Section>
 
         <Section title={m.retention.title} sub={m.retention.sub}>

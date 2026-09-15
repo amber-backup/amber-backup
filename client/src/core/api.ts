@@ -169,6 +169,10 @@ export interface Job {
   cron_expr: string;
   restic_options: Record<string, unknown>;
   notify?: JobNotify;
+  /** How often a failed backup is retried (0 = never). */
+  retry_max?: number;
+  /** Wait before each retry, in seconds. */
+  retry_delay_seconds?: number;
   enabled: boolean;
   next_run?: string | null;
 }
@@ -237,6 +241,12 @@ export interface Run {
   check_info?: CheckInfo | null;
   trigger: string;
   status: string;
+  /** 1 for the first try of a backup; a retry counts on from the run it repeats. */
+  attempt?: number;
+  /** For a retry: the failed run it repeats. */
+  retry_of_run_id?: string | null;
+  /** A queued retry does not start before this time. */
+  not_before?: string | null;
   agent_id: string | null;
   started_at: string | null;
   finished_at: string | null;

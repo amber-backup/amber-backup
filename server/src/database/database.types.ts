@@ -386,6 +386,10 @@ export interface BackupJobsTable {
   restic_options: JSONColumnType<ResticOptions>;
   notify: JSONColumnType<JobNotifyConfig>;
   integrity_check: ColumnType<IntegrityCheckConfig, string | undefined, string>;
+  /** How often a failed backup is retried (0 = never). */
+  retry_max: ColumnType<number, number | undefined, number>;
+  /** Wait before each retry, in seconds. */
+  retry_delay_seconds: ColumnType<number, number | undefined, number>;
   enabled: ColumnType<boolean, boolean | undefined, boolean>;
   owner_id: string;
   created_at: CreatedAt;
@@ -462,6 +466,12 @@ export interface JobRunsTable {
   check_info: ColumnType<CheckInfo | null, string | null | undefined, string | null>;
   trigger: RunTrigger;
   status: ColumnType<RunStatus, RunStatus | undefined, RunStatus>;
+  /** 1 for the first try of a backup; a retry counts on from its predecessor. */
+  attempt: ColumnType<number, number | undefined, number>;
+  /** For a retry: the failed run it repeats. */
+  retry_of_run_id: string | null;
+  /** A queued retry does not start before this time. */
+  not_before: ColumnType<Date | null, Date | null | undefined, Date | null>;
   /** Set when dispatched to an agent; null for local runs. */
   agent_id: string | null;
   started_at: ColumnType<Date | null, Date | null, Date | null>;

@@ -2,7 +2,7 @@ import { chain, createDbMock } from '../testing/db-mock';
 import { JobRunnerService } from './job-runner.service';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { RunRetryService } from './run-retry.service';
 import { RepositoriesService } from '../repositories/repositories.service';
 import { PruneRunnerService } from './prune-runner.service';
 
@@ -10,16 +10,16 @@ describe('JobRunnerService', () => {
   function make(staleIds: string[]) {
     const update = chain({ execute: staleIds.map((id) => ({ id })) });
     const { db } = createDbMock({ updateTable: update });
-    const notifications = { notifyJobRun: jest.fn().mockResolvedValue(undefined) };
+    const retries = { finalize: jest.fn().mockResolvedValue(undefined) };
     const service = new JobRunnerService(
       db,
       {} as ResticService,
       {} as TargetsService,
-      notifications as unknown as NotificationsService,
+      retries as unknown as RunRetryService,
       {} as RepositoriesService,
       {} as PruneRunnerService,
     );
-    return { service, update, notifications };
+    return { service, update, retries, db };
   }
 
   afterEach(() => {
@@ -27,9 +27,9 @@ describe('JobRunnerService', () => {
   });
 
   describe('failStaleQueuedRuns', () => {
-    it('fails queued backups and checks older than the timeout and notifies for each', async () => {
+    it('fails queued backups and checks older than the timeout and settles each', async () => {
       process.env.RUN_QUEUE_TIMEOUT_SECONDS = '300';
-      const { service, update, notifications } = make(['r1', 'r2']);
+      const { service, update, retries } = make(['r1', 'r2']);
 
       await service.failStaleQueuedRuns();
 
@@ -46,22 +46,43 @@ describe('JobRunnerService', () => {
         expect.objectContaining({ error: expect.stringContaining('too old for integrity checks') }),
       );
       expect(update.where).toHaveBeenCalledWith('status', '=', 'queued');
-      const cutoff = update.where.mock.calls.find((c) => c[0] === 'created_at')![2] as Date;
+      // A pending retry counts from when it became due, not from when it was queued.
+      const cutoffCall = update.where.mock.calls.find((c) => c[1] === '<')!;
+      const cutoffSql = cutoffCall[0] as { toOperationNode(): { sqlFragments: string[] } };
+      expect(cutoffSql.toOperationNode().sqlFragments.join('')).toBe(
+        'coalesce(not_before, created_at)',
+      );
+      const cutoff = cutoffCall[2] as Date;
       expect(Date.now() - cutoff.getTime()).toBeGreaterThanOrEqual(300_000);
       // The stub returns the same rows for both kinds.
-      expect(notifications.notifyJobRun).toHaveBeenCalledTimes(4);
-      expect(notifications.notifyJobRun).toHaveBeenCalledWith('r1');
-      expect(notifications.notifyJobRun).toHaveBeenCalledWith('r2');
+      expect(retries.finalize).toHaveBeenCalledTimes(4);
+      expect(retries.finalize).toHaveBeenCalledWith('r1');
+      expect(retries.finalize).toHaveBeenCalledWith('r2');
     });
 
     it('does nothing when the timeout is disabled', async () => {
       process.env.RUN_QUEUE_TIMEOUT_SECONDS = '0';
-      const { service, update, notifications } = make(['r1']);
+      const { service, update, retries } = make(['r1']);
 
       await service.failStaleQueuedRuns();
 
       expect(update.execute).not.toHaveBeenCalled();
-      expect(notifications.notifyJobRun).not.toHaveBeenCalled();
+      expect(retries.finalize).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startDueRetries', () => {
+    it('claims due local retries by clearing not_before and dispatches each', async () => {
+      const { service, update } = make(['r1', 'r2']);
+      const dispatch = jest.spyOn(service, 'dispatch').mockResolvedValue(undefined);
+
+      await service.startDueRetries();
+
+      expect(update.set).toHaveBeenCalledWith({ not_before: null });
+      expect(update.where).toHaveBeenCalledWith('status', '=', 'queued');
+      expect(update.where).toHaveBeenCalledWith('not_before', '<=', expect.any(Date));
+      expect(dispatch).toHaveBeenCalledWith('r1');
+      expect(dispatch).toHaveBeenCalledWith('r2');
     });
   });
 });

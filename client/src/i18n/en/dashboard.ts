@@ -18,6 +18,8 @@ export const dashboard = {
     checkDamaged: (level: string) => `${level.toLowerCase()} — integrity errors found`,
     checkClean: (level: string) => `${level.toLowerCase()} — no errors`,
     checkStatus: (level: string, status: string) => `${level.toLowerCase()} — ${status}`,
+    retryBadge: (n: number) => `retry ${n}`,
+    retryPending: (n: number, when: string) => `retry ${n} — starts ${when}`,
     kinds: {
       backup: 'backup',
       prune: 'prune',

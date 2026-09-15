@@ -496,8 +496,13 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
 
   // For failed/queued show the reason (or plain status) instead of a snapshot id;
   // a running activity shows how long it has been going.
-  const sub =
-    r.status === 'failed' && r.error
+  // A retry still waiting out its delay says when it starts.
+  const retry = (r.attempt ?? 1) - 1;
+  const retryWaiting =
+    r.status === 'queued' && !!r.not_before && new Date(r.not_before).getTime() > Date.now();
+  const sub = retryWaiting
+    ? a.retryPending(retry, fmtRelative(r.not_before))
+    : r.status === 'failed' && r.error
       ? r.error
       : r.status === 'running' && r.started_at
         ? `${statusLabel(r.status)} · ${duration}`
@@ -522,6 +527,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
               {a.kinds[r.kind] ?? r.kind}
             </span>
           )}
+          {retry > 0 && <span className="badge muted row-kind">{a.retryBadge(retry)}</span>}
         </div>
         <div className="row-sub">{sub}</div>
       </div>

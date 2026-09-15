@@ -89,6 +89,18 @@ export const jobs = {
       cronHelp: 'minute hour day month weekday',
       custom: 'Custom schedule',
     },
+    retries: {
+      title: 'Retries',
+      sub: 'when a backup fails',
+      max: 'Retries',
+      maxHelp: '0 = do not retry, at most 10',
+      delay: 'Delay (seconds)',
+      delayHelp: 'Wait before each retry, 10–86400',
+      summary: (n: number, delay: string) =>
+        n === 0
+          ? 'A failed backup is reported right away.'
+          : `A failed backup is started again up to ${n} ${n === 1 ? 'time' : 'times'}, ${delay} after each failure. The failure is only reported once no retry follows.`,
+    },
     retention: {
       title: 'Retention',
       sub: 'how long to keep snapshots',

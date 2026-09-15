@@ -9,7 +9,7 @@ one place. Remote hosts are covered by a lightweight Go agent.
 - **Dashboard** — recent runs, upcoming schedules, agent/fleet status, activity log.
 - **Targets** — every restic backend (local, SFTP, REST, S3, B2, Azure, GCS, Swift, rclone) via a dynamic, schema-driven form, with a connection test.
 - **Sources** — local (server) or agent-bound path sets.
-- **Jobs** — cron-scheduled backups with full restic options and integrated retention (`forget`/`prune`).
+- **Jobs** — cron-scheduled backups with full restic options and integrated retention (`forget`/`prune`) and per-job automatic retries of failed backups (up to 10, with a configurable delay; the failure is only notified once no retry follows).
 - **Snapshots** — live snapshot browsing (`snapshots` + `ls`), selective or full restore in three modes (original / alternate path / download archive), dry-run and overwrite safety.
 - **Integrity checks** — `restic check` per job, by hand or on a schedule, at three levels (structure only, a rotating part of the data per run, all data); the verdict, when all data was last read back and the check history are shown on the Snapshots page, and damage triggers the job's failure notifications.
 - **Agents** — enrollment tokens + install command, poll-based task dispatch, heartbeat/offline detection, reported restic version.

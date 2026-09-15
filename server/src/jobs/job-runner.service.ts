@@ -7,13 +7,14 @@ import {
 import { Interval } from '@nestjs/schedule';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { sql } from 'kysely';
 import { Db, KYSELY } from '../database/database.module';
 import { loadConfig } from '../config/configuration';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { RepositoriesService } from '../repositories/repositories.service';
 import { PruneRunnerService } from './prune-runner.service';
+import { RunRetryService } from './run-retry.service';
 import { ResticOptions, RunStats } from '../database/database.types';
 import { sanitizedChildEnv } from '../common/child-env';
 
@@ -26,7 +27,8 @@ const SCRIPT_TIMEOUT_MS = 300_000;
  * Executes local backup runs end-to-end: backup → forget (§7) with live
  * progress written to job_runs, followed by a prune recorded as an activity of
  * its own when the retention asks for one. Agent-bound runs are left queued
- * for the agent to pick up on its next poll.
+ * for the agent to pick up on its next poll. A failed run is handed to
+ * RunRetryService, which queues a retry or notifies.
  */
 @Injectable()
 export class JobRunnerService implements OnApplicationShutdown {
@@ -42,7 +44,7 @@ export class JobRunnerService implements OnApplicationShutdown {
     @Inject(KYSELY) private readonly db: Db,
     private readonly restic: ResticService,
     private readonly targets: TargetsService,
-    private readonly notifications: NotificationsService,
+    private readonly retries: RunRetryService,
     private readonly repositories: RepositoriesService,
     private readonly pruneRunner: PruneRunnerService,
   ) {}
@@ -73,8 +75,9 @@ export class JobRunnerService implements OnApplicationShutdown {
   /**
    * Fails backup and check runs that sat in the queue for longer than the
    * configured timeout without being picked up — normally because the job's
-   * agent is offline (or, for a check, predates integrity checks). Each one is
-   * notified like any other failed run.
+   * agent is offline (or, for a check, predates integrity checks). A retry
+   * waiting for its delay counts from when it became due. Each one is settled
+   * like any other failed run (retried or notified).
    */
   @Interval(30_000)
   async failStaleQueuedRuns(): Promise<void> {
@@ -97,16 +100,36 @@ export class JobRunnerService implements OnApplicationShutdown {
         })
         .where('kind', '=', kind as keyof typeof reasons)
         .where('status', '=', 'queued')
-        .where('created_at', '<', staleBefore)
+        .where(sql<Date>`coalesce(not_before, created_at)`, '<', staleBefore)
         .returning('id')
         .execute();
       stale.push(...rows);
     }
     for (const run of stale) {
       this.logger.warn(`Run ${run.id} timed out in the queue`);
-      void this.notifications
-        .notifyJobRun(run.id)
-        .catch((e) => this.logger.warn(`Notify failed for run ${run.id}: ${e}`));
+      void this.retries.finalize(run.id);
+    }
+  }
+
+  /**
+   * Starts local retries whose delay has passed. Clearing `not_before` claims
+   * a run, so a slow tick never starts the same retry twice. Agent-bound
+   * retries need no help: the agent only claims runs that are due.
+   */
+  @Interval(5_000)
+  async startDueRetries(): Promise<void> {
+    const due = await this.db
+      .updateTable('job_runs')
+      .set({ not_before: null })
+      .where('kind', '=', 'backup')
+      .where('status', '=', 'queued')
+      .where('not_before', '<=', new Date())
+      .where('job_id', 'in', this.db.selectFrom('backup_jobs').select('id').where('location', '=', 'local'))
+      .returning('id')
+      .execute();
+    for (const run of due) {
+      this.logger.log(`Starting retry run ${run.id}`);
+      await this.dispatch(run.id);
     }
   }
 
@@ -271,10 +294,9 @@ export class JobRunnerService implements OnApplicationShutdown {
         .execute();
     } finally {
       this.running.delete(jobRunId);
-      // Fire configured notifications for the now-terminal run (best-effort).
-      void this.notifications
-        .notifyJobRun(jobRunId)
-        .catch((e) => this.logger.warn(`Notify failed for run ${jobRunId}: ${e}`));
+      // Queue a retry of a failed run, or fire the configured notifications
+      // for the now-terminal run (best-effort).
+      void this.retries.finalize(jobRunId);
     }
   }
 
