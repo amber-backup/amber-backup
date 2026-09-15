@@ -1,5 +1,6 @@
 // Command ambb is the Amber Backup CLI. It talks to the Amber Backup server's
-// REST API to list and inspect agents, jobs and targets, and to trigger jobs.
+// REST API to list and inspect agents, jobs and targets, to enroll agents and
+// to trigger jobs.
 package main
 
 import (
@@ -16,8 +17,10 @@ Usage:
 Commands:
   login <server>                  Sign in this device via the browser (no API key needed)
   logout [server]                 Revoke and forget the key saved by login
-  agent list                      List enrolled agents (requires an admin API key)
-  agent inspect <id|slug>         Show a single agent
+  agent list                      List enrolled agents (admin)
+  agent inspect <id|slug>         Show a single agent (admin)
+  agent create [name]             Create an enrollment token + install command
+                                  (admin, full-access key)
   job list                        List backup jobs
   job inspect <id|slug>           Show a single job
   job run <id|slug>               Trigger a job manually
@@ -50,6 +53,11 @@ its own credentials, e.g. a REST server with per-repository accounts):
   --clear                    Remove the override; the connection's own
                              credentials apply again
 
+Flags for 'agent create' (prints the command that installs and enrolls the
+agent on the target host; the token is single-use):
+  --method <method>          binary|docker|docker-compose  (default binary)
+  --expires <minutes>        Token lifetime, 1-10080       (default 60)
+
 Flags for 'login' (prints a link and a code; approve the request in the web UI,
 where you also choose read-only or full access and the key's lifetime):
   --name <name>              Device name shown for approval (default: hostname)
@@ -65,6 +73,7 @@ Examples:
   ambb login amber.example.com
   ambb --url http://localhost:3000 --api-key ak_xxxx agent list
   ambb agent inspect web-1
+  ambb agent create web-2 --method docker --expires 120
   ambb --output-format json target list
   ambb job run daily-backup
   ambb job credentials daily-backup --username repo1 --password-stdin < pw.txt
@@ -251,6 +260,18 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 				return nil, err
 			}
 			cfg.Flags.Name = strPtr(v)
+		case "--method":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Method = strPtr(v)
+		case "--expires":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Expires = strPtr(v)
 		case "--no-browser":
 			cfg.Flags.NoBrowser = true
 		case "--insecure-http":

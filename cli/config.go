@@ -38,6 +38,11 @@ type CommandFlags struct {
 	Name         *string
 	NoBrowser    bool
 	InsecureHTTP bool
+
+	// Method and Expires belong to 'agent create'; Expires is the raw
+	// --expires value (minutes), validated by the command.
+	Method  *string
+	Expires *string
 }
 
 // credentialsUsed reports whether any 'job credentials' flag was given.
@@ -55,8 +60,14 @@ func (f *CommandFlags) loginUsed() bool {
 	return f.Name != nil || f.NoBrowser || f.InsecureHTTP
 }
 
+// agentCreateUsed reports whether any 'agent create' flag was given.
+func (f *CommandFlags) agentCreateUsed() bool {
+	return f.Method != nil || f.Expires != nil
+}
+
 // rejectFlagsExcept fails when a command flag belonging to another command
-// than `allowed` ("credentials", "update", "login" or "") was given.
+// than `allowed` ("credentials", "agent-create", "update", "login" or "") was
+// given.
 func (f *CommandFlags) rejectFlagsExcept(allowed string) error {
 	if allowed != "credentials" && f.credentialsUsed() {
 		return usageErrorf("--username/--password/--password-stdin/--clear are only valid for 'job credentials'")
@@ -66,6 +77,9 @@ func (f *CommandFlags) rejectFlagsExcept(allowed string) error {
 	}
 	if allowed != "login" && f.loginUsed() {
 		return usageErrorf("--name/--no-browser/--insecure-http are only valid for 'login'")
+	}
+	if allowed != "agent-create" && f.agentCreateUsed() {
+		return usageErrorf("--method/--expires are only valid for 'agent create'")
 	}
 	return nil
 }

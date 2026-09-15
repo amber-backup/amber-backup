@@ -8,6 +8,14 @@ export const IS_ADMIN_KEY = 'requireAdmin';
 /** Marks a route/controller as admin-only. */
 export const RequireAdmin = () => SetMetadata(IS_ADMIN_KEY, true);
 
+export const ADMIN_API_KEY_KEY = 'adminApiKey';
+/**
+ * Opens an admin-only route to an administrator's API key (e.g. the CLI's
+ * saved login). Reads accept any key scope; state-changing requests need a
+ * full-access key (`*`). Admin routes without it stay session-only.
+ */
+export const AllowAdminApiKey = () => SetMetadata(ADMIN_API_KEY_KEY, true);
+
 export const REQUIRED_ACTION_KEY = 'requiredAction';
 /** Declares the API-key action scope a route needs (e.g. 'read','backup'). */
 export const RequireAction = (action: string) =>

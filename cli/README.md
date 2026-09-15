@@ -86,9 +86,12 @@ flags or environment variables — flags win — or use the login saved by
 Output format is `text` (default) or `json`. Global flags may appear before or
 after the command.
 
-> Agent commands (`agent list` / `agent inspect`) require an API key whose owner
-> is an administrator. Job, repository and target commands are governed by
-> per-resource grants on the key owner.
+> Agent commands require an API key whose owner is an administrator:
+> `agent list` / `agent inspect` work with any key (read-only included),
+> `agent create` needs a **full-access** key. Other admin operations (users,
+> settings, rotating or removing agents) stay limited to the web UI. Job,
+> repository and target commands are governed by per-resource grants on the
+> key owner.
 
 ## Commands
 
@@ -97,6 +100,7 @@ ambb login <server>                 Sign in this device via the browser
 ambb logout [server]                Revoke and forget the saved login
 ambb agent list                     List enrolled agents
 ambb agent inspect <id|slug>        Show a single agent
+ambb agent create [name]            Create an enrollment token + install command
 ambb job list                       List backup jobs
 ambb job inspect <id|slug>          Show a single job
 ambb job run <id|slug>              Trigger a job manually
@@ -118,6 +122,23 @@ change automatically when the entity is renamed.
 `repo inspect` reports the repository's deduplicated size and snapshot count,
 read live from restic; on an unreachable repository both are `null` and a
 `stats_error` field explains why.
+
+### `agent create` — enroll a new agent
+
+Creates a single-use enrollment token and prints the command that installs and
+enrolls the agent on the target host (to stdout, so it can be piped; the expiry
+notice goes to stderr). The optional name is suggested to the agent as its own.
+
+```bash
+ambb agent create web-2                              # binary install script
+ambb agent create web-2 --method docker --expires 120
+ambb -o json agent create                            # token, expiresAt, installCommand
+```
+
+| Flag | Effect |
+|------|--------|
+| `--method <method>` | `binary` (default), `docker` or `docker-compose` |
+| `--expires <minutes>` | Token lifetime, 1–10080 (default 60) |
 
 ### `job credentials` — per-job credential override
 

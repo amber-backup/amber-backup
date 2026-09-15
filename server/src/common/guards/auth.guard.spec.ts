@@ -6,6 +6,7 @@ import { CryptoService } from '../../crypto/crypto.service';
 import { Db } from '../../database/database.module';
 import {
   IS_ADMIN_KEY,
+  ADMIN_API_KEY_KEY,
   NO_API_KEY_KEY,
   ANY_API_KEY_SCOPE_KEY,
 } from '../decorators/public.decorator';
@@ -70,6 +71,41 @@ describe('AuthGuard — API key restrictions', () => {
 
   it('denies an API key on an admin route even for an admin user', async () => {
     const { guard, ctx } = build({ admin: true, meta: { [IS_ADMIN_KEY]: true } });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a read-only admin key to read an AllowAdminApiKey route', async () => {
+    const { guard, ctx } = build({
+      admin: true,
+      scopes: { actions: ['read'] },
+      meta: { [IS_ADMIN_KEY]: true, [ADMIN_API_KEY_KEY]: true },
+    });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+  });
+
+  it('allows a full-access admin key to mutate on an AllowAdminApiKey route', async () => {
+    const { guard, ctx } = build({
+      method: 'POST',
+      admin: true,
+      meta: { [IS_ADMIN_KEY]: true, [ADMIN_API_KEY_KEY]: true },
+    });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+  });
+
+  it('denies a scoped admin key a mutation on an AllowAdminApiKey route', async () => {
+    const { guard, ctx } = build({
+      method: 'POST',
+      admin: true,
+      scopes: { actions: ['operate'] },
+      meta: { [IS_ADMIN_KEY]: true, [ADMIN_API_KEY_KEY]: true },
+    });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('denies a non-admin key on an AllowAdminApiKey route', async () => {
+    const { guard, ctx } = build({
+      meta: { [IS_ADMIN_KEY]: true, [ADMIN_API_KEY_KEY]: true },
+    });
     await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
   });
 

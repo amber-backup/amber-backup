@@ -115,3 +115,48 @@ func TestParseArgsCollectsCredentialFlags(t *testing.T) {
 		t.Error("clear flag not set")
 	}
 }
+
+func TestEnrollmentPayloadLeavesDefaultsToServer(t *testing.T) {
+	body, err := buildEnrollmentPayload(&CommandFlags{}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(body) != 0 {
+		t.Errorf("body = %v, want empty", body)
+	}
+}
+
+func TestEnrollmentPayloadSetsNameMethodAndExpiry(t *testing.T) {
+	flags := &CommandFlags{Method: strPtr("docker"), Expires: strPtr("120")}
+
+	body, err := buildEnrollmentPayload(flags, "web-2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body["intendedAgentName"] != "web-2" || body["deployMethod"] != "docker" || body["expiresInMinutes"] != 120 {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestEnrollmentPayloadRejectsInvalidFlags(t *testing.T) {
+	for _, flags := range []*CommandFlags{
+		{Method: strPtr("podman")},
+		{Expires: strPtr("0")},
+		{Expires: strPtr("10081")},
+		{Expires: strPtr("1h")},
+	} {
+		if _, err := buildEnrollmentPayload(flags, ""); err == nil {
+			t.Errorf("expected an error for %+v", flags)
+		}
+	}
+}
+
+func TestAgentCreateFlagsRejectedElsewhere(t *testing.T) {
+	flags := &CommandFlags{Method: strPtr("docker")}
+	if err := flags.rejectFlagsExcept(""); err == nil {
+		t.Error("expected --method to be rejected outside 'agent create'")
+	}
+	if err := flags.rejectFlagsExcept("agent-create"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

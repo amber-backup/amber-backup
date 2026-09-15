@@ -14,6 +14,7 @@ import { CryptoService } from '../../crypto/crypto.service';
 import {
   IS_PUBLIC_KEY,
   IS_ADMIN_KEY,
+  ADMIN_API_KEY_KEY,
   REQUIRED_ACTION_KEY,
   NO_API_KEY_KEY,
   ANY_API_KEY_SCOPE_KEY,
@@ -68,13 +69,29 @@ export class AuthGuard implements CanActivate {
       [ctx.getHandler(), ctx.getClass()],
     );
     if (requireAdmin) {
-      // API keys never exercise administrator privileges, even for an admin
+      // API keys do not exercise administrator privileges, even for an admin
       // user: an admin's leaked read-scoped key must not manage users, settings
-      // or agents. Admin operations require an interactive session.
+      // or agents. Only routes marked @AllowAdminApiKey accept a key — reads
+      // with any scope, state changes only with a full-access key.
       if (user.authVia === 'apikey') {
-        throw new ForbiddenException(
-          'Administrator operations require an interactive session, not an API key',
+        const keyAllowed = this.reflector.getAllAndOverride<boolean>(
+          ADMIN_API_KEY_KEY,
+          [ctx.getHandler(), ctx.getClass()],
         );
+        if (!keyAllowed) {
+          throw new ForbiddenException(
+            'Administrator operations require an interactive session, not an API key',
+          );
+        }
+        const actions = user.apiKeyScopes?.actions ?? [];
+        const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(
+          req.method.toUpperCase(),
+        );
+        if (user.apiKeyScopes && mutating && !actions.includes('*')) {
+          throw new ForbiddenException(
+            'Administrator operations via an API key require a full-access key',
+          );
+        }
       }
       if (!user.isAdmin) {
         throw new ForbiddenException('Administrator access required');

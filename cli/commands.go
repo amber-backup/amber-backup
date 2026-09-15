@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -59,9 +61,13 @@ func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	// The credential flags are parsed globally but belong to one command only.
 	isJobCredentials := (resource == "job" || resource == "jobs") &&
 		(action == "credentials" || action == "creds")
+	isAgentCreate := (resource == "agent" || resource == "agents") && action == "create"
 	allowed := ""
-	if isJobCredentials {
+	switch {
+	case isJobCredentials:
 		allowed = "credentials"
+	case isAgentCreate:
+		allowed = "agent-create"
 	}
 	if err := cfg.Flags.rejectFlagsExcept(allowed); err != nil {
 		return err
@@ -74,7 +80,7 @@ func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 
 	switch resource {
 	case "agent", "agents":
-		return runResource(cfg, client, "agents", agentColumns, action, id, false)
+		return runAgent(cfg, client, action, id)
 	case "job", "jobs":
 		return runJob(cfg, client, action, id)
 	case "repo", "repos":
@@ -105,6 +111,58 @@ func runResource(cfg *Config, client *Client, path string, cols []column, action
 	default:
 		return usageErrorf("unknown action %q for %s (want: list, inspect)", action, singular(path))
 	}
+}
+
+// runAgent adds the "create" action on top of the shared list/inspect behavior.
+func runAgent(cfg *Config, client *Client, action, id string) error {
+	if action != "create" {
+		return runResource(cfg, client, "agents", agentColumns, action, id, false)
+	}
+	body, err := buildEnrollmentPayload(&cfg.Flags, id)
+	if err != nil {
+		return err
+	}
+	v, err := client.postJSON("/agents/enrollment-tokens", body)
+	if err != nil {
+		return err
+	}
+	if cfg.Format == FormatJSON {
+		return printJSON(v)
+	}
+	obj, _ := v.(map[string]any)
+	// The install command goes to stdout on its own so it can be piped or
+	// copied; the surrounding context goes to stderr.
+	fmt.Fprintf(os.Stderr, "Enrollment token created (single use, expires %s).\n", stringify(obj["expiresAt"]))
+	fmt.Fprintln(os.Stderr, "Run this on the host to install and enroll the agent:")
+	fmt.Println(stringify(obj["installCommand"]))
+	return nil
+}
+
+// agentDeployMethods are the install variants the server can render.
+var agentDeployMethods = []string{"binary", "docker", "docker-compose"}
+
+// buildEnrollmentPayload turns the optional agent name and the 'agent create'
+// flags into the POST body for a new enrollment token. Unset values are left
+// out so the server's defaults apply.
+func buildEnrollmentPayload(flags *CommandFlags, name string) (map[string]any, error) {
+	body := map[string]any{}
+	if name != "" {
+		body["intendedAgentName"] = name
+	}
+	if flags.Method != nil {
+		if !slices.Contains(agentDeployMethods, *flags.Method) {
+			return nil, usageErrorf("--method must be one of %s", strings.Join(agentDeployMethods, ", "))
+		}
+		body["deployMethod"] = *flags.Method
+	}
+	if flags.Expires != nil {
+		minutes, err := strconv.Atoi(*flags.Expires)
+		if err != nil || minutes < 1 || minutes > 10080 {
+			return nil, usageErrorf("--expires must be a number of minutes between 1 and 10080")
+		}
+		body["expiresInMinutes"] = minutes
+	}
+	return body, nil
 }
 
 // runRepo adds the "use" action (a restic wrapper) on top of the shared

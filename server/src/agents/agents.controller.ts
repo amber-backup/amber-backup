@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  AllowAdminApiKey,
   Public,
   RequireAdmin,
 } from '../common/decorators/public.decorator';
@@ -48,6 +49,7 @@ export class AgentsController {
   }
 
   @RequireAdmin()
+  @AllowAdminApiKey()
   @Get()
   @ApiOperation({ summary: 'List agents (admin)' })
   list() {
@@ -55,6 +57,7 @@ export class AgentsController {
   }
 
   @RequireAdmin()
+  @AllowAdminApiKey()
   @Post('enrollment-tokens')
   @ApiOperation({ summary: 'Create an enrollment token + install command' })
   createToken(
@@ -86,6 +89,7 @@ export class AgentsController {
   }
 
   @RequireAdmin()
+  @AllowAdminApiKey()
   @Get(':id')
   @ApiOperation({ summary: 'Get an agent by id or slug (admin)' })
   async get(@Param('id') idOrSlug: string) {
