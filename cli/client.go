@@ -152,6 +152,19 @@ func (c *Client) patchJSON(path string, body any) (any, error) {
 	return v, nil
 }
 
+// putJSON performs a PUT with a body and decodes the response.
+func (c *Client) putJSON(path string, body any) (any, error) {
+	data, err := c.do(http.MethodPut, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return v, nil
+}
+
 // postJSON performs a POST (optionally with a body) and decodes the response.
 func (c *Client) postJSON(path string, body any) (any, error) {
 	data, err := c.do(http.MethodPost, path, body)

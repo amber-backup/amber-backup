@@ -29,6 +29,7 @@ var jobColumns = []column{
 	{"NEXT RUN", "next_run"},
 	{"TARGET", "target_id"},
 	{"AGENT", "agent_id"},
+	{"CHECK", "repo_check_status"},
 }
 
 var targetColumns = []column{
@@ -62,12 +63,17 @@ func runCommand(cfg *Config, resource, action, id string, rest []string) error {
 	isJobCredentials := (resource == "job" || resource == "jobs") &&
 		(action == "credentials" || action == "creds")
 	isAgentCreate := (resource == "agent" || resource == "agents") && action == "create"
+	isJob := resource == "job" || resource == "jobs"
 	allowed := ""
 	switch {
 	case isJobCredentials:
 		allowed = "credentials"
 	case isAgentCreate:
 		allowed = "agent-create"
+	case isJob && action == "check":
+		allowed = "job-check"
+	case isJob && action == "integrity":
+		allowed = "job-integrity"
 	}
 	if err := cfg.Flags.rejectFlagsExcept(allowed); err != nil {
 		return err
@@ -272,12 +278,16 @@ func runJobCredentials(cfg *Config, client *Client, id string) error {
 	return nil
 }
 
-// runJob adds the "run" and "credentials" actions on top of the shared
-// list/inspect behavior.
+// runJob adds the "run", "credentials", "check" and "integrity" actions on top
+// of the shared list/inspect behavior.
 func runJob(cfg *Config, client *Client, action, id string) error {
 	switch action {
 	case "credentials", "creds":
 		return runJobCredentials(cfg, client, id)
+	case "check":
+		return runJobCheck(cfg, client, id)
+	case "integrity":
+		return runJobIntegrity(cfg, client, id)
 	case "run":
 		if id == "" {
 			return usageErrorf("job run requires an <id|slug>")

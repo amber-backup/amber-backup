@@ -25,6 +25,9 @@ Commands:
   job inspect <id|slug>           Show a single job
   job run <id|slug>               Trigger a job manually
   job credentials <id|slug>       Set or clear the job's credential override
+  job check <id|slug>             Start an integrity check of the job's repository
+  job integrity <id|slug>         Show the integrity status, or change the check
+                                  schedule with the flags below
   repo list                       List repositories
   repo inspect <id|slug>          Show a repository (with size and snapshot count)
   repo use <id|slug> -- <args>    Run restic against the repository (remote repos only)
@@ -53,6 +56,19 @@ its own credentials, e.g. a REST server with per-repository accounts):
   --clear                    Remove the override; the connection's own
                              credentials apply again
 
+Flags for 'job check' (verifies the job's repository with restic check):
+  --level <level>            quick|rotating|full  (default: the job's scheduled
+                             level, else quick)
+  --wait                     Wait for the check to finish; exit 1 unless it passed
+
+Flags for 'job integrity' (without flags it only shows the status; changes
+need manage access on the job):
+  --cron <expr>              Check on this cron schedule (enables it)
+  --enable                   Enable the schedule with its stored cron expression
+  --disable                  Stop scheduled checks (keeps the settings)
+  --level <level>            quick|rotating|full
+  --parts <n>                Parts a rotating check splits the data into, 2-100
+
 Flags for 'agent create' (prints the command that installs and enrolls the
 agent on the target host; the token is single-use):
   --method <method>          binary|docker|docker-compose  (default binary)
@@ -77,6 +93,8 @@ Examples:
   ambb --output-format json target list
   ambb job run daily-backup
   ambb job credentials daily-backup --username repo1 --password-stdin < pw.txt
+  ambb job check daily-backup --level full --wait
+  ambb job integrity daily-backup --cron "0 4 * * 0" --level rotating --parts 12
   ambb repo use offsite-s3 -- snapshots --json
   ambb repo use 7cc2... -- mount /mnt/restic
   ambb update
@@ -272,6 +290,30 @@ func parseArgs(args []string, cfg *Config) ([]string, error) {
 				return nil, err
 			}
 			cfg.Flags.Expires = strPtr(v)
+		case "--level":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Level = strPtr(v)
+		case "--wait":
+			cfg.Flags.Wait = true
+		case "--cron":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Cron = strPtr(v)
+		case "--enable":
+			cfg.Flags.Enable = true
+		case "--disable":
+			cfg.Flags.Disable = true
+		case "--parts":
+			v, err := next()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Flags.Parts = strPtr(v)
 		case "--no-browser":
 			cfg.Flags.NoBrowser = true
 		case "--insecure-http":

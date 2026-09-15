@@ -105,6 +105,8 @@ ambb job list                       List backup jobs
 ambb job inspect <id|slug>          Show a single job
 ambb job run <id|slug>              Trigger a job manually
 ambb job credentials <id|slug>      Set or clear the job's credential override
+ambb job check <id|slug>            Start an integrity check of the job's repository
+ambb job integrity <id|slug>        Show the integrity status / change the check schedule
 ambb repo list                      List repositories
 ambb repo inspect <id|slug>         Show a repository (with size and snapshot count)
 ambb repo use <id|slug> -- <args>   Run restic against the repository
@@ -172,6 +174,50 @@ currently that is the REST server's username and password. Requires **manage**
 access on the job. `job inspect` and `repo list` show whether an override is in
 place (`has_credential_override`), never its values. Moving a job to another
 connection drops the override, because it belonged to the old one.
+
+### `job check` / `job integrity` — repository integrity checks
+
+`job check` starts a `restic check` of the job's repository — on the server or,
+for a remote job, on its agent — and prints the run id.
+
+```bash
+ambb job check daily-backup                     # at the job's scheduled level, else quick
+ambb job check daily-backup --level full --wait # exit code 1 unless it passed
+ambb -o json job check daily-backup --wait      # final run record as JSON
+```
+
+| Level | Verifies |
+|-------|----------|
+| `quick` | Repository structure only |
+| `rotating` | Structure plus the next part of the pack data (`--read-data-subset=n/parts`); a full rotation reads everything back |
+| `full` | Structure plus all pack data (slow, reads the whole repository) |
+
+With `--wait` the CLI follows the run until it finishes and exits `0` only if
+the check passed; damage, failure (e.g. a locked repository or an agent too old
+to run checks) and cancellation exit with `1`. Short network or server outages
+while waiting are tolerated. Requires **operate** access on the job; the server
+refuses a check while a backup, prune or check of the job is in progress.
+
+`job integrity` shows the last verdict, when all data was last read back, the
+rotation progress and the schedule. Given any of the flags below it first
+changes the schedule (**manage** access), keeping every setting not named:
+
+```bash
+ambb job integrity daily-backup
+ambb job integrity daily-backup --cron "0 4 * * 0" --level rotating --parts 12
+ambb job integrity daily-backup --disable
+ambb job integrity daily-backup --enable        # back on with the stored cron
+```
+
+| Flag | Effect |
+|------|--------|
+| `--cron <expr>` | Check on this schedule (also enables it) |
+| `--enable` / `--disable` | Switch scheduled checks on or off |
+| `--level <level>` | `quick`, `rotating` or `full` (also valid for `job check`) |
+| `--parts <n>` | Parts a rotating check splits the data into, 2–100 (server default 12) |
+
+`job list` shows each repository's last verdict in the `CHECK` column
+(`passed`, `damaged`, or `-` if never checked).
 
 ### `repo use` — restic wrapper
 

@@ -43,6 +43,17 @@ type CommandFlags struct {
 	// --expires value (minutes), validated by the command.
 	Method  *string
 	Expires *string
+
+	// Level belongs to 'job check' and 'job integrity'; Wait to 'job check'.
+	Level *string
+	Wait  bool
+
+	// Cron, Enable, Disable and Parts belong to 'job integrity'; Parts is the
+	// raw --parts value, validated by the command.
+	Cron    *string
+	Enable  bool
+	Disable bool
+	Parts   *string
 }
 
 // credentialsUsed reports whether any 'job credentials' flag was given.
@@ -65,9 +76,15 @@ func (f *CommandFlags) agentCreateUsed() bool {
 	return f.Method != nil || f.Expires != nil
 }
 
+// integrityScheduleUsed reports whether any flag that changes the check
+// schedule in 'job integrity' was given (--level counts too, see Level).
+func (f *CommandFlags) integrityScheduleUsed() bool {
+	return f.Cron != nil || f.Enable || f.Disable || f.Parts != nil
+}
+
 // rejectFlagsExcept fails when a command flag belonging to another command
-// than `allowed` ("credentials", "agent-create", "update", "login" or "") was
-// given.
+// than `allowed` ("credentials", "agent-create", "job-check", "job-integrity",
+// "update", "login" or "") was given.
 func (f *CommandFlags) rejectFlagsExcept(allowed string) error {
 	if allowed != "credentials" && f.credentialsUsed() {
 		return usageErrorf("--username/--password/--password-stdin/--clear are only valid for 'job credentials'")
@@ -80,6 +97,15 @@ func (f *CommandFlags) rejectFlagsExcept(allowed string) error {
 	}
 	if allowed != "agent-create" && f.agentCreateUsed() {
 		return usageErrorf("--method/--expires are only valid for 'agent create'")
+	}
+	if allowed != "job-check" && allowed != "job-integrity" && f.Level != nil {
+		return usageErrorf("--level is only valid for 'job check' and 'job integrity'")
+	}
+	if allowed != "job-check" && f.Wait {
+		return usageErrorf("--wait is only valid for 'job check'")
+	}
+	if allowed != "job-integrity" && f.integrityScheduleUsed() {
+		return usageErrorf("--cron/--enable/--disable/--parts are only valid for 'job integrity'")
 	}
 	return nil
 }
