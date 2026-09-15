@@ -1,3 +1,10 @@
+# [1.32.0](https://github.com/amber-backup/amber-backup/compare/v1.31.0...v1.32.0) (2026-09-15)
+
+
+### Features
+
+* **swagger:** toggle the API explorer with SWAGGER_ENABLED ([6850d00](https://github.com/amber-backup/amber-backup/commit/6850d00f035849af96a912266bb9c6cc0a7f1741))
+
 # [1.31.0](https://github.com/amber-backup/amber-backup/compare/v1.30.1...v1.31.0) (2026-09-15)
 
 
