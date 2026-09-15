@@ -11,6 +11,11 @@ export interface AppConfig {
   port: number;
   /** Emit one access-log line per HTTP request (method, path, status, timing). */
   httpLogging: boolean;
+  /**
+   * Serve the Swagger UI/JSON at /api/explorer. Both are unauthenticated, so
+   * this defaults to off in production and on everywhere else.
+   */
+  swaggerEnabled: boolean;
   publicBaseUrl: string;
   /** WebAuthn Relying Party ID (the registrable domain, no scheme/port). */
   webauthnRpId: string;
@@ -97,10 +102,12 @@ export function loadConfig(): AppConfig {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+  const nodeEnv = env.NODE_ENV ?? 'development';
   return {
-    nodeEnv: env.NODE_ENV ?? 'development',
+    nodeEnv,
     port: int(env.PORT, 3000),
     httpLogging: bool(env.HTTP_LOGGING, true),
+    swaggerEnabled: bool(env.SWAGGER_ENABLED, nodeEnv !== 'production'),
     publicBaseUrl,
     webauthnRpId,
     webauthnOrigins,

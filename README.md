@@ -42,6 +42,7 @@ npm run dev
 
 - Client dev server: <http://localhost:5173> (proxies `/api` to the server)
 - Server + API: <http://localhost:3000>, Swagger at `/api/explorer`
+  (off when `NODE_ENV=production`; toggle with `SWAGGER_ENABLED=true|false`)
 - First start creates the bootstrap admin from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`.
 
 Restic must be on `PATH` in dev (`RESTIC_BINARY` to override).

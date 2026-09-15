@@ -32,7 +32,8 @@ async function bootstrap(): Promise<void> {
   // same origin; inline *styles* are allowed (React style attributes + the
   // design system) but inline scripts are not; framing is denied to prevent
   // clickjacking of destructive actions. The interactive Swagger UI at
-  // /api/explorer ships inline scripts, so it is exempted from the CSP.
+  // /api/explorer ships inline scripts, so it is exempted from the CSP (only
+  // while Swagger is enabled).
   app.getHttpAdapter().getInstance().disable('x-powered-by');
   const secureHeaders = helmet({
     contentSecurityPolicy: {
@@ -56,7 +57,9 @@ async function bootstrap(): Promise<void> {
     crossOriginEmbedderPolicy: false,
   });
   app.use((req: { path?: string; url: string }, res: unknown, next: () => void) => {
-    if ((req.path ?? req.url).startsWith('/api/explorer')) return next();
+    if (config.swaggerEnabled && (req.path ?? req.url).startsWith('/api/explorer')) {
+      return next();
+    }
     return (secureHeaders as (a: unknown, b: unknown, c: unknown) => void)(
       req,
       res,
@@ -99,14 +102,8 @@ async function bootstrap(): Promise<void> {
 
   // The Swagger UI and JSON are unauthenticated (they sit outside the Nest
   // guards), so exposing them in production discloses the full API surface.
-  // Register them only outside production; opt back in with SWAGGER_ENABLED=true.
-  const swaggerEnabled =
-    process.env.SWAGGER_ENABLED !== undefined
-      ? ['1', 'true', 'yes', 'on'].includes(
-          process.env.SWAGGER_ENABLED.toLowerCase(),
-        )
-      : config.nodeEnv !== 'production';
-  if (swaggerEnabled) {
+  // Registered only when SWAGGER_ENABLED is set (default: outside production).
+  if (config.swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Amber Backup API')
       .setDescription('Central management of Restic backups')
