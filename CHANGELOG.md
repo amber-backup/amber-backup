@@ -1,3 +1,11 @@
+# [1.33.0](https://github.com/amber-backup/amber-backup/compare/v1.32.0...v1.33.0) (2026-09-15)
+
+
+### Features
+
+* **cli:** start integrity checks and manage their schedule ([677ac4f](https://github.com/amber-backup/amber-backup/commit/677ac4f24444a8b4bd63e173fe1815225a9b41bb))
+* **jobs:** retry failed backups automatically ([9ddd0cc](https://github.com/amber-backup/amber-backup/commit/9ddd0cc53764b3f83e2420fb35ed4c5a00f5417e))
+
 # [1.32.0](https://github.com/amber-backup/amber-backup/compare/v1.31.0...v1.32.0) (2026-09-15)
 
 
