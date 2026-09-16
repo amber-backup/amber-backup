@@ -1,3 +1,12 @@
+# [1.34.0](https://github.com/amber-backup/amber-backup/compare/v1.33.0...v1.34.0) (2026-09-16)
+
+
+### Features
+
+* **agents:** edit agents, label them and restrict them to allowed IPs ([46b813b](https://github.com/amber-backup/amber-backup/commit/46b813b73e3dcdd256e20c49413be0f4f46378e8))
+* **auth:** restrict administrators to an IP allowlist ([0750248](https://github.com/amber-backup/amber-backup/commit/075024840d76e6385ddd288d7c35c02987901433))
+* **jobs:** open a job's snapshots from its snapshot count ([82c8d94](https://github.com/amber-backup/amber-backup/commit/82c8d947ab5645befdc46605967dab8159e34fdd))
+
 # [1.33.0](https://github.com/amber-backup/amber-backup/compare/v1.32.0...v1.33.0) (2026-09-15)
 
 
