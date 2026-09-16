@@ -887,6 +887,16 @@ input, select, textarea {
     color: var(--danger);
 }
 
+.repo-size-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.repo-size-link:hover {
+    color: var(--amber);
+    text-decoration: underline;
+}
+
 .repo-size .btn {
     padding: 2px 5px;
 }

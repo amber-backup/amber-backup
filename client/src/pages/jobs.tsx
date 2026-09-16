@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import {
   api,
   type Job,
@@ -239,14 +240,22 @@ function RepoSize({ job }: { job: Job }) {
     : stats.stats_at
       ? m.asOf(fmtDateTime(stats.stats_at))
       : m.notRead;
-  const label =
-    stats.size_bytes == null
-      ? m.unknown
-      : `${fmtBytes(stats.size_bytes)} · ${m.snapshots(stats.snapshot_count ?? null)}`;
 
   return (
     <div className="repo-size" title={title}>
-      <span className={stats.stats_error ? 'repo-size-stale' : undefined}>{label}</span>
+      <span className={stats.stats_error ? 'repo-size-stale' : undefined}>
+        {stats.size_bytes == null ? (
+          m.unknown
+        ) : (
+          <>
+            {fmtBytes(stats.size_bytes)}
+            {' · '}
+            <Link to={`/snapshots/${job.slug}`} className="repo-size-link" title={m.openSnapshots}>
+              {m.snapshots(stats.snapshot_count ?? null)}
+            </Link>
+          </>
+        )}
+      </span>
       <BusyButton
         className="btn btn-ghost"
         title={m.refresh}

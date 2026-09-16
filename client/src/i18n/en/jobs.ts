@@ -28,6 +28,7 @@ export const jobs = {
     notRead: 'Repository size not read yet',
     unknown: 'size unknown',
     snapshots: (n: number | null) => (n === 1 ? '1 snapshot' : `${n ?? '?'} snapshots`),
+    openSnapshots: 'Show snapshots',
     refresh: 'Refresh repository size',
     refreshError: (error: string) => `Stats refresh failed: ${error}`,
     refreshFailed: 'Refresh failed',

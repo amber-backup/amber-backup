@@ -30,6 +30,7 @@ export const jobs: JobsMessages = {
     notRead: 'Repository-Größe noch nicht gelesen',
     unknown: 'Größe unbekannt',
     snapshots: (n: number | null) => (n === 1 ? '1 Snapshot' : `${n ?? '?'} Snapshots`),
+    openSnapshots: 'Snapshots anzeigen',
     refresh: 'Repository-Größe aktualisieren',
     refreshError: (error: string) => `Aktualisieren der Statistik fehlgeschlagen: ${error}`,
     refreshFailed: 'Aktualisieren fehlgeschlagen',
