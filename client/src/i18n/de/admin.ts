@@ -35,6 +35,22 @@ export const admin: AdminMessages = {
     help:
       'Ist dies deaktiviert, verschwinden Passwortformular und Passkey-Schaltfläche von der Anmeldeseite, und nur Single Sign-on bleibt. API-Schlüssel funktionieren weiterhin.',
   },
+  adminIps: {
+    heading: 'IP-Allowlist für Administratoren',
+    loadFailed: 'IP-Allowlist für Administratoren konnte nicht geladen werden.',
+    help:
+      'Ist sie gesetzt, können sich Administratoren nur von diesen Adressen anmelden und die API nutzen — über Web-UI, Passkeys, SSO und API-Schlüssel gleichermaßen. Andere Benutzer sind nicht betroffen.',
+    envEntries: 'Aus ADMIN_ALLOWED_IPS',
+    envHelp: 'In der Server-Umgebung gesetzt; dort ändern.',
+    entries: 'Erlaubte Adressen',
+    entriesHelp: 'Eine IP-Adresse oder ein CIDR-Bereich pro Zeile (z. B. 10.0.0.0/8). Leer lassen für keine Einschränkung.',
+    currentIp: (ip: string) => `Ihre aktuelle Adresse: ${ip}.`,
+    currentIpUnknown: 'Ihre aktuelle Adresse konnte nicht ermittelt werden.',
+    addCurrentIp: 'Hinzufügen',
+    restricted: 'Der Administratorzugriff ist auf die aufgeführten Adressen beschränkt. Speichern wird abgelehnt, wenn Ihre aktuelle Adresse dadurch ausgeschlossen würde.',
+    unrestricted: 'Keine Einschränkung: Administratoren können sich von jeder Adresse aus verbinden.',
+    saved: 'Allowlist gespeichert',
+  },
   agents: {
     heading: 'Agents',
     invalidTimeout: 'Geben Sie eine ganze Zahl zwischen 30 und 3600 Sekunden ein',

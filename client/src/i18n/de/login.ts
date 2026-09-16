@@ -19,6 +19,7 @@ export const login: LoginMessages = {
     pending: 'Ihr Konto wartet auf die Freigabe durch einen Administrator.',
     localAccount:
       'Dieses Konto meldet sich mit einem Passwort an. Ein Administrator muss es zuerst auf SSO umstellen.',
+    ipNotAllowed: 'Administratoren können sich von dieser Adresse aus nicht anmelden.',
     incomplete: 'Single Sign-on wurde nicht abgeschlossen.',
   },
 };

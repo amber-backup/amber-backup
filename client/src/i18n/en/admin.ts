@@ -33,6 +33,22 @@ export const admin = {
     help:
       'With this off, the password form and passkey button disappear from the login page and only single sign-on remains. API keys keep working.',
   },
+  adminIps: {
+    heading: 'Administrator IP allowlist',
+    loadFailed: 'Failed to load the administrator IP allowlist.',
+    help:
+      'When set, administrators can only sign in and use the API from these addresses — through the web UI, passkeys, SSO and API keys alike. Other users are not affected.',
+    envEntries: 'From ADMIN_ALLOWED_IPS',
+    envHelp: 'Set in the server environment; change it there.',
+    entries: 'Allowed addresses',
+    entriesHelp: 'One IP address or CIDR range per line (e.g. 10.0.0.0/8). Leave empty for no restriction.',
+    currentIp: (ip: string) => `Your current address: ${ip}.`,
+    currentIpUnknown: 'Your current address could not be determined.',
+    addCurrentIp: 'Add',
+    restricted: 'Administrator access is restricted to the listed addresses. Saving is refused if it would exclude your current address.',
+    unrestricted: 'No restriction: administrators can connect from any address.',
+    saved: 'Allowlist saved',
+  },
   agents: {
     heading: 'Agents',
     invalidTimeout: 'Enter a whole number between 30 and 3600 seconds',

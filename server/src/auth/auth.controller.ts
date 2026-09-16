@@ -19,6 +19,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SESSION_COOKIE } from '../common/guards/auth.guard';
+import { AdminIpAllowlistService } from '../common/admin-ip-allowlist.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from './auth.service';
@@ -86,7 +87,16 @@ export class AuthController {
     private readonly passkeys: PasskeysService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    private readonly adminIps: AdminIpAllowlistService,
   ) {}
+
+  /** Refuses a session to an administrator outside the admin IP allowlist. */
+  private async assertLoginAllowed(
+    user: { email: string; is_admin: boolean },
+    ip: string | null,
+  ): Promise<void> {
+    if (user.is_admin) await this.adminIps.assertAllowed(ip, user.email);
+  }
 
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -107,6 +117,7 @@ export class AuthController {
       if (result.status === '2fa_required') {
         return { totpRequired: true, challengeToken: result.challengeToken };
       }
+      await this.assertLoginAllowed(result.user, ip);
       res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
       void this.audit.record({
         actorId: result.user.id,
@@ -156,6 +167,7 @@ export class AuthController {
     const userAgent = (req.headers['user-agent'] as string) ?? null;
     try {
       const result = await this.auth.loginTotp(dto.challengeToken, dto.code);
+      await this.assertLoginAllowed(result.user, ip);
       res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
       void this.audit.record({
         actorId: result.user.id,
@@ -293,6 +305,7 @@ export class AuthController {
         dto.response as never,
       );
       const result = await this.auth.issueForUser(userId);
+      await this.assertLoginAllowed(result.user, ip);
       res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
       res.clearCookie(WEBAUTHN_AUTH_COOKIE, { path: '/' });
       void this.audit.record({
@@ -415,6 +428,14 @@ export class AuthController {
     if (result.reason) {
       res.redirect(`/?sso=${result.reason}`);
       return;
+    }
+    if (result.user?.isAdmin) {
+      try {
+        await this.adminIps.assertAllowed(clientIp(req), result.user.email);
+      } catch {
+        res.redirect('/?sso=ip_not_allowed');
+        return;
+      }
     }
     res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
     res.redirect('/');

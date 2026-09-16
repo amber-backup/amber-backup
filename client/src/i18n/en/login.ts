@@ -16,6 +16,7 @@ export const login = {
   sso: {
     pending: 'Your account is waiting for an administrator to approve it.',
     localAccount: 'This account signs in with a password. An administrator has to switch it to SSO first.',
+    ipNotAllowed: 'Administrators cannot sign in from this address.',
     incomplete: 'Single sign-on did not complete.',
   },
 };

@@ -11,6 +11,7 @@ import {
   ANY_API_KEY_SCOPE_KEY,
 } from '../decorators/public.decorator';
 import { ApiKeyScopes } from '../../database/database.types';
+import { AdminIpAllowlistService } from '../admin-ip-allowlist.service';
 
 /**
  * These tests exercise the metadata rules for API-key callers. The key lookup
@@ -25,6 +26,8 @@ describe('AuthGuard — API key restrictions', () => {
     admin?: boolean;
     scopes?: ApiKeyScopes;
     meta?: Record<string, boolean>;
+    /** Whether the admin IP allowlist admits the request. */
+    ipAllowed?: boolean;
   }) {
     const meta = opts.meta ?? {};
     const reflector = {
@@ -55,18 +58,32 @@ describe('AuthGuard — API key restrictions', () => {
       }),
     } as unknown as Db;
 
-    const guard = new AuthGuard(reflector, {} as JwtService, crypto, db);
+    const adminIps = {
+      assertAllowed: jest.fn(() =>
+        opts.ipAllowed === false
+          ? Promise.reject(new ForbiddenException('address'))
+          : Promise.resolve(),
+      ),
+    };
+    const guard = new AuthGuard(
+      reflector,
+      {} as JwtService,
+      crypto,
+      db,
+      adminIps as unknown as AdminIpAllowlistService,
+    );
     const ctx = {
       switchToHttp: () => ({
         getRequest: () => ({
           method: opts.method ?? 'GET',
           headers: { authorization: `Bearer ${KEY}` },
+          ip: '203.0.113.9',
         }),
       }),
       getHandler: () => undefined,
       getClass: () => undefined,
     } as unknown as ExecutionContext;
-    return { guard, ctx };
+    return { guard, ctx, adminIps };
   }
 
   it('denies an API key on an admin route even for an admin user', async () => {
@@ -136,5 +153,17 @@ describe('AuthGuard — API key restrictions', () => {
   it('allows an operate-scoped key on a mutating request (resource ACL still applies)', async () => {
     const { guard, ctx } = build({ method: 'POST', scopes: { actions: ['operate'] } });
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
+  });
+
+  it('denies an admin outside the admin IP allowlist on any route', async () => {
+    const { guard, ctx, adminIps } = build({ admin: true, ipAllowed: false });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(adminIps.assertAllowed).toHaveBeenCalledWith('203.0.113.9', 'u@x');
+  });
+
+  it('does not apply the admin IP allowlist to non-admins', async () => {
+    const { guard, ctx, adminIps } = build({ ipAllowed: false });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(adminIps.assertAllowed).not.toHaveBeenCalled();
   });
 });

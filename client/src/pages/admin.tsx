@@ -84,7 +84,7 @@ const CARD_STYLE: CSSProperties = {
   gap: 12,
 };
 
-/** Admin-only system settings (agent self-registration, timeouts, SSO). */
+/** Admin-only system settings (agent self-registration, timeouts, SSO, admin IP allowlist). */
 export function Admin() {
   const t = useT();
   return (
@@ -92,6 +92,7 @@ export function Admin() {
       <PageHeader title={t.admin.title} subtitle={t.admin.subtitle} />
       <EnrollPanel />
       <SystemPanels />
+      <AdminIpPanel />
     </div>
   );
 }
@@ -283,6 +284,119 @@ function AuthPanel({ sys }: { sys: SystemSettings }) {
         </label>
         <div className="help">
           {enabled && !ssoUsable ? t.admin.auth.needsSso : t.admin.auth.help}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Admin IP allowlist -----------------------------------------------------
+
+interface AdminIpAllowlist {
+  entries: string[];
+  /** Fixed by ADMIN_ALLOWED_IPS; shown read-only. */
+  envEntries: string[];
+  currentIp: string | null;
+}
+
+function AdminIpPanel() {
+  const t = useT();
+  const m = t.admin.adminIps;
+  const toast = useToast();
+  const { data, loading, error } = useAsync(() =>
+    api.get<AdminIpAllowlist>('/settings/admin-ip-allowlist'),
+  );
+
+  if (loading) {
+    return (
+      <div className="panel section-gap">
+        <Loading label={t.common.loading} />
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="panel section-gap">
+        <Empty>{m.loadFailed}</Empty>
+      </div>
+    );
+  }
+  return <AdminIpForm initial={data} onError={(msg) => toast(msg, 'error')} />;
+}
+
+function AdminIpForm({ initial, onError }: { initial: AdminIpAllowlist; onError: (msg: string) => void }) {
+  const t = useT();
+  const m = t.admin.adminIps;
+  const toast = useToast();
+  const [state, setState] = useState(initial);
+  const [text, setText] = useState(initial.entries.join('\n'));
+  const [busy, setBusy] = useState(false);
+
+  const entries = [...new Set(text.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean))];
+  const restricted = state.envEntries.length > 0 || entries.length > 0;
+  const currentListed = !!state.currentIp && entries.includes(state.currentIp);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.put<AdminIpAllowlist>('/settings/admin-ip-allowlist', { entries });
+      setState(updated);
+      setText(updated.entries.join('\n'));
+      toast(m.saved, 'success');
+    } catch (err) {
+      onError(err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>{m.heading}</h2>
+      </div>
+      <div style={BODY_STYLE}>
+        <div className="help">{m.help}</div>
+        {state.envEntries.length > 0 && (
+          <Field label={m.envEntries} help={m.envHelp}>
+            <div className="tags">
+              {state.envEntries.map((e) => (
+                <span className="tag mono" key={e}>
+                  {e}
+                </span>
+              ))}
+            </div>
+          </Field>
+        )}
+        <Field label={m.entries} help={m.entriesHelp}>
+          <textarea
+            rows={5}
+            className="mono"
+            value={text}
+            placeholder={'203.0.113.7\n10.0.0.0/8'}
+            onChange={(e) => setText(e.target.value)}
+          />
+        </Field>
+        <div className="help">
+          {state.currentIp ? m.currentIp(state.currentIp) : m.currentIpUnknown}
+          {state.currentIp && !currentListed && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setText(entries.concat(state.currentIp!).join('\n'))}
+              >
+                {m.addCurrentIp}
+              </button>
+            </>
+          )}
+        </div>
+        <div className="help">{restricted ? m.restricted : m.unrestricted}</div>
+        <div style={ACTIONS_STYLE}>
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void save()}>
+            {t.common.save}
+          </button>
         </div>
       </div>
     </div>

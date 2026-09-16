@@ -1,6 +1,7 @@
 // Load .env into process.env as early as possible (dev/local). In production
 // the environment is provided directly and the (absent) file is simply ignored.
 import 'dotenv/config';
+import { isValidAllowlistEntry } from '../common/ip-allowlist';
 
 /**
  * Central typed configuration, loaded from environment variables.
@@ -34,6 +35,12 @@ export interface AppConfig {
    * Default false: never trust the header, so a client cannot spoof its IP.
    */
   trustProxy: boolean | number | string;
+  /**
+   * IP addresses / CIDR ranges administrators may connect from, in addition to
+   * the list maintained in the UI (ADMIN_ALLOWED_IPS, comma-separated). Both
+   * empty = no restriction.
+   */
+  adminAllowedIps: string[];
   resticBinary: string;
   resticCacheDir: string;
   restoreTmpDir: string;
@@ -123,6 +130,10 @@ export function loadConfig(): AppConfig {
       (env.PUBLIC_BASE_URL ?? '').startsWith('https://'),
     ),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    adminAllowedIps: (env.ADMIN_ALLOWED_IPS ?? '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean),
     resticBinary: env.RESTIC_BINARY ?? 'restic',
     resticCacheDir: env.RESTIC_CACHE_DIR ?? './.cache/restic',
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
@@ -147,6 +158,15 @@ export function validateConfig(config: AppConfig): void {
     if (raw.length !== 32) {
       errors.push('MASTER_ENCRYPTION_KEY must decode to 32 bytes (base64)');
     }
+  }
+
+  const badAdminIps = config.adminAllowedIps.filter(
+    (e) => !isValidAllowlistEntry(e),
+  );
+  if (badAdminIps.length > 0) {
+    errors.push(
+      `ADMIN_ALLOWED_IPS contains entries that are not an IP address or CIDR range: ${badAdminIps.join(', ')}`,
+    );
   }
 
   if (!config.jwtSecret) errors.push('JWT_SECRET is required');

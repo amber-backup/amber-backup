@@ -1,8 +1,9 @@
 import { BlockList, isIP } from 'net';
 
 /**
- * Per-agent IP allowlists: entries are single addresses (`203.0.113.7`,
- * `2001:db8::1`) or CIDR ranges (`10.0.0.0/8`, `2001:db8::/32`).
+ * IP allowlists (per agent, and for administrators): entries are single
+ * addresses (`203.0.113.7`, `2001:db8::1`) or CIDR ranges (`10.0.0.0/8`,
+ * `2001:db8::/32`).
  */
 
 type Entry = { address: string; prefix: number | null; family: 'ipv4' | 'ipv6' };

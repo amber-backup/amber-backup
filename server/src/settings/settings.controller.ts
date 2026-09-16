@@ -1,8 +1,11 @@
-import { Body, Controller, Get, Patch, Put } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Put, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequireAdmin } from '../common/decorators/public.decorator';
+import { AdminIpAllowlistService } from '../common/admin-ip-allowlist.service';
 import { SettingsService } from './settings.service';
 import {
+  UpdateAdminIpAllowlistDto,
   UpdateAgentSettingsDto,
   UpdateAuthSettingsDto,
   UpdateSsoDto,
@@ -11,7 +14,10 @@ import {
 @ApiTags('settings')
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    private readonly adminIps: AdminIpAllowlistService,
+  ) {}
 
   @RequireAdmin()
   @Get('system')
@@ -42,5 +48,24 @@ export class SettingsController {
   async updateSso(@Body() dto: UpdateSsoDto) {
     await this.settings.updateSso(dto);
     return this.settings.getSystemView();
+  }
+
+  @RequireAdmin()
+  @Get('admin-ip-allowlist')
+  @ApiOperation({ summary: 'Addresses administrators may connect from (admin)' })
+  adminIpAllowlist(@Req() req: Request) {
+    return this.adminIps.view(req.ip);
+  }
+
+  @RequireAdmin()
+  @Put('admin-ip-allowlist')
+  @ApiOperation({
+    summary: 'Replace the UI-maintained admin IP allowlist (must keep the caller allowed)',
+  })
+  updateAdminIpAllowlist(
+    @Req() req: Request,
+    @Body() dto: UpdateAdminIpAllowlistDto,
+  ) {
+    return this.adminIps.update(dto.entries, req.ip);
   }
 }

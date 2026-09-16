@@ -74,6 +74,8 @@ const CLOCK_SKEW = 60;
 export interface CallbackResult {
   token: string;
   reason: 'pending' | 'local_account' | null;
+  /** Account behind the issued session; unset when `reason` is. */
+  user?: { email: string; isAdmin: boolean };
 }
 
 /** Default login-button labels per provider type. */
@@ -251,7 +253,11 @@ export class SsoService {
     }
     void this.users.touchSsoIdentity(provider.id, profile.subject);
     const result = await this.auth.issue(user.id, user.email, user.is_admin);
-    return { token: result.token, reason: null };
+    return {
+      token: result.token,
+      reason: null,
+      user: { email: user.email, isAdmin: user.is_admin },
+    };
   }
 
   /**

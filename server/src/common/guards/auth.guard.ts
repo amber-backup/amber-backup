@@ -20,6 +20,7 @@ import {
   ANY_API_KEY_SCOPE_KEY,
 } from '../decorators/public.decorator';
 import { RequestUser } from '../auth/request-user';
+import { AdminIpAllowlistService } from '../admin-ip-allowlist.service';
 
 export const SESSION_COOKIE = 'amber_session';
 export const API_KEY_PREFIX = 'ak_';
@@ -35,7 +36,7 @@ interface JwtPayload {
 /**
  * Unified authentication for user-facing endpoints. Accepts a session JWT
  * (cookie or Bearer) or an API key. Enforces @Public / @RequireAdmin /
- * @RequireAction metadata.
+ * @RequireAction metadata and the administrator IP allowlist.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -44,6 +45,7 @@ export class AuthGuard implements CanActivate {
     private readonly jwt: JwtService,
     private readonly crypto: CryptoService,
     @Inject(KYSELY) private readonly db: Db,
+    private readonly adminIps: AdminIpAllowlistService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -60,6 +62,10 @@ export class AuthGuard implements CanActivate {
     const user = token.startsWith(API_KEY_PREFIX)
       ? await this.fromApiKey(token)
       : await this.fromJwt(token);
+
+    // Administrators may only act from allowlisted addresses (when a list is
+    // set) — through any credential, on any route.
+    if (user.isAdmin) await this.adminIps.assertAllowed(req.ip, user.email);
 
     (req as Request & { user: RequestUser }).user = user;
 

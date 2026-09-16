@@ -22,7 +22,11 @@ interface LoginMethods {
 /** Why a redirect back from an identity provider did not sign anyone in. */
 function ssoMessage(reason: string): string {
   const m = messages().login.sso;
-  const byReason: Record<string, string> = { pending: m.pending, local_account: m.localAccount };
+  const byReason: Record<string, string> = {
+    pending: m.pending,
+    local_account: m.localAccount,
+    ip_not_allowed: m.ipNotAllowed,
+  };
   return byReason[reason] ?? m.incomplete;
 }
 

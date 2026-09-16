@@ -43,6 +43,7 @@ describe('validateConfig (crypto material validation)', () => {
       masterEncryptionKey: TEST_MASTER_KEY,
       jwtSecret: 'a-secret',
       databaseUrl: 'postgres://amber:amber@localhost:5432/amber',
+      adminAllowedIps: [],
       ...overrides,
     } as AppConfig;
   }
@@ -81,5 +82,11 @@ describe('validateConfig (crypto material validation)', () => {
         baseConfig({ masterEncryptionKey: '', jwtSecret: '', databaseUrl: '' }),
       ),
     ).toThrow(/MASTER_ENCRYPTION_KEY[\s\S]*JWT_SECRET[\s\S]*DATABASE_URL/);
+  });
+
+  it('rejects ADMIN_ALLOWED_IPS entries that are not an address or range', () => {
+    expect(() =>
+      validateConfig(baseConfig({ adminAllowedIps: ['10.0.0.0/8', 'intranet'] })),
+    ).toThrow(/ADMIN_ALLOWED_IPS .*intranet/);
   });
 });

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -8,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -75,4 +77,18 @@ export class UpdateSsoDto {
   @ValidateNested({ each: true })
   @Type(() => SsoProviderDto)
   providers?: SsoProviderDto[];
+}
+
+export class UpdateAdminIpAllowlistDto {
+  @ApiProperty({
+    type: [String],
+    description:
+      'IP addresses / CIDR ranges administrators may connect from (in addition to ADMIN_ALLOWED_IPS); empty removes the UI-maintained restriction',
+    example: ['203.0.113.7', '10.0.0.0/8'],
+  })
+  @IsArray()
+  @ArrayMaxSize(256)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  entries!: string[];
 }

@@ -159,7 +159,11 @@ describe('SsoService (callback)', () => {
 
       const result = await callback((n) => idToken(n));
 
-      expect(result).toEqual({ token: 'session-jwt', reason: null });
+      expect(result).toEqual({
+        token: 'session-jwt',
+        reason: null,
+        user: { email: 'person@example.com', isAdmin: false },
+      });
       expect(users.findBySsoIdentity).toHaveBeenCalledWith('p1', 'subject-1');
       // The subject decided it — no e-mail lookup was needed.
       expect(users.findByEmailRaw).not.toHaveBeenCalled();
