@@ -1,5 +1,6 @@
 import { Request } from 'express';
 import { secretFieldNames } from '../targets/backend-registry';
+import { normalizeIp } from '../common/ip-allowlist';
 import { secretChannelFieldNames } from '../notifications/channel-registry';
 
 /** Object keys whose values are secrets and must never be persisted. */
@@ -136,8 +137,10 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
 /**
  * Client IP for audit entries. Relies on Express's `req.ip`, which honours
  * X-Forwarded-For only per the configured `trust proxy` setting — so a caller
- * cannot spoof the recorded IP by sending its own header.
+ * cannot spoof the recorded IP by sending its own header. IPv4-mapped IPv6
+ * addresses (`::ffff:1.2.3.4`) are reported as plain IPv4.
  */
 export function clientIp(req: Request): string | null {
-  return req.ip ?? req.socket?.remoteAddress ?? null;
+  const ip = req.ip ?? req.socket?.remoteAddress;
+  return ip ? normalizeIp(ip) : null;
 }

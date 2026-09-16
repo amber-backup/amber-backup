@@ -22,6 +22,7 @@ import { SESSION_COOKIE } from '../common/guards/auth.guard';
 import { AdminIpAllowlistService } from '../common/admin-ip-allowlist.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuditService } from '../audit/audit.service';
+import { clientIp } from '../audit/audit.util';
 import { AuthService } from './auth.service';
 import { SsoService } from './sso.service';
 import { UsersService } from './users.service';
@@ -37,15 +38,6 @@ import {
   PasskeyRegisterDto,
   UpdatePreferencesDto,
 } from './dto/auth.dto';
-
-/**
- * Client IP for audit entries. Uses Express's `req.ip`, which honours
- * X-Forwarded-For only according to the configured `trust proxy` setting — so
- * a caller cannot forge the recorded IP by sending its own header.
- */
-function clientIp(req: Request): string | null {
-  return req.ip ?? req.socket?.remoteAddress ?? null;
-}
 
 const OIDC_STATE_COOKIE = 'amber_oidc';
 const WEBAUTHN_REG_COOKIE = 'amber_wa_reg';

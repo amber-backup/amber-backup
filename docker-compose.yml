@@ -33,6 +33,10 @@ services:
       # Required — generate with: openssl rand -base64 48
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      # Behind a reverse proxy (Traefik, nginx, Caddy, …) set this to the number
+      # of proxy hops (usually 1), or the audit log, rate limiter and admin IP
+      # allowlist see the proxy's container address instead of the client's.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
       # Required — never ship a default admin password on an internet-reachable app.
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in .env}

@@ -1,4 +1,5 @@
-import { deriveAction, redactSecrets, singular } from './audit.util';
+import { Request } from 'express';
+import { clientIp, deriveAction, redactSecrets, singular } from './audit.util';
 
 describe('audit redaction (never persist plaintext secrets)', () => {
   it('redacts secret-bearing keys anywhere in the object tree', () => {
@@ -106,5 +107,18 @@ describe('audit action derivation', () => {
     expect(singular('jobs')).toBe('job');
     expect(singular('policies')).toBe('policy');
     expect(singular('addresses')).toBe('address');
+  });
+});
+
+describe('clientIp', () => {
+  const req = (ip?: string) => ({ ip, socket: {} }) as unknown as Request;
+
+  it('reports IPv4-mapped IPv6 addresses as plain IPv4', () => {
+    expect(clientIp(req('::ffff:203.0.113.7'))).toBe('203.0.113.7');
+  });
+
+  it('keeps real IPv6 addresses and handles a missing address', () => {
+    expect(clientIp(req('2001:db8::1'))).toBe('2001:db8::1');
+    expect(clientIp(req(undefined))).toBeNull();
   });
 });
