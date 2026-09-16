@@ -268,6 +268,12 @@ export interface Agent {
   agent_version: string | null;
   restic_version: string | null;
   poll_interval_seconds: number;
+  /** Free-form admin labels. */
+  labels: string[];
+  /** IPs/CIDR ranges the agent may connect from; empty = any address. */
+  allowed_ips: string[];
+  /** Source address of the agent's latest poll. */
+  last_ip: string | null;
 }
 
 export interface Snapshot {

@@ -1042,12 +1042,16 @@ input, select, textarea {
     color: var(--text-3);
 }
 
-/* Agent fleet grid: host, agent version, last contact, restic, action. */
+/* Agent fleet grid: host, agent version, last contact, restic, actions. */
 .agents-grid {
     display: grid;
-    grid-template-columns: 1.6fr 1fr 1fr 1fr 40px;
+    grid-template-columns: 1.6fr 1fr 1fr 1fr 84px;
     gap: 14px;
     align-items: center;
+}
+
+.agent-tags {
+    margin-top: 5px;
 }
 
 /* Audit log grid: five columns on desktop, condensed to three on mobile. */
@@ -1070,7 +1074,7 @@ input, select, textarea {
     }
 
     .agents-grid {
-        grid-template-columns: minmax(0, 1fr) auto 40px;
+        grid-template-columns: minmax(0, 1fr) auto 84px;
         gap: 10px;
     }
 

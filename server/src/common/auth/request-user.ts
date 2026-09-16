@@ -16,4 +16,6 @@ export interface RequestUser {
 export interface RequestAgent {
   id: string;
   name: string;
+  /** Source address of the request, per the `trust proxy` setting. */
+  ip?: string;
 }

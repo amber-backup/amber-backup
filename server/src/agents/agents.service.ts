@@ -405,6 +405,10 @@ echo "Amber agent installed and started."
     }
     if (dto.pollIntervalSeconds !== undefined)
       patch.poll_interval_seconds = dto.pollIntervalSeconds;
+    if (dto.labels !== undefined)
+      patch.labels = JSON.stringify(uniqueTrimmed(dto.labels));
+    if (dto.allowedIps !== undefined)
+      patch.allowed_ips = JSON.stringify(uniqueTrimmed(dto.allowedIps));
     const a = await this.db
       .updateTable('agents')
       .set(patch)
@@ -519,6 +523,7 @@ echo "Amber agent installed and started."
         status: 'online',
         restic_version: dto.resticVersion ?? null,
         agent_version: dto.agentVersion ?? null,
+        last_ip: agent.ip ?? null,
         updated_at: new Date(),
       })
       .where('id', '=', agent.id)
@@ -928,4 +933,9 @@ echo "Amber agent installed and started."
       typeof row.value === 'string' ? JSON.parse(row.value) : (row.value as { seconds?: number });
     return typeof v.seconds === 'number' ? v.seconds : 120;
   }
+}
+
+/** Trims entries and drops blanks and duplicates, keeping the first occurrence's order. */
+function uniqueTrimmed(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
 }

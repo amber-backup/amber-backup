@@ -279,6 +279,12 @@ export interface AgentsTable {
   agent_version: string | null;
   restic_version: string | null;
   poll_interval_seconds: ColumnType<number, number | undefined, number>;
+  /** Free-form admin labels for grouping agents. */
+  labels: JSONColumnType<string[], string | undefined, string>;
+  /** IPs/CIDR ranges the agent's authenticated requests must come from; empty = any. */
+  allowed_ips: JSONColumnType<string[], string | undefined, string>;
+  /** Source address of the agent's latest poll. */
+  last_ip: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }

@@ -5,8 +5,8 @@ import { fmtRelative } from '../core/format';
 import { copyToClipboard } from '../core/clipboard';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
-import { useModal, ModalFrame } from '../ui/modal';
-import { PageHeader, ActionButton, Loading } from '../ui/primitives';
+import { useModal, ModalFrame, FormModal } from '../ui/modal';
+import { PageHeader, ActionButton, Field, Loading } from '../ui/primitives';
 import { useT } from '../i18n';
 import type { AgentsMessages } from '../i18n/en/agents';
 
@@ -130,7 +130,9 @@ export function Agents() {
 function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
   const t = useT().agents.row;
   const toast = useToast();
-  const { confirmDialog } = useModal();
+  const { open, confirmDialog } = useModal();
+  const labels = a.labels ?? [];
+  const allowedIps = a.allowed_ips ?? [];
 
   return (
     <div className="row agents-grid">
@@ -139,6 +141,20 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
         <div style={{ minWidth: 0 }}>
           <div className="row-title">{a.name}</div>
           <div className="row-sub">{`${a.hostname ?? '?'} · ${a.os ?? ''}`}</div>
+          {(labels.length > 0 || allowedIps.length > 0) && (
+            <div className="tags agent-tags">
+              {allowedIps.length > 0 && (
+                <span className="badge info" title={allowedIps.join(', ')}>
+                  {t.ipRestricted(allowedIps.length)}
+                </span>
+              )}
+              {labels.map((label) => (
+                <span className="tag" key={label}>
+                  {label}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-2)' }}>
@@ -150,26 +166,134 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
       <div className="mono agents-hide-mobile" style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
         {a.restic_version ?? '—'}
       </div>
-      <button
-        className="btn btn-ghost btn-sm"
-        title={t.remove}
-        aria-label={t.remove}
-        onClick={() =>
-          confirmDialog(
-            t.remove,
-            t.removeConfirm(a.name),
-            async () => {
-              await api.del(`/agents/${a.id}`);
-              toast(t.removed, 'success');
-              reload();
-            },
-            true,
-          )
-        }
-      >
-        <Icon name="trash" />
-      </button>
+      <div className="row-actions">
+        <button
+          className="btn btn-ghost btn-sm"
+          title={t.edit}
+          aria-label={t.edit}
+          onClick={() => open((close) => <AgentEditor agent={a} onClose={close} onSaved={reload} />)}
+        >
+          <Icon name="edit" />
+        </button>
+        <button
+          className="btn btn-ghost btn-sm"
+          title={t.remove}
+          aria-label={t.remove}
+          onClick={() =>
+            confirmDialog(
+              t.remove,
+              t.removeConfirm(a.name),
+              async () => {
+                await api.del(`/agents/${a.id}`);
+                toast(t.removed, 'success');
+                reload();
+              },
+              true,
+            )
+          }
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
     </div>
+  );
+}
+
+/** Splits free text on commas, whitespace and newlines into trimmed, unique entries. */
+function splitList(text: string, separators: RegExp): string[] {
+  return [...new Set(text.split(separators).map((v) => v.trim()).filter(Boolean))];
+}
+
+/** Name, poll interval, labels and the IP allowlist of an enrolled agent. */
+function AgentEditor({ agent, onClose, onSaved }: { agent: Agent; onClose: () => void; onSaved: () => void }) {
+  const { agents, common } = useT();
+  const m = agents.editor;
+  const toast = useToast();
+  const [name, setName] = useState(agent.name);
+  const [pollInterval, setPollInterval] = useState(String(agent.poll_interval_seconds));
+  const [labelsText, setLabelsText] = useState((agent.labels ?? []).join(', '));
+  const [ipsText, setIpsText] = useState((agent.allowed_ips ?? []).join('\n'));
+
+  const ips = splitList(ipsText, /[\s,]+/);
+  const lastIpListed = !!agent.last_ip && ips.includes(agent.last_ip);
+
+  const submit = async () => {
+    const interval = Number(pollInterval);
+    if (!name.trim()) {
+      toast(m.nameRequired, 'error');
+      return false;
+    }
+    if (!Number.isInteger(interval) || interval < 5 || interval > 3600) {
+      toast(m.pollIntervalInvalid, 'error');
+      return false;
+    }
+    try {
+      await api.patch(`/agents/${agent.id}`, {
+        name: name.trim(),
+        pollIntervalSeconds: interval,
+        labels: splitList(labelsText, /,/),
+        allowedIps: ips,
+      });
+      toast(m.saved, 'success');
+      onSaved();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : m.saveFailed, 'error');
+      return false;
+    }
+  };
+
+  return (
+    <FormModal title={m.title} confirmLabel={common.save} onClose={onClose} onSubmit={submit}>
+      <div className="modal-form">
+        <Field label={m.name}>
+          <input type="text" value={name} maxLength={128} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label={m.pollInterval} help={m.pollIntervalHelp}>
+          <input
+            type="number"
+            min={5}
+            max={3600}
+            value={pollInterval}
+            onChange={(e) => setPollInterval(e.target.value)}
+          />
+        </Field>
+        <Field label={m.labels} help={m.labelsHelp}>
+          <input
+            type="text"
+            value={labelsText}
+            placeholder="prod, eu-west"
+            onChange={(e) => setLabelsText(e.target.value)}
+          />
+        </Field>
+        <Field label={m.allowedIps} help={m.allowedIpsHelp}>
+          <textarea
+            rows={4}
+            className="mono"
+            value={ipsText}
+            placeholder={'203.0.113.7\n10.0.0.0/8'}
+            onChange={(e) => setIpsText(e.target.value)}
+          />
+        </Field>
+        {agent.last_ip && (
+          <div className="help">
+            {m.lastIp(agent.last_ip)}
+            {!lastIpListed && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setIpsText(ips.concat(agent.last_ip!).join('\n'))}
+                >
+                  {m.addLastIp}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {ips.length > 0 && <div className="help">{m.allowlistWarning}</div>}
+      </div>
+    </FormModal>
   );
 }
 

@@ -28,6 +28,27 @@ export const agents = {
     remove: 'Remove agent',
     removeConfirm: (name: string) => `"${name}" will be removed. The agent will no longer be able to check in.`,
     removed: 'Agent removed',
+    edit: 'Edit agent',
+    ipRestricted: (n: number) => (n === 1 ? '1 allowed IP' : `${n} allowed IPs`),
+  },
+  editor: {
+    title: 'Edit agent',
+    name: 'Name',
+    nameRequired: 'Name is required',
+    pollInterval: 'Poll interval (seconds)',
+    pollIntervalHelp: 'How often the agent asks for new tasks (5–3600).',
+    pollIntervalInvalid: 'Poll interval must be a whole number between 5 and 3600',
+    labels: 'Labels',
+    labelsHelp: 'Comma-separated, e.g. prod, eu-west.',
+    allowedIps: 'Allowed IP addresses',
+    allowedIpsHelp:
+      'One IP address or CIDR range per line. Leave empty to allow any address.',
+    lastIp: (ip: string) => `Last contact from ${ip}.`,
+    addLastIp: 'Add',
+    allowlistWarning:
+      'Requests from any other address are rejected — make sure the agent\'s address is covered, or it can no longer check in.',
+    saved: 'Agent saved',
+    saveFailed: 'Save failed',
   },
   rollout: {
     title: 'Roll out agent',

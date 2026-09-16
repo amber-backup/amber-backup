@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { isValidAllowlistEntry } from '../../common/ip-allowlist';
 import {
   ArrayMaxSize,
   IsArray,
@@ -14,7 +15,10 @@ import {
   MaxLength,
   Min,
   MinLength,
+  Validate,
   ValidateNested,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
 
 export class CreateEnrollmentTokenDto {
@@ -46,6 +50,17 @@ export class SetGlobalEnrollmentDto {
   enabled!: boolean;
 }
 
+@ValidatorConstraint({ name: 'allowlistEntry' })
+class AllowlistEntryConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return typeof value === 'string' && isValidAllowlistEntry(value);
+  }
+
+  defaultMessage(): string {
+    return 'each value in allowedIps must be an IP address or CIDR range';
+  }
+}
+
 export class UpdateAgentDto {
   @ApiPropertyOptional()
   @IsOptional()
@@ -60,6 +75,28 @@ export class UpdateAgentDto {
   @Min(5)
   @Max(3600)
   pollIntervalSeconds?: number;
+
+  @ApiPropertyOptional({ type: [String], description: 'Free-form labels, e.g. ["prod", "eu"]' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(32)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(64, { each: true })
+  labels?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'IP addresses / CIDR ranges the agent may connect from; empty allows any address',
+    example: ['203.0.113.7', '10.0.0.0/8'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(64)
+  @IsString({ each: true })
+  @Validate(AllowlistEntryConstraint, { each: true })
+  allowedIps?: string[];
 }
 
 // --- Agent-facing DTOs ---

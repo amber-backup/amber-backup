@@ -1,5 +1,5 @@
 import { ValidationPipe } from '@nestjs/common';
-import { TaskProgressDto } from './agent.dto';
+import { TaskProgressDto, UpdateAgentDto } from './agent.dto';
 
 // Mirrors the global pipe configured in main.ts.
 const pipe = new ValidationPipe({
@@ -31,6 +31,28 @@ describe('TaskProgressDto (agent progress)', () => {
   it('rejects a non-object stats value', async () => {
     await expect(
       pipe.transform({ stats: 'nope' }, meta),
+    ).rejects.toBeInstanceOf(Error);
+  });
+});
+
+describe('UpdateAgentDto (labels + IP allowlist)', () => {
+  const updateMeta = { type: 'body' as const, metatype: UpdateAgentDto, data: '' };
+
+  it('accepts labels and addresses/CIDR ranges', async () => {
+    const body = { labels: ['prod', 'eu'], allowedIps: ['203.0.113.7', '10.0.0.0/8', '2001:db8::/32'] };
+    const out = (await pipe.transform(body, updateMeta)) as UpdateAgentDto;
+    expect(out.labels).toEqual(body.labels);
+    expect(out.allowedIps).toEqual(body.allowedIps);
+  });
+
+  it('accepts an empty allowlist', async () => {
+    const out = (await pipe.transform({ allowedIps: [] }, updateMeta)) as UpdateAgentDto;
+    expect(out.allowedIps).toEqual([]);
+  });
+
+  it('rejects an entry that is not an address or range', async () => {
+    await expect(
+      pipe.transform({ allowedIps: ['10.0.0.0/8', 'example.com'] }, updateMeta),
     ).rejects.toBeInstanceOf(Error);
   });
 });

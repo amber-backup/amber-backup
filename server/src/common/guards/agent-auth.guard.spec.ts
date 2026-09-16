@@ -1,4 +1,8 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { chain, createDbMock, TEST_MASTER_KEY } from '../../testing/db-mock';
 
 process.env.MASTER_ENCRYPTION_KEY = TEST_MASTER_KEY;
@@ -59,5 +63,40 @@ describe('AgentAuthGuard (bearer credential hashing)', () => {
     await expect(
       guard.canActivate(contextWithAuth('Bearer nope')),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  function contextFrom(ip: string) {
+    const req: Record<string, unknown> = {
+      headers: { authorization: 'Bearer raw-agent-key' },
+      ip,
+    };
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+    return { req, ctx };
+  }
+
+  it('admits a request from an allowed address', async () => {
+    const select = chain({
+      executeTakeFirst: { id: 'agent-1', name: 'web-1', allowed_ips: ['10.0.0.0/8'] },
+    });
+    const { db } = createDbMock({ selectFrom: select });
+    const guard = new AgentAuthGuard(db, crypto);
+    const { req, ctx } = contextFrom('::ffff:10.2.3.4');
+
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(req.agent).toEqual({ id: 'agent-1', name: 'web-1', ip: '10.2.3.4' });
+  });
+
+  it('rejects a valid credential from outside the allowlist', async () => {
+    const select = chain({
+      executeTakeFirst: { id: 'agent-1', name: 'web-1', allowed_ips: ['10.0.0.0/8'] },
+    });
+    const { db } = createDbMock({ selectFrom: select });
+    const guard = new AgentAuthGuard(db, crypto);
+    const { req, ctx } = contextFrom('203.0.113.9');
+
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(req.agent).toBeUndefined();
   });
 });
