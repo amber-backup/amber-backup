@@ -1,3 +1,10 @@
+## [1.34.1](https://github.com/amber-backup/amber-backup/compare/v1.34.0...v1.34.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **audit:** record the client IP instead of the proxy's container address ([bb8c393](https://github.com/amber-backup/amber-backup/commit/bb8c393056b141df7b5cc9b6218466089264c381))
+
 # [1.34.0](https://github.com/amber-backup/amber-backup/compare/v1.33.0...v1.34.0) (2026-09-16)
 
 
