@@ -9,6 +9,7 @@ import { CronJob } from 'cron';
 import { JobsService } from './jobs.service';
 import { JobRunnerService } from './job-runner.service';
 import { CheckRunnerService, parseIntegrityConfig } from './check-runner.service';
+import { SettingsService } from '../settings/settings.service';
 import { BackupJobRow } from '../database/database.types';
 
 /**
@@ -26,9 +27,16 @@ export class SchedulerService implements OnModuleInit {
     private readonly jobs: JobsService,
     private readonly runner: JobRunnerService,
     private readonly checkRunner: CheckRunnerService,
+    private readonly settings: SettingsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // Cron expressions are read in the configured zone, so a change to it moves
+    // every schedule — re-register them all.
+    this.settings.onTimezoneChange((tz) => {
+      this.logger.log(`Timezone changed to ${tz}; rescheduling backup jobs`);
+      void this.syncAll();
+    });
     await this.syncAll();
   }
 
@@ -83,9 +91,15 @@ export class SchedulerService implements OnModuleInit {
     onTick: () => Promise<void>,
   ): void {
     try {
-      const job = new CronJob(cronExpr, () => {
-        void onTick();
-      });
+      const job = new CronJob(
+        cronExpr,
+        () => {
+          void onTick();
+        },
+        null,
+        false,
+        this.settings.getTimezone(),
+      );
       this.registry.addCronJob(name, job as unknown as CronJob);
       job.start();
     } catch (e) {

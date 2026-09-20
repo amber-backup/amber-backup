@@ -109,10 +109,16 @@ the full list (database, encryption key, JWT, restic paths, audit log retention,
 bootstrap admin).
 
 Runtime settings that admins can change without a restart live in the **Admin**
-section of the UI and are stored in the database: the agent offline timeout and
-the single sign-on configuration — a master toggle plus any number of providers
-(generic OIDC, Microsoft Entra ID, Google, GitHub); client secrets are encrypted
-at rest.
+section of the UI and are stored in the database: the timezone, the agent
+offline timeout and the single sign-on configuration — a master toggle plus any
+number of providers (generic OIDC, Microsoft Entra ID, Google, GitHub); client
+secrets are encrypted at rest.
+
+The timezone applies system-wide. Cron schedules for backup jobs, integrity
+checks and reports are read in it (so "daily at 02:00" follows daylight saving
+time), and the UI renders every timestamp in it. It defaults to the server
+process timezone (`TZ`, or UTC in a bare container). Changing it re-registers
+every schedule, which moves existing ones to the new zone.
 
 ## License
 

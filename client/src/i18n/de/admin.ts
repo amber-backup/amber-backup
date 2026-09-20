@@ -59,6 +59,17 @@ export const admin: AdminMessages = {
     offlineTimeoutHelp:
       'Nach welcher Zeit ohne Abfrage ein Agent als offline gilt. 30–3600 Sekunden.',
   },
+  timezone: {
+    heading: 'Zeitzone',
+    label: 'Zeitzone',
+    help: 'Zeitpläne werden in dieser Zone gelesen, alle Zeitangaben darin angezeigt.',
+    warning: 'Eine Änderung verschiebt jeden bestehenden Zeitplan in die neue Zone.',
+    filter: 'Filter',
+    filterPlaceholder: 'z. B. Berlin',
+    noMatch: 'Keine Zone passt zum Filter.',
+    currentTime: 'Dortige Uhrzeit',
+    saved: 'Zeitzone gespeichert',
+  },
   sso: {
     heading: 'Single Sign-on',
     enable: 'Single Sign-on aktivieren',

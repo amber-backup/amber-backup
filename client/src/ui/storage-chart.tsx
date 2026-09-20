@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import type { RepositoryStatsHistory } from '../core/api';
 import { fmtBytes, fmtDateTime } from '../core/format';
+import { appTimezone } from '../core/timezone';
 import { intlLocale, useT } from '../i18n';
 
 /** One point of the total-storage series. */
@@ -56,7 +57,11 @@ function byteTicks(max: number, count: number): number[] {
 }
 
 function fmtDay(t: number): string {
-  return new Date(t).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' });
+  return new Date(t).toLocaleDateString(intlLocale(), {
+    month: 'short',
+    day: 'numeric',
+    timeZone: appTimezone(),
+  });
 }
 
 const PAD = { top: 14, right: 16, bottom: 24, left: 8 };

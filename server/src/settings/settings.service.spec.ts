@@ -275,3 +275,65 @@ describe('SettingsService (local login)', () => {
     await expect(service.updateSso({ enabled: false })).resolves.toBeUndefined();
   });
 });
+
+describe('SettingsService (timezone)', () => {
+  let crypto: CryptoService;
+
+  beforeEach(() => {
+    process.env.MASTER_ENCRYPTION_KEY = TEST_MASTER_KEY;
+    crypto = new CryptoService();
+  });
+
+  it('falls back to the server timezone until an admin picks one', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.onModuleInit();
+    expect(service.getTimezone()).toBe(
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
+  });
+
+  it('round-trips a stored timezone', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.setTimezone('Europe/Berlin');
+    expect(service.getTimezone()).toBe('Europe/Berlin');
+
+    // A fresh service reads it back from the store.
+    const reloaded = new SettingsService(db, crypto);
+    await reloaded.onModuleInit();
+    expect(reloaded.getTimezone()).toBe('Europe/Berlin');
+  });
+
+  it('rejects an unknown timezone and keeps the stored one', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.setTimezone('Europe/Berlin');
+
+    await expect(service.setTimezone('Mars/Olympus')).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(service.getTimezone()).toBe('Europe/Berlin');
+  });
+
+  it('tells subscribers when the timezone changed', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    const seen: string[] = [];
+    service.onTimezoneChange((tz) => seen.push(tz));
+
+    await service.setTimezone('Asia/Tokyo');
+    await service.setTimezone('Mars/Olympus').catch(() => undefined);
+
+    expect(seen).toEqual(['Asia/Tokyo']);
+  });
+
+  it('exposes the timezone in the admin system view', async () => {
+    const { db } = createStore();
+    const service = new SettingsService(db, crypto);
+    await service.setTimezone('America/New_York');
+    await expect(service.getSystemView()).resolves.toMatchObject({
+      timezone: 'America/New_York',
+    });
+  });
+});

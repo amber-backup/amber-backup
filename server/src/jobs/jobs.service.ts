@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import parser from 'cron-parser';
+import { SettingsService } from '../settings/settings.service';
 import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
@@ -31,6 +32,7 @@ export class JobsService {
     @Inject(KYSELY) private readonly db: Db,
     private readonly acl: AccessControlService,
     private readonly secrets: SecretsService,
+    private readonly settings: SettingsService,
   ) {}
 
   private validateCron(expr: string): void {
@@ -125,7 +127,10 @@ export class JobsService {
 
   nextRun(expr: string): Date | null {
     try {
-      return parser.parseExpression(expr).next().toDate();
+      return parser
+        .parseExpression(expr, { tz: this.settings.getTimezone() })
+        .next()
+        .toDate();
     } catch {
       return null;
     }

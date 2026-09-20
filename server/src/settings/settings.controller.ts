@@ -9,6 +9,7 @@ import {
   UpdateAgentSettingsDto,
   UpdateAuthSettingsDto,
   UpdateSsoDto,
+  UpdateTimezoneDto,
 } from './dto/settings.dto';
 
 @ApiTags('settings')
@@ -23,6 +24,24 @@ export class SettingsController {
   @Get('system')
   @ApiOperation({ summary: 'System settings (agent timeout, SSO — admin)' })
   system() {
+    return this.settings.getSystemView();
+  }
+
+  @Get('app')
+  @ApiOperation({
+    summary: 'Settings every signed-in client needs (display timezone)',
+  })
+  app() {
+    return { timezone: this.settings.getTimezone() };
+  }
+
+  @RequireAdmin()
+  @Patch('timezone')
+  @ApiOperation({
+    summary: 'Set the timezone cron schedules and timestamps are read in',
+  })
+  async updateTimezone(@Body() dto: UpdateTimezoneDto) {
+    await this.settings.setTimezone(dto.timezone);
     return this.settings.getSystemView();
   }
 

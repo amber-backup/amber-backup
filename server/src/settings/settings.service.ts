@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  OnModuleInit,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Db, KYSELY } from '../database/database.module';
 import { CryptoService, EncryptedPayload } from '../crypto/crypto.service';
@@ -14,9 +19,28 @@ export const SETTINGS_KEYS = {
   agentOfflineTimeout: 'agent_offline_timeout',
   sso: 'sso',
   localLogin: 'local_login',
+  timezone: 'timezone',
 } as const;
 
 const DEFAULT_OFFLINE_SECONDS = 120;
+
+/**
+ * The zone schedules and timestamps fall back to until an admin picks one:
+ * whatever the server process runs in (`TZ`, or UTC in a bare container).
+ */
+export function serverTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/** True for an IANA zone name `Intl` — and therefore cron — can resolve. */
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Supported single sign-on provider kinds. */
 export type SsoProviderType = 'oidc' | 'entra' | 'google' | 'github';
@@ -89,6 +113,8 @@ export interface SsoProviderView {
 /** Admin-facing view (secrets never leave the server — only a "set" flag). */
 export interface SystemSettingsView {
   agentOfflineTimeoutSeconds: number;
+  /** IANA zone that cron schedules and displayed timestamps are read in. */
+  timezone: string;
   /** Whether password and passkey logins are accepted at all. */
   localLoginEnabled: boolean;
   sso: {
@@ -102,11 +128,22 @@ export interface SystemSettingsView {
 const EMPTY_SSO: StoredSso = { enabled: false, providers: [] };
 
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnModuleInit {
+  /**
+   * Cached so that synchronous callers (`nextRun`, cron registration) can read
+   * the zone without awaiting a query. Kept current by every write.
+   */
+  private tz = serverTimezone();
+  private readonly tzListeners: ((tz: string) => void)[] = [];
+
   constructor(
     @Inject(KYSELY) private readonly db: Db,
     private readonly crypto: CryptoService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.readTimezone();
+  }
 
   private async read<T>(key: string): Promise<T | null> {
     const row = await this.db
@@ -140,6 +177,42 @@ export class SettingsService {
 
   async setAgentOfflineTimeout(seconds: number): Promise<void> {
     await this.write(SETTINGS_KEYS.agentOfflineTimeout, { seconds });
+  }
+
+  // --- Timezone -------------------------------------------------------------
+
+  private async readTimezone(): Promise<string> {
+    const v = await this.read<{ timezone: string }>(SETTINGS_KEYS.timezone);
+    this.tz =
+      v?.timezone && isValidTimezone(v.timezone) ? v.timezone : serverTimezone();
+    return this.tz;
+  }
+
+  /** The configured zone, from cache — safe to call from synchronous code. */
+  getTimezone(): string {
+    return this.tz;
+  }
+
+  async setTimezone(timezone: string): Promise<void> {
+    const tz = timezone.trim();
+    if (!isValidTimezone(tz)) {
+      throw new BadRequestException(`Unknown timezone: ${timezone}`);
+    }
+    // Stored even when it matches the current default, so the choice survives a
+    // change to the server's own zone. Only a real change needs rescheduling.
+    const changed = tz !== this.tz;
+    await this.write(SETTINGS_KEYS.timezone, { timezone: tz });
+    this.tz = tz;
+    if (changed) for (const listener of this.tzListeners) listener(tz);
+  }
+
+  /**
+   * Notifies on every change, so the schedulers can re-register their cron jobs
+   * in the new zone. Listening this way keeps the dependency one-directional:
+   * jobs and reports know settings, never the other way round.
+   */
+  onTimezoneChange(listener: (tz: string) => void): void {
+    this.tzListeners.push(listener);
   }
 
   // --- Local login ----------------------------------------------------------
@@ -236,14 +309,16 @@ export class SettingsService {
   // --- Admin view -----------------------------------------------------------
 
   async getSystemView(): Promise<SystemSettingsView> {
-    const [timeout, sso, localLogin] = await Promise.all([
+    const [timeout, sso, localLogin, timezone] = await Promise.all([
       this.getAgentOfflineTimeout(),
       this.readSso(),
       this.getLocalLoginEnabled(),
+      this.readTimezone(),
     ]);
     const base = loadConfig().publicBaseUrl.replace(/\/$/, '');
     return {
       agentOfflineTimeoutSeconds: timeout,
+      timezone,
       localLoginEnabled: localLogin,
       sso: {
         enabled: sso.enabled,

@@ -23,6 +23,17 @@ export class UpdateAgentSettingsDto {
   offlineTimeoutSeconds!: number;
 }
 
+export class UpdateTimezoneDto {
+  @ApiProperty({
+    description:
+      'IANA zone name that cron schedules and displayed timestamps are read in',
+    example: 'Europe/Berlin',
+  })
+  @IsString()
+  @MaxLength(64)
+  timezone!: string;
+}
+
 export class UpdateAuthSettingsDto {
   @ApiProperty({ description: 'Accept password and passkey logins' })
   @IsBoolean()

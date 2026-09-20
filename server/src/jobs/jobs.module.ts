@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TargetsModule } from '../targets/targets.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RepositoriesModule } from '../repositories/repositories.module';
+import { SettingsModule } from '../settings/settings.module';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { JobRunnerService } from './job-runner.service';
@@ -11,7 +12,12 @@ import { SchedulerService } from './scheduler.service';
 import { RunRetryService } from './run-retry.service';
 
 @Module({
-  imports: [TargetsModule, NotificationsModule, RepositoriesModule],
+  imports: [
+    TargetsModule,
+    NotificationsModule,
+    RepositoriesModule,
+    SettingsModule,
+  ],
   controllers: [JobsController],
   providers: [
     JobsService,

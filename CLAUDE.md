@@ -108,6 +108,14 @@ Key cross-cutting flows to understand before editing:
   announces e.g. `check`), so an older agent is never handed a task it would
   drop.
 
+- **One timezone for the whole system.** `SettingsService` stores it in
+  `app_settings` (key `timezone`, default = the server process zone) and caches
+  it so synchronous callers can read it via `getTimezone()`. The schedulers pass
+  it to every `CronJob`, `nextRun()` passes it to `cron-parser`, and the client
+  formats all timestamps in it (`core/timezone.ts`, loaded from
+  `GET /settings/app` with the session). Settings never imports jobs/reports —
+  the schedulers subscribe via `onTimezoneChange()` and re-sync themselves.
+
 - **Auth & RBAC.** Cookie/JWT session auth. `common/guards/auth.guard.ts`
   protects human/API-key requests; `agent-auth.guard.ts` protects the agent
   channel. Mark public routes with the `@Public()` decorator

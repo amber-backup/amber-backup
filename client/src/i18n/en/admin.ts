@@ -56,6 +56,17 @@ export const admin = {
     offlineTimeout: 'Offline timeout (seconds)',
     offlineTimeoutHelp: 'After how long without a poll an agent is marked offline. 30–3600 seconds.',
   },
+  timezone: {
+    heading: 'Timezone',
+    label: 'Timezone',
+    help: 'Schedules are read in this zone and all timestamps are shown in it.',
+    warning: 'Changing it moves every existing schedule to the new zone.',
+    filter: 'Filter',
+    filterPlaceholder: 'e.g. Berlin',
+    noMatch: 'No zone matches the filter.',
+    currentTime: 'Current time there',
+    saved: 'Timezone saved',
+  },
   sso: {
     heading: 'Single sign-on',
     enable: 'Enable single sign-on',

@@ -4,6 +4,7 @@ import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
 import { Db } from '../database/database.module';
+import { SettingsService } from '../settings/settings.service';
 import { chain, ChainBuilder } from '../testing/db-mock';
 
 describe('JobsService credential overrides', () => {
@@ -65,6 +66,7 @@ describe('JobsService credential overrides', () => {
       db,
       acl as unknown as AccessControlService,
       secrets as unknown as SecretsService,
+      { getTimezone: () => 'UTC' } as unknown as SettingsService,
     );
     return { service, secrets, repoInsert, repoUpdate };
   }
@@ -212,5 +214,31 @@ describe('JobsService credential overrides', () => {
       expect(secrets.remove).toHaveBeenCalledWith('sec-password');
       expect(secrets.remove).toHaveBeenCalledWith('sec-old');
     });
+  });
+});
+
+describe('JobsService next run timezone', () => {
+  function make(timezone: string) {
+    const settings = { getTimezone: () => timezone };
+    return new JobsService(
+      {} as unknown as Db,
+      {} as unknown as AccessControlService,
+      {} as unknown as SecretsService,
+      settings as unknown as SettingsService,
+    );
+  }
+
+  it('reads a cron expression in the configured timezone', () => {
+    // "03:00 daily" is a different instant in Berlin than it is in UTC.
+    const utc = make('UTC').nextRun('0 3 * * *')!;
+    const berlin = make('Europe/Berlin').nextRun('0 3 * * *')!;
+
+    expect(utc.getUTCHours()).toBe(3);
+    // Berlin is one or two hours ahead, depending on daylight saving time.
+    expect([1, 2]).toContain(berlin.getUTCHours());
+  });
+
+  it('returns null for an expression it cannot parse', () => {
+    expect(make('UTC').nextRun('not a cron')).toBeNull();
   });
 });

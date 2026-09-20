@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, type User } from './api';
 import { authenticatePasskey } from './passkeys';
+import { loadAppTimezone } from './timezone';
 
 /** Login either signs in, or reports that a TOTP second factor is required. */
 export type LoginResult =
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async (): Promise<User | null> => {
     try {
       const me = await api.get<User>('/auth/me');
+      await loadAppTimezone();
       setUser(me);
       return me;
     } catch {
@@ -37,7 +39,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
     const res = await api.post<LoginResult>('/auth/login', { email, password });
-    if ('user' in res) setUser(res.user);
+    if ('user' in res) {
+      await loadAppTimezone();
+      setUser(res.user);
+    }
     return res;
   }, []);
 
@@ -47,13 +52,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         challengeToken,
         code,
       });
+      await loadAppTimezone();
       setUser(res.user);
     },
     [],
   );
 
   const loginPasskey = useCallback(async (): Promise<void> => {
-    setUser(await authenticatePasskey());
+    const me = await authenticatePasskey();
+    await loadAppTimezone();
+    setUser(me);
   }, []);
 
   const logout = useCallback(async (): Promise<void> => {

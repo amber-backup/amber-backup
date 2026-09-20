@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { ReportsService } from './reports.service';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * Registers a dynamic CronJob per enabled report. On tick it renders the report
@@ -14,9 +15,13 @@ export class ReportSchedulerService implements OnModuleInit {
   constructor(
     private readonly registry: SchedulerRegistry,
     private readonly reports: ReportsService,
+    private readonly settings: SettingsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    this.settings.onTimezoneChange(() => {
+      void this.syncAll();
+    });
     await this.syncAll();
   }
 
@@ -51,9 +56,15 @@ export class ReportSchedulerService implements OnModuleInit {
   private register(reportId: string, cronExpr: string): void {
     const name = this.cronName(reportId);
     try {
-      const job = new CronJob(cronExpr, () => {
-        void this.trigger(reportId);
-      });
+      const job = new CronJob(
+        cronExpr,
+        () => {
+          void this.trigger(reportId);
+        },
+        null,
+        false,
+        this.settings.getTimezone(),
+      );
       this.registry.addCronJob(name, job as unknown as CronJob);
       job.start();
     } catch (e) {

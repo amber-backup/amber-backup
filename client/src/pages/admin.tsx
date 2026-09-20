@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../core/api';
 import { Icon } from '../core/icons';
 import { copyToClipboard } from '../core/clipboard';
@@ -6,7 +6,8 @@ import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal } from '../ui/modal';
 import { PageHeader, Field, Loading, Empty } from '../ui/primitives';
-import { useT } from '../i18n';
+import { setAppTimezone } from '../core/timezone';
+import { intlLocale, useT } from '../i18n';
 
 interface GlobalEnroll {
   enabled: boolean;
@@ -27,6 +28,8 @@ interface SsoProviderView {
 
 interface SystemSettings {
   agentOfflineTimeoutSeconds: number;
+  /** IANA zone cron schedules and displayed timestamps are read in. */
+  timezone: string;
   /** Whether password and passkey logins are accepted at all. */
   localLoginEnabled: boolean;
   sso: { enabled: boolean; providers: SsoProviderView[] };
@@ -224,6 +227,7 @@ function SystemPanels() {
 
   return (
     <>
+      <TimezonePanel sys={data} />
       <AgentPanel sys={data} />
       <AuthPanel sys={data} />
       <SsoPanel sys={data} />
@@ -443,6 +447,117 @@ function AgentPanel({ sys }: { sys: SystemSettings }) {
             onChange={(e) => setValue(e.target.value)}
           />
         </Field>
+        <div style={ACTIONS_STYLE}>
+          <button className="btn btn-primary btn-sm" onClick={() => void save()}>
+            {t.common.save}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Timezone ---------------------------------------------------------------
+
+/** Enough of a list to stay usable where `Intl.supportedValuesOf` is missing. */
+const FALLBACK_TIMEZONES = [
+  'UTC',
+  'Europe/Berlin',
+  'Europe/London',
+  'Europe/Zurich',
+  'America/New_York',
+  'America/Los_Angeles',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+];
+
+function supportedTimezones(): string[] {
+  const supported = (Intl as { supportedValuesOf?: (key: string) => string[] })
+    .supportedValuesOf;
+  try {
+    const zones = supported?.('timeZone');
+    if (zones?.length) return zones;
+  } catch {
+    /* not supported here — the short list below still gets the job done */
+  }
+  return FALLBACK_TIMEZONES;
+}
+
+/** The time it is right now in `tz`, so the choice can be sanity-checked. */
+function nowIn(tz: string): string {
+  try {
+    return new Date().toLocaleString(intlLocale(), {
+      timeZone: tz,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  } catch {
+    return '—';
+  }
+}
+
+function TimezonePanel({ sys }: { sys: SystemSettings }) {
+  const t = useT();
+  const toast = useToast();
+  const [value, setValue] = useState(sys.timezone);
+  const [filter, setFilter] = useState('');
+  const zones = useMemo(() => supportedTimezones(), []);
+
+  const { shown, empty } = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const matches = q ? zones.filter((z) => z.toLowerCase().includes(q)) : zones;
+    // The selected zone stays selectable even when the filter would hide it.
+    return {
+      shown: matches.includes(value) ? matches : [value, ...matches],
+      empty: matches.length === 0,
+    };
+  }, [zones, filter, value]);
+
+  const save = async () => {
+    try {
+      await api.patch('/settings/timezone', { timezone: value });
+      setAppTimezone(value);
+      toast(t.admin.timezone.saved, 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t.common.error, 'error');
+    }
+  };
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>{t.admin.timezone.heading}</h2>
+      </div>
+      <div style={BODY_STYLE}>
+        <Field label={t.admin.timezone.filter}>
+          <input
+            type="text"
+            style={{ maxWidth: 320 }}
+            placeholder={t.admin.timezone.filterPlaceholder}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </Field>
+        <Field label={t.admin.timezone.label} help={t.admin.timezone.help}>
+          <select
+            style={{ maxWidth: 320 }}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          >
+            {shown.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="row-sub">
+          {empty
+            ? t.admin.timezone.noMatch
+            : `${t.admin.timezone.currentTime}: ${nowIn(value)}`}
+        </div>
+        <div className="row-sub">{t.admin.timezone.warning}</div>
         <div style={ACTIONS_STYLE}>
           <button className="btn btn-primary btn-sm" onClick={() => void save()}>
             {t.common.save}

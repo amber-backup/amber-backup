@@ -1,6 +1,7 @@
 // Pure formatting helpers shared across pages.
 
 import { intlLocale, messages } from '../i18n';
+import { appTimezone } from './timezone';
 
 export function fmtBytes(bytes?: number | null): string {
   if (bytes == null) return '—';
@@ -24,7 +25,7 @@ export function fmtRelative(date?: string | null): string {
   if (abs < hour) return fmt(Math.round(abs / min), m.unitMin);
   if (abs < day) return fmt(Math.round(abs / hour), m.unitHour);
   if (abs < 30 * day) return fmt(Math.round(abs / day), m.unitDay);
-  return new Date(date).toLocaleDateString(intlLocale());
+  return new Date(date).toLocaleDateString(intlLocale(), { timeZone: appTimezone() });
 }
 
 /** Human-readable elapsed time, e.g. "42 s", "3 min 12 s", "1 h 05 min". */
@@ -55,6 +56,7 @@ export function fmtDateTime(date?: string | null): string {
   return new Date(date).toLocaleString(intlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: appTimezone(),
   });
 }
 
