@@ -1,3 +1,10 @@
+# [1.35.0](https://github.com/amber-backup/amber-backup/compare/v1.34.1...v1.35.0) (2026-09-20)
+
+
+### Features
+
+* **settings:** configure the system timezone in the admin area ([1a3e6e9](https://github.com/amber-backup/amber-backup/commit/1a3e6e9faf160075a943a8bc13d23ceff379e13b))
+
 ## [1.34.1](https://github.com/amber-backup/amber-backup/compare/v1.34.0...v1.34.1) (2026-09-16)
 
 
