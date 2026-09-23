@@ -220,7 +220,8 @@ export interface RepositoriesTable {
   owner_id: string;
   /**
    * Cached figures from `restic stats` / `restic snapshots`, refreshed after
-   * each successful backup run and on demand (RepositoriesService).
+   * each successful backup run and on demand (RepositoriesService). For a job
+   * that runs on an agent, the agent reads them and reports them.
    * `size_bytes` is a bigint; pg returns it as a string.
    */
   size_bytes: ColumnType<string | null, number | null, number | null>;
@@ -229,6 +230,11 @@ export interface RepositoriesTable {
   stats_at: ColumnType<Date | null, Date | null, Date | null>;
   /** Last refresh failure (figures then reflect the previous read), if any. */
   stats_error: string | null;
+  /**
+   * Refresh requested for an agent-run repository, waiting for the agent's next
+   * poll to claim it; null ⇒ nothing pending.
+   */
+  stats_requested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   /** Verdict of the last integrity check that finished; null ⇒ never checked. */
   check_status: CheckStatus | null;
   /** When that verdict was reached. */

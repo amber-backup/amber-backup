@@ -439,7 +439,10 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         selectFrom: select,
         updateTable: chain({ executeTakeFirst: { poll_interval_seconds: 30 } }),
       });
-      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+      const repos = {
+        claimStatsRequests: jest.fn().mockResolvedValue([]),
+      } as unknown as RepositoriesService;
+      const service = new AgentsService(db, crypto, targets, notifications, repos, pruneRunner, checkRunner, retries);
       return { service, select };
     }
 
@@ -500,6 +503,158 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         error: 'damaged',
         log: 'Fatal: repository contains errors',
       });
+    });
+  });
+
+  describe('repository stats', () => {
+    const agent = { id: 'agent-1' } as never;
+    const request = {
+      id: 'repo-1',
+      target_id: 't1',
+      repo_config: {},
+      repo_password_secret_id: 'sec',
+      credential_secret_id: null,
+    };
+
+    function makePollService() {
+      const { db } = createDbMock({
+        selectFrom: chain({ execute: [] }),
+        updateTable: chain({ executeTakeFirst: { poll_interval_seconds: 30 } }),
+      });
+      const repos = {
+        claimStatsRequests: jest.fn().mockResolvedValue([request]),
+        refreshStatsInBackground: jest.fn(),
+      };
+      const resolver = {
+        resolveForJob: jest.fn().mockResolvedValue({
+          repository: 's3:bucket/repo',
+          password: 'pw',
+          env: {},
+          credentialFiles: [],
+        }),
+      };
+      const service = new AgentsService(
+        db,
+        crypto,
+        resolver as unknown as TargetsService,
+        notifications,
+        repos as unknown as RepositoriesService,
+        pruneRunner,
+        checkRunner,
+        retries,
+      );
+      return { service, repos };
+    }
+
+    it('hands a requested refresh to an agent that announces the capability', async () => {
+      const { service, repos } = makePollService();
+
+      const { tasks } = await service.poll(agent, { capabilities: ['check', 'stats'] });
+
+      expect(tasks).toEqual([
+        expect.objectContaining({ type: 'stats', taskId: 'stats-repo-1', repository: 's3:bucket/repo' }),
+      ]);
+      expect(repos.refreshStatsInBackground).not.toHaveBeenCalled();
+    });
+
+    it('reads the repository on the server for an agent without the capability', async () => {
+      const { service, repos } = makePollService();
+
+      const { tasks } = await service.poll(agent, { capabilities: ['check'] });
+
+      expect(tasks).toEqual([]);
+      expect(repos.refreshStatsInBackground).toHaveBeenCalledWith('repo-1');
+    });
+
+    function makeResultService(owned: unknown) {
+      const { db } = createDbMock({
+        selectFrom: chain({
+          executeTakeFirst: owned,
+        }),
+        updateTable: chain({ execute: [] }),
+      });
+      const repos = {
+        recordStats: jest.fn().mockResolvedValue(undefined),
+        refreshStatsInBackground: jest.fn(),
+      };
+      const prune = { record: jest.fn().mockResolvedValue('prune-1') };
+      const service = new AgentsService(
+        db,
+        crypto,
+        targets,
+        notifications,
+        repos as unknown as RepositoriesService,
+        prune as unknown as PruneRunnerService,
+        checkRunner,
+        retries,
+      );
+      return { service, repos, prune };
+    }
+
+    it('records the figures of a stats task', async () => {
+      const { service, repos } = makeResultService({ id: 'job-1' });
+
+      await service.submitResult('agent-1', 'stats-repo-1', {
+        status: 'success',
+        repoStats: { sizeBytes: 4096, snapshotCount: 7 },
+      } as never);
+
+      expect(repos.recordStats).toHaveBeenCalledWith('repo-1', {
+        size_bytes: 4096,
+        snapshot_count: 7,
+      });
+    });
+
+    it('rejects stats for a repository whose job runs elsewhere', async () => {
+      const { service, repos } = makeResultService(undefined);
+
+      await expect(
+        service.submitResult('agent-1', 'stats-repo-1', {
+          status: 'success',
+          repoStats: { sizeBytes: 1, snapshotCount: 1 },
+        } as never),
+      ).rejects.toThrow(NotFoundException);
+      expect(repos.recordStats).not.toHaveBeenCalled();
+    });
+
+    it('takes the figures a backup reported instead of reading them on the server', async () => {
+      const { service, repos, prune } = makeResultService({
+        id: 'run-1',
+        job_id: 'j1',
+        trigger: 'manual',
+        repository_id: 'repo-1',
+      });
+
+      await service.submitBackupResult('agent-1', 'run-1', {
+        status: 'success',
+        repoStats: { sizeBytes: 4096, snapshotCount: 7 },
+        prune: {
+          status: 'success',
+          startedAt: '2026-09-23T10:00:00Z',
+          finishedAt: '2026-09-23T10:01:00Z',
+        },
+      } as never);
+
+      expect(repos.recordStats).toHaveBeenCalledWith('repo-1', {
+        size_bytes: 4096,
+        snapshot_count: 7,
+      });
+      expect(repos.refreshStatsInBackground).not.toHaveBeenCalled();
+      expect(prune.record).toHaveBeenCalledWith(expect.objectContaining({ statsReported: true }));
+    });
+
+    it('reads the repository on the server when an older agent reports no figures', async () => {
+      const { service, repos } = makeResultService({
+        id: 'run-1',
+        job_id: 'j1',
+        trigger: 'manual',
+        repository_id: 'repo-1',
+      });
+
+      await service.submitBackupResult('agent-1', 'run-1', { status: 'success' } as never);
+
+      expect(repos.recordStats).not.toHaveBeenCalled();
+      expect(repos.refreshStatsInBackground).toHaveBeenCalledWith('repo-1');
     });
   });
 });

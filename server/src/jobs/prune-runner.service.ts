@@ -30,6 +30,8 @@ export interface PruneOutcome {
   finishedAt: Date;
   error?: string | null;
   log?: string | null;
+  /** The agent already reported the repository's figures after the prune. */
+  statsReported?: boolean;
 }
 
 /**
@@ -97,7 +99,7 @@ export class PruneRunnerService {
       })
       .returning('id')
       .executeTakeFirstOrThrow();
-    if (outcome.status === 'success') {
+    if (outcome.status === 'success' && !outcome.statsReported) {
       this.repositories.refreshStatsInBackground(outcome.repositoryId);
     }
     return row.id;

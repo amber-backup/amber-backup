@@ -8,6 +8,7 @@ import {
   type NotificationChannel,
   type BackendDef,
   type RepositoryStats,
+  type RepositoryStatsRefresh,
 } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative } from '../core/format';
@@ -142,7 +143,8 @@ function JobRow({
         ) : (
           <span className="muted">{m.disabled}</span>
         )}
-        <RepoSize job={j} />
+        {/* Keyed on the reading so a list reload shows figures an agent reported. */}
+        <RepoSize key={`${j.repo_stats_at ?? ''}|${j.repo_stats_error ?? ''}`} job={j} />
       </div>
       <div className="row-actions">
         <BusyButton
@@ -261,7 +263,13 @@ function RepoSize({ job }: { job: Job }) {
         title={m.refresh}
         onClick={async () => {
           try {
-            const fresh = await api.post<RepositoryStats>(`/repositories/${job.repository_id}/stats`);
+            const fresh = await api.post<RepositoryStatsRefresh>(
+              `/repositories/${job.repository_id}/stats`,
+            );
+            if (fresh.queued) {
+              toast(m.refreshQueued);
+              return;
+            }
             setStats(fresh);
             if (fresh.stats_error) toast(m.refreshError(fresh.stats_error), 'error');
           } catch (err) {

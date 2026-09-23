@@ -185,6 +185,14 @@ export interface RepositoryStats {
   stats_error: string | null;
 }
 
+/**
+ * Result of POST /repositories/:id/stats. `queued`: the job runs on an agent,
+ * which reads the figures after its next poll; these are the cached ones.
+ */
+export interface RepositoryStatsRefresh extends RepositoryStats {
+  queued: boolean;
+}
+
 /** Result of GET /repositories/stats-history?days=N (dashboard growth chart). */
 export interface RepositoryStatsHistory {
   since: string;

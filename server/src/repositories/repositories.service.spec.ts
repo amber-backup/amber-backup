@@ -143,3 +143,80 @@ describe('RepositoriesService.refreshStats', () => {
     });
   });
 });
+
+describe('RepositoriesService.refreshStatsFor', () => {
+  const user = { id: 'u1' } as RequestUser;
+  const cached = {
+    size_bytes: '100',
+    snapshot_count: 1,
+    stats_at: new Date('2026-01-01T00:00:00Z'),
+    stats_error: null,
+  };
+
+  function make(agentId: string | null) {
+    const update = chain({ execute: [] });
+    const { db } = createDbMock({
+      selectFrom: (table) =>
+        table === 'repositories as r'
+          ? chain({ executeTakeFirst: { job_id: 'job-1', agent_id: agentId } })
+          : chain({ executeTakeFirst: cached }),
+      updateTable: update,
+    });
+    const acl = { assert: jest.fn().mockResolvedValue(undefined) };
+    const restic = { stats: jest.fn(), snapshots: jest.fn() };
+    const service = new RepositoriesService(
+      db,
+      acl as unknown as AccessControlService,
+      {} as TargetsService,
+      restic as unknown as ResticService,
+    );
+    return { service, update, restic };
+  }
+
+  it('queues the read for the agent instead of running restic on the server', async () => {
+    const { service, update, restic } = make('agent-1');
+
+    const result = await service.refreshStatsFor(user, 'repo-1');
+
+    expect(restic.stats).not.toHaveBeenCalled();
+    expect(update.set).toHaveBeenCalledWith({ stats_requested_at: expect.any(Date) });
+    expect(result).toEqual({
+      size_bytes: 100,
+      snapshot_count: 1,
+      stats_at: cached.stats_at,
+      stats_error: null,
+      queued: true,
+    });
+  });
+});
+
+describe('RepositoriesService.recordStats', () => {
+  it('stores figures an agent reported', async () => {
+    const update = chain({ execute: [] });
+    const insert = chain({ execute: [] });
+    const { db } = createDbMock({
+      selectFrom: () =>
+        chain({ executeTakeFirst: { size_bytes: '100', snapshot_count: 1, stats_at: null } }),
+      updateTable: update,
+      insertInto: insert,
+    });
+    const service = new RepositoriesService(
+      db,
+      {} as AccessControlService,
+      {} as TargetsService,
+      {} as ResticService,
+    );
+
+    await service.recordStats('repo-1', { size_bytes: 2048, snapshot_count: 3 });
+
+    expect(update.set).toHaveBeenCalledWith({
+      size_bytes: 2048,
+      snapshot_count: 3,
+      stats_at: expect.any(Date),
+      stats_error: null,
+    });
+    expect(insert.values).toHaveBeenCalledWith(
+      expect.objectContaining({ repository_id: 'repo-1', size_bytes: 2048 }),
+    );
+  });
+});

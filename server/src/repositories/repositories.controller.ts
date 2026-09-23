@@ -51,7 +51,7 @@ export class RepositoriesController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Re-read size and snapshot count from restic and cache them on the repository',
+      'Re-read size and snapshot count from restic and cache them on the repository; for a job on an agent, queue the read for that agent (queued: true)',
   })
   async refreshStats(
     @CurrentUser() user: RequestUser,

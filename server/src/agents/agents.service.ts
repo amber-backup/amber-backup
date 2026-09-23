@@ -15,7 +15,10 @@ import { Db, KYSELY } from '../database/database.module';
 import { CryptoService } from '../crypto/crypto.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { RepositoriesService } from '../repositories/repositories.service';
+import {
+  RepositoriesService,
+  StatsReading,
+} from '../repositories/repositories.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
 import { RunRetryService } from '../jobs/run-retry.service';
 import { CheckRunnerService } from '../jobs/check-runner.service';
@@ -49,9 +52,17 @@ const NAME_PLACEHOLDER = '__AGENT_NAME__';
  * such tasks (they would drop them as unknown).
  */
 export const AGENT_CAPABILITY_CHECK = 'check';
+/**
+ * The agent reads the repository figures itself: after every backup (reported
+ * as `repoStats` on the result) and for queued `stats` tasks.
+ */
+export const AGENT_CAPABILITY_STATS = 'stats';
+
+/** Task id prefix of a `stats` task; the rest is the repository id. */
+const STATS_TASK_PREFIX = 'stats-';
 
 export interface AgentTask {
-  type: 'backup' | 'restore' | 'check';
+  type: 'backup' | 'restore' | 'check' | 'stats';
   taskId: string;
   repository: string;
   password: string;
@@ -536,6 +547,12 @@ echo "Amber agent installed and started."
     if (dto.capabilities?.includes(AGENT_CAPABILITY_CHECK)) {
       tasks.push(...(await this.claimCheckTasks(agent.id)));
     }
+    tasks.push(
+      ...(await this.claimStatsTasks(
+        agent.id,
+        dto.capabilities?.includes(AGENT_CAPABILITY_STATS) ?? false,
+      )),
+    );
 
     return {
       tasks,
@@ -672,6 +689,36 @@ echo "Amber agent installed and started."
     return tasks;
   }
 
+  /**
+   * Hands pending stats refreshes to the agent. An agent that predates the
+   * `stats` task can't run them, so the server reads those repositories itself
+   * instead of leaving the request pending forever.
+   */
+  private async claimStatsTasks(
+    agentId: string,
+    capable: boolean,
+  ): Promise<AgentTask[]> {
+    const requests = await this.repositories.claimStatsRequests(agentId);
+    if (!capable) {
+      for (const r of requests) this.repositories.refreshStatsInBackground(r.id);
+      return [];
+    }
+    const tasks: AgentTask[] = [];
+    for (const r of requests) {
+      const resolved = await this.targets.resolveForJob(r);
+      tasks.push({
+        type: 'stats',
+        taskId: STATS_TASK_PREFIX + r.id,
+        repository: resolved.repository,
+        password: resolved.password,
+        env: resolved.env,
+        credentialFiles: resolved.credentialFiles,
+        extraArgs: resolved.extraArgs,
+      });
+    }
+    return tasks;
+  }
+
   private async claimRestoreTasks(agentId: string): Promise<AgentTask[]> {
     const runs = await this.db
       .selectFrom('restore_runs')
@@ -776,8 +823,12 @@ echo "Amber agent installed and started."
       .where('status', '=', 'running')
       .execute();
 
-    // The repository just changed size — refresh its cached figures.
-    if (dto.status === 'success') {
+    // The repository just changed size. A current agent read the new figures
+    // itself (after its prune, if any); only an older one leaves it to us.
+    const statsReported = dto.repoStats != null || dto.repoStatsError != null;
+    if (statsReported) {
+      await this.repositories.recordStats(run.repository_id, toStatsReading(dto));
+    } else if (dto.status === 'success') {
       this.repositories.refreshStatsInBackground(run.repository_id);
     }
 
@@ -794,6 +845,7 @@ echo "Amber agent installed and started."
         finishedAt: new Date(dto.prune.finishedAt),
         error: dto.prune.error ?? null,
         log: dto.prune.log ?? null,
+        statsReported,
       });
     }
 
@@ -851,6 +903,14 @@ echo "Amber agent installed and started."
     // A result post proves the agent is alive, even for a long task that ran
     // past the offline timeout without polling.
     await this.touchAgent(agentId);
+    if (taskId.startsWith(STATS_TASK_PREFIX)) {
+      await this.submitStatsResult(
+        agentId,
+        taskId.slice(STATS_TASK_PREFIX.length),
+        dto,
+      );
+      return { ok: true };
+    }
     // Route to the correct run table.
     const jobRun = await this.db
       .selectFrom('job_runs')
@@ -871,6 +931,22 @@ echo "Amber agent installed and started."
       await this.submitRestoreResult(agentId, taskId, dto);
     }
     return { ok: true };
+  }
+
+  /** Records the figures of a `stats` task, if the repository is this agent's. */
+  async submitStatsResult(
+    agentId: string,
+    repositoryId: string,
+    dto: TaskResultDto,
+  ): Promise<void> {
+    const owned = await this.db
+      .selectFrom('backup_jobs')
+      .select('id')
+      .where('repository_id', '=', repositoryId)
+      .where('agent_id', '=', agentId)
+      .executeTakeFirst();
+    if (!owned) throw new NotFoundException('Task not found for this agent');
+    await this.repositories.recordStats(repositoryId, toStatsReading(dto));
   }
 
   async submitProgress(
@@ -938,4 +1014,15 @@ echo "Amber agent installed and started."
 /** Trims entries and drops blanks and duplicates, keeping the first occurrence's order. */
 function uniqueTrimmed(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+}
+
+/** The repository figures an agent reported on a task result. */
+function toStatsReading(dto: TaskResultDto): StatsReading {
+  if (dto.repoStats) {
+    return {
+      size_bytes: dto.repoStats.sizeBytes,
+      snapshot_count: dto.repoStats.snapshotCount,
+    };
+  }
+  return { error: dto.repoStatsError ?? dto.error ?? 'stats failed' };
 }

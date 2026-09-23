@@ -114,9 +114,20 @@ type TaskResult struct {
 	// the server records it as an activity of its own.
 	Prune *PruneResult `json:"prune,omitempty"`
 	// For a check: restic reported integrity errors (Status is then "failed").
-	Damaged bool   `json:"damaged,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Log     string `json:"log,omitempty"`
+	Damaged bool `json:"damaged,omitempty"`
+	// Repository figures read after a backup and for a stats task, so the
+	// server never has to run `restic stats` itself; RepoStatsError when that
+	// read failed. Mirrors the server's RepoStatsDto.
+	RepoStats      *RepoStats `json:"repoStats,omitempty"`
+	RepoStatsError string     `json:"repoStatsError,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	Log            string     `json:"log,omitempty"`
+}
+
+// RepoStats mirrors the server's RepoStatsDto.
+type RepoStats struct {
+	SizeBytes     int64 `json:"sizeBytes"`
+	SnapshotCount int64 `json:"snapshotCount"`
 }
 
 // PruneResult mirrors the server's PruneResultDto.

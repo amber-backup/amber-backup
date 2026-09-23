@@ -280,6 +280,22 @@ func checkArgs(t *Task) []string {
 	return []string{"check"}
 }
 
+// statsArgs reads the repository's stored footprint (mirrors the server's
+// stats()). raw-data mode also reports the snapshot count, so one command
+// yields both figures.
+func statsArgs() []string {
+	return []string{"stats", "--json", "--no-lock", "--mode", "raw-data"}
+}
+
+// repoStatsFrom picks the figures out of `restic stats --json` output.
+func repoStatsFrom(msg map[string]any) *RepoStats {
+	num := func(key string) int64 {
+		v, _ := msg[key].(float64)
+		return int64(v)
+	}
+	return &RepoStats{SizeBytes: num("total_size"), SnapshotCount: num("snapshots_count")}
+}
+
 // isDamagedCheckOutput tells a check that found errors apart from one that
 // could not run: restic ends the former with "Fatal: repository contains errors".
 func isDamagedCheckOutput(output string) bool {

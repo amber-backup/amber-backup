@@ -63,6 +63,27 @@ export interface RepositoryStats {
   stats_error: string | null;
 }
 
+/** Figures read by restic — on the server or on an agent — or why that failed. */
+export type StatsReading =
+  | { size_bytes: number | null; snapshot_count: number }
+  | { error: string };
+
+/**
+ * Answer to a manual refresh. `queued` means the owning job runs on an agent:
+ * the figures are the cached ones and the agent reports fresh ones after its
+ * next poll.
+ */
+export type RepositoryStatsRefresh = RepositoryStats & { queued: boolean };
+
+/** Credentials needed to read a repository, as claimed for an agent. */
+export interface StatsRequest {
+  id: string;
+  target_id: string | null;
+  repo_config: Record<string, unknown>;
+  repo_password_secret_id: string;
+  credential_secret_id: string | null;
+}
+
 /** Detail shape adds the (freshly refreshed) repository figures. */
 export type RepositoryDetail = PublicRepository & RepositoryStats;
 
@@ -172,17 +193,76 @@ export class RepositoriesService {
     return { ...this.toPublic(row), ...(await this.refreshStats(id)) };
   }
 
-  /** Refreshes a repository's figures after an access check (API entry point). */
-  async refreshStatsFor(user: RequestUser, id: string): Promise<RepositoryStats> {
+  /**
+   * Refreshes a repository's figures after an access check (API entry point).
+   * A repository whose job runs on an agent is not read here: the refresh is
+   * queued for that agent, which keeps restic's load off the server.
+   */
+  async refreshStatsFor(
+    user: RequestUser,
+    id: string,
+  ): Promise<RepositoryStatsRefresh> {
     const row = await this.db
       .selectFrom('repositories as r')
       .innerJoin('backup_jobs as j', 'j.repository_id', 'r.id')
-      .select('j.id as job_id')
+      .select(['j.id as job_id', 'j.agent_id as agent_id'])
       .where('r.id', '=', id)
       .executeTakeFirst();
     if (!row) throw new NotFoundException('Repository not found');
     await this.acl.assert(user, 'job', row.job_id, 'view');
-    return this.refreshStats(id);
+    if (row.agent_id == null) {
+      return { ...(await this.refreshStats(id)), queued: false };
+    }
+    await this.db
+      .updateTable('repositories')
+      .set({ stats_requested_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+    return { ...(await this.cachedStats(id)), queued: true };
+  }
+
+  /**
+   * Claims the pending refresh requests of the repositories whose job runs on
+   * the given agent. Clearing the request in the same statement hands each one
+   * out exactly once.
+   */
+  async claimStatsRequests(agentId: string): Promise<StatsRequest[]> {
+    const rows = await this.db
+      .updateTable('repositories')
+      .set({ stats_requested_at: null })
+      .where('stats_requested_at', 'is not', null)
+      .where(
+        'id',
+        'in',
+        this.db
+          .selectFrom('backup_jobs')
+          .select('repository_id')
+          .where('agent_id', '=', agentId),
+      )
+      .returning([
+        'id',
+        'target_id',
+        'repo_config',
+        'repo_password_secret_id',
+        'credential_secret_id',
+      ])
+      .execute();
+    return rows.map((r) => ({ ...r, repo_config: this.parseConfig(r.repo_config) }));
+  }
+
+  private async cachedStats(id: string): Promise<RepositoryStats> {
+    const repo = await this.db
+      .selectFrom('repositories')
+      .select(['size_bytes', 'snapshot_count', 'stats_at', 'stats_error'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!repo) throw new NotFoundException('Repository not found');
+    return {
+      size_bytes: repo.size_bytes == null ? null : Number(repo.size_bytes),
+      snapshot_count: repo.snapshot_count,
+      stats_at: repo.stats_at,
+      stats_error: repo.stats_error,
+    };
   }
 
   /**
@@ -201,15 +281,12 @@ export class RepositoriesService {
         'repo_config',
         'repo_password_secret_id',
         'credential_secret_id',
-        'size_bytes',
-        'snapshot_count',
-        'stats_at',
-        'stats_error',
       ])
       .where('id', '=', id)
       .executeTakeFirst();
     if (!repo) throw new NotFoundException('Repository not found');
 
+    let reading: StatsReading;
     try {
       const ctx = await this.targets.resolveForJob({
         target_id: repo.target_id,
@@ -221,37 +298,30 @@ export class RepositoriesService {
         this.restic.snapshots(ctx),
         this.restic.stats(ctx),
       ]);
-      const fresh: RepositoryStats = {
+      reading = {
         size_bytes: stats.total_size ?? null,
         snapshot_count: snaps.length,
-        stats_at: new Date(),
-        stats_error: null,
       };
-      await this.db
-        .updateTable('repositories')
-        .set(fresh)
-        .where('id', '=', id)
-        .execute();
-      // Append to the history only when the figures actually changed so
-      // manual refreshes don't pile up identical readings.
-      const changed =
-        repo.stats_at == null ||
-        Number(repo.size_bytes) !== fresh.size_bytes ||
-        repo.snapshot_count !== fresh.snapshot_count;
-      if (changed && fresh.size_bytes != null) {
-        await this.db
-          .insertInto('repository_stats_history')
-          .values({
-            repository_id: id,
-            measured_at: fresh.stats_at ?? undefined,
-            size_bytes: fresh.size_bytes,
-            snapshot_count: fresh.snapshot_count ?? 0,
-          })
-          .execute();
-      }
-      return fresh;
     } catch (e) {
-      const stats_error = e instanceof Error ? e.message : String(e);
+      reading = { error: e instanceof Error ? e.message : String(e) };
+    }
+    return this.recordStats(id, reading);
+  }
+
+  /**
+   * Caches a reading on the repository, wherever restic ran. A failed reading
+   * keeps the previous figures and records the error.
+   */
+  async recordStats(id: string, reading: StatsReading): Promise<RepositoryStats> {
+    const repo = await this.db
+      .selectFrom('repositories')
+      .select(['size_bytes', 'snapshot_count', 'stats_at'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!repo) throw new NotFoundException('Repository not found');
+
+    if ('error' in reading) {
+      const stats_error = reading.error;
       this.logger.warn(`Stats refresh for repository ${id} failed: ${stats_error}`);
       await this.db
         .updateTable('repositories')
@@ -265,6 +335,36 @@ export class RepositoriesService {
         stats_error,
       };
     }
+
+    const fresh: RepositoryStats = {
+      size_bytes: reading.size_bytes,
+      snapshot_count: reading.snapshot_count,
+      stats_at: new Date(),
+      stats_error: null,
+    };
+    await this.db
+      .updateTable('repositories')
+      .set(fresh)
+      .where('id', '=', id)
+      .execute();
+    // Append to the history only when the figures actually changed so
+    // manual refreshes don't pile up identical readings.
+    const changed =
+      repo.stats_at == null ||
+      Number(repo.size_bytes) !== fresh.size_bytes ||
+      repo.snapshot_count !== fresh.snapshot_count;
+    if (changed && fresh.size_bytes != null) {
+      await this.db
+        .insertInto('repository_stats_history')
+        .values({
+          repository_id: id,
+          measured_at: fresh.stats_at ?? undefined,
+          size_bytes: fresh.size_bytes,
+          snapshot_count: fresh.snapshot_count ?? 0,
+        })
+        .execute();
+    }
+    return fresh;
   }
 
   /**

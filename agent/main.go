@@ -211,7 +211,7 @@ func (a *agent) poll() ([]Task, int, string, error) {
 	req := PollRequest{
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
-		Capabilities:  []string{"check"},
+		Capabilities:  []string{"check", "stats"},
 	}
 	var resp PollResponse
 	if err := a.post("/api/agents/me/poll", a.state.AgentKey, req, &resp); err != nil {
@@ -231,6 +231,8 @@ func (a *agent) runTask(t *Task) {
 		a.runRestore(t)
 	case "check":
 		a.runCheck(t)
+	case "stats":
+		a.runStats(t)
 	default:
 		log.Printf("unknown task type: %s", t.Type)
 	}
@@ -304,6 +306,10 @@ func (a *agent) runBackup(t *Task) {
 			result.Prune = a.runPrune(t)
 		}
 	}
+
+	// The repository just changed (and maybe shrank through the prune): read
+	// its figures here so the server doesn't have to.
+	a.readRepoStats(t, &result)
 
 	// On-success script runs after a successful backup; failure only logged.
 	if t.Options != nil && t.Options.PostSuccessScript != "" {
@@ -386,6 +392,36 @@ func (a *agent) runCheck(t *Task) {
 	default:
 		a.failTask(t, fmt.Sprintf("check exited %d: %v", code, err), logBuf.String())
 	}
+}
+
+// runStats reads the repository figures the server asked for.
+func (a *agent) runStats(t *Task) {
+	result := TaskResult{Status: "success"}
+	a.readRepoStats(t, &result)
+	if result.RepoStats == nil {
+		result.Status = "failed"
+		result.Error = result.RepoStatsError
+	}
+	a.postResult(t.TaskID, result)
+	log.Printf("stats task %s finished: %s", t.TaskID, result.Status)
+}
+
+// readRepoStats runs `restic stats` and puts the figures — or why they could
+// not be read — on the result.
+func (a *agent) readRepoStats(t *Task, result *TaskResult) {
+	var logBuf strings.Builder
+	var stats map[string]any
+	code, err := a.runner.run(t, statsArgs(), func(msg map[string]any) { stats = msg },
+		func(s string) { logBuf.WriteString(s + "\n") })
+	if err != nil || code != 0 || stats == nil {
+		msg := strings.TrimSpace(logBuf.String())
+		if msg == "" {
+			msg = fmt.Sprintf("stats exited %d: %v", code, err)
+		}
+		result.RepoStatsError = msg
+		return
+	}
+	result.RepoStats = repoStatsFrom(stats)
 }
 
 func (a *agent) failTask(t *Task, msg, logStr string) {

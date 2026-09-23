@@ -85,3 +85,17 @@ func TestIsDamagedCheckOutput(t *testing.T) {
 		t.Fatal("lock failure mistaken for damage")
 	}
 }
+
+func TestRepoStatsFrom(t *testing.T) {
+	// Shape of `restic stats --json --mode raw-data` (numbers decode as float64).
+	got := repoStatsFrom(map[string]any{
+		"total_size":               float64(5368709120),
+		"total_uncompressed_size":  float64(8000000000),
+		"total_blob_count":         float64(1234),
+		"snapshots_count":          float64(42),
+		"compression_space_saving": float64(32.9),
+	})
+	if got.SizeBytes != 5368709120 || got.SnapshotCount != 42 {
+		t.Fatalf("repoStatsFrom = %+v", got)
+	}
+}

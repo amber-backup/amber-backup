@@ -200,6 +200,19 @@ export class PruneResultDto {
   log?: string;
 }
 
+/** Repository figures an agent read with `restic stats` after its task. */
+export class RepoStatsDto {
+  @ApiProperty({ description: 'Deduplicated repository size in bytes (raw-data mode)' })
+  @IsInt()
+  @Min(0)
+  sizeBytes!: number;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(0)
+  snapshotCount!: number;
+}
+
 export class TaskResultDto {
   @ApiProperty({ enum: ['success', 'failed'] })
   @IsIn(['success', 'failed'])
@@ -224,6 +237,21 @@ export class TaskResultDto {
   @ValidateNested()
   @Type(() => PruneResultDto)
   prune?: PruneResultDto;
+
+  @ApiPropertyOptional({
+    type: RepoStatsDto,
+    description: 'Repository figures the agent read after a backup or for a stats task',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RepoStatsDto)
+  repoStats?: RepoStatsDto;
+
+  @ApiPropertyOptional({ description: 'Why reading the repository figures failed' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20_000)
+  repoStatsError?: string;
 
   @ApiPropertyOptional({
     description: 'For a check: restic reported integrity errors (status is then failed)',

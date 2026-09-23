@@ -32,6 +32,7 @@ export const jobs = {
     refresh: 'Refresh repository size',
     refreshError: (error: string) => `Stats refresh failed: ${error}`,
     refreshFailed: 'Refresh failed',
+    refreshQueued: 'Refresh requested — the agent reports the new figures after its next poll',
   },
   presets: {
     hourly: 'Hourly',

@@ -34,6 +34,7 @@ export const jobs: JobsMessages = {
     refresh: 'Repository-Größe aktualisieren',
     refreshError: (error: string) => `Aktualisieren der Statistik fehlgeschlagen: ${error}`,
     refreshFailed: 'Aktualisieren fehlgeschlagen',
+    refreshQueued: 'Aktualisierung angefordert – der Agent meldet die neuen Werte nach seinem nächsten Abruf',
   },
   presets: {
     hourly: 'Stündlich',
