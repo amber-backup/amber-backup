@@ -1,3 +1,10 @@
+# [1.36.0](https://github.com/amber-backup/amber-backup/compare/v1.35.0...v1.36.0) (2026-09-23)
+
+
+### Features
+
+* **agents:** read repository stats on the agent instead of the server ([911ebf6](https://github.com/amber-backup/amber-backup/commit/911ebf687ae62c2f19d57c0957f13941437fd173))
+
 # [1.35.0](https://github.com/amber-backup/amber-backup/compare/v1.34.1...v1.35.0) (2026-09-20)
 
 
