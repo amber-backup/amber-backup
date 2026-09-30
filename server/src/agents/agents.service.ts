@@ -8,7 +8,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'crypto';
-import { createReadStream, existsSync, readFileSync } from 'fs';
+import { createReadStream, existsSync } from 'fs';
 import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
 import { sql } from 'kysely';
@@ -25,6 +25,7 @@ import { PruneRunnerService } from '../jobs/prune-runner.service';
 import { RunRetryService } from '../jobs/run-retry.service';
 import { CheckRunnerService } from '../jobs/check-runner.service';
 import { loadConfig } from '../config/configuration';
+import { readBundledVersion } from '../common/bundled-version';
 import {
   Agent,
   CheckInfo,
@@ -381,14 +382,8 @@ echo "Amber agent installed and started."
    * built agent), in which case no self-update is advertised.
    */
   latestAgentVersion(): string | null {
-    if (this.cachedAgentVersion !== undefined) return this.cachedAgentVersion;
-    try {
-      const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'version');
-      this.cachedAgentVersion = existsSync(file)
-        ? readFileSync(file, 'utf8').trim() || null
-        : null;
-    } catch {
-      this.cachedAgentVersion = null;
+    if (this.cachedAgentVersion === undefined) {
+      this.cachedAgentVersion = readBundledVersion();
     }
     return this.cachedAgentVersion;
   }

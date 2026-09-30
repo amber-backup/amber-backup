@@ -17,6 +17,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuditModule } from './audit/audit.module';
 import { UpdatesModule } from './updates/updates.module';
+import { CliModule } from './cli/cli.module';
 import { StaticModule } from './static.module';
 
 @Module({
@@ -42,6 +43,7 @@ import { StaticModule } from './static.module';
     SettingsModule,
     AuditModule,
     UpdatesModule,
+    CliModule,
     StaticModule,
   ],
 })

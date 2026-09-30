@@ -3,6 +3,54 @@
 A small, dependency-free Go CLI for the Amber Backup server's REST API. It lists
 and inspects agents, jobs, repositories and targets, and triggers jobs manually.
 
+## Install
+
+Every Amber server serves an install script; the exact commands for your
+server are shown in the web UI under *Settings → Command line (ambb)*.
+
+```bash
+# Linux / macOS
+curl -fsSL https://amber.example.com/api/cli/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell 5.1 or 7+)
+irm https://amber.example.com/api/cli/install.ps1 | iex
+```
+
+Then pair the CLI with your account: `ambb login amber.example.com`.
+
+The script downloads the release archive for your OS/architecture from GitHub
+Releases (so the machine needs access to github.com), verifies its SHA-256
+against the release's `checksums.txt` and aborts on a missing entry or a
+mismatch, then installs the binary:
+
+- Linux/macOS: to `/usr/local/bin` when run as root or when it is writable,
+  otherwise to `~/.local/bin` (with a hint if that is not on your `PATH`).
+- Windows: to `%LOCALAPPDATA%\Programs\ambb`, which is added to your user
+  `PATH`.
+
+The server-served script defaults to the server's own release version; the
+scripts in this directory (`install.sh`, `install.ps1`) also work standalone and
+then default to the latest release. Environment overrides:
+
+| Variable | Effect |
+|----------|--------|
+| `AMBB_VERSION` | Release to install, e.g. `1.36.0` (default: the server's version, or `latest`) |
+| `AMBB_INSTALL_DIR` | Install directory |
+| `AMBER_URL` | Server shown in the final `ambb login` hint |
+
+```bash
+curl -fsSL https://amber.example.com/api/cli/install.sh | AMBB_INSTALL_DIR="$HOME/bin" sh
+```
+
+```powershell
+$env:AMBB_VERSION = '1.36.0'; irm https://amber.example.com/api/cli/install.ps1 | iex
+```
+
+The checksum only proves the archive matches the release; to also verify where
+it was built, check its signed build provenance (see below).
+
 ## Download
 
 Prebuilt binaries for Linux, macOS and Windows (amd64/arm64) are attached to

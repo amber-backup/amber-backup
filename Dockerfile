@@ -61,6 +61,7 @@ ENV NODE_ENV=production
 ENV RESTIC_BINARY=/usr/local/bin/restic
 ENV RESTIC_CACHE_DIR=/data/cache
 ENV RESTORE_TMP_DIR=/data/restore-tmp
+ENV CLI_SCRIPT_DIR=/app/cli-install
 
 # Server runtime + compiled output + node_modules
 COPY --from=server-build /build/node_modules ./node_modules
@@ -70,6 +71,9 @@ COPY --from=server-build /build/server/package.json ./package.json
 COPY --from=client-build /build/client/dist ./client
 # Precompiled agent binaries served via GET /api/agents/binary/linux-<arch>
 COPY --from=agent-build /out/ ./agent-bin/
+# ambb CLI install scripts served via GET /api/cli/install.{sh,ps1}; the
+# binaries themselves are downloaded from GitHub Releases by the scripts.
+COPY cli/install.sh cli/install.ps1 ./cli-install/
 
 VOLUME ["/data"]
 EXPOSE 3000

@@ -1,6 +1,7 @@
 // Load .env into process.env as early as possible (dev/local). In production
 // the environment is provided directly and the (absent) file is simply ignored.
 import 'dotenv/config';
+import * as path from 'path';
 import { isValidAllowlistEntry } from '../common/ip-allowlist';
 
 /**
@@ -46,6 +47,8 @@ export interface AppConfig {
   restoreTmpDir: string;
   /** Directory holding the compiled agent binaries served to hosts. */
   agentBinaryDir: string;
+  /** Directory holding the ambb CLI install scripts (install.sh / install.ps1). */
+  cliScriptDir: string;
   /**
    * How long a backup run may wait in the queue before it is marked failed
    * (typically because its agent is offline). <= 0 disables the timeout.
@@ -139,6 +142,10 @@ export function loadConfig(): AppConfig {
     restoreTmpDir: env.RESTORE_TMP_DIR ?? './tmp/restore',
     // Bundled into the Docker image at /app/agent-bin; overridable in dev.
     agentBinaryDir: env.AGENT_BINARY_DIR ?? 'agent-bin',
+    // The image copies the scripts to /app/cli-install and sets CLI_SCRIPT_DIR;
+    // the default is the repo's cli/ (from src/config or dist/config), for dev.
+    cliScriptDir:
+      env.CLI_SCRIPT_DIR ?? path.resolve(__dirname, '..', '..', '..', 'cli'),
     runQueueTimeoutSeconds: int(env.RUN_QUEUE_TIMEOUT_SECONDS, 300),
     auditRetentionDays: int(env.AUDIT_RETENTION_DAYS, 90),
     updateCheckEnabled: bool(env.UPDATE_CHECK_ENABLED, true),

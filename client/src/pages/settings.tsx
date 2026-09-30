@@ -102,6 +102,8 @@ export function Settings() {
 
       {passkeysSupported() && <PasskeysPanel />}
 
+      <CliPanel />
+
       <div className="panel section-gap">
         <div className="panel-head">
           <h2>{t.settings.apiKeys.title}</h2>
@@ -164,6 +166,116 @@ function LanguagePanel() {
             </option>
           ))}
         </select>
+      </div>
+    </div>
+  );
+}
+
+type CliOs = 'unix' | 'windows';
+
+/** Best guess of the viewer's OS, to preselect the matching install command. */
+function guessCliOs(): CliOs {
+  return /Win(dows|32|64)/i.test(`${navigator.userAgent} ${navigator.platform}`) ? 'windows' : 'unix';
+}
+
+const CMD_STYLE: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  background: 'var(--bg-0)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
+  padding: '10px 14px',
+  fontSize: 12,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+  color: 'var(--amber-light)',
+};
+
+const HINT_STYLE: React.CSSProperties = { fontSize: 12.5, color: 'var(--text-2)' };
+
+function CliCommand({ label, help, command }: { label: string; help: string; command: string }) {
+  const t = useT();
+  const toast = useToast();
+  const copy = async () => {
+    const ok = await copyToClipboard(command);
+    toast(ok ? t.common.copied : t.settings.cli.copyFailed, ok ? 'success' : 'error');
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="mono" style={CMD_STYLE}>
+          {command}
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={() => void copy()}>
+          <Icon name="copy" />
+          {t.common.copy}
+        </button>
+      </div>
+      <div style={HINT_STYLE}>{help}</div>
+    </div>
+  );
+}
+
+/** How to install the ambb CLI and pair it with this server. */
+function CliPanel() {
+  const t = useT();
+  const m = t.settings.cli;
+  const [os, setOs] = useState<CliOs>(guessCliOs);
+  const origin = window.location.origin;
+  const version = __APP_VERSION__;
+  const install =
+    os === 'windows'
+      ? `irm ${origin}/api/cli/install.ps1 | iex`
+      : `curl -fsSL ${origin}/api/cli/install.sh | sh`;
+
+  return (
+    <div className="panel section-gap">
+      <div className="panel-head">
+        <h2>{m.title}</h2>
+        <div className="seg" role="group" aria-label={m.os}>
+          {(['unix', 'windows'] as const).map((value) => (
+            <button
+              key={value}
+              className={`seg-btn${value === os ? ' active' : ''}`}
+              aria-pressed={value === os}
+              onClick={() => setOs(value)}
+            >
+              {value === 'windows' ? m.osWindows : m.osUnix}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={HINT_STYLE}>{m.intro}</div>
+        <CliCommand
+          label={m.installStep}
+          help={os === 'windows' ? m.installHelpWindows(version) : m.installHelpUnix(version)}
+          command={install}
+        />
+        <CliCommand label={m.loginStep} help={m.loginHelp} command={`ambb login ${origin}`} />
+        <div style={{ ...HINT_STYLE, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div>
+            {`${m.update} `}
+            <span className="mono" style={{ color: 'var(--text-1)' }}>
+              ambb update
+            </span>
+            .
+          </div>
+          <div>
+            {`${m.manual} `}
+            <a
+              href={`https://github.com/amber-backup/amber-backup/releases/tag/v${version}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--amber)' }}
+            >
+              {m.release(version)}
+            </a>
+            {`. ${m.githubAccess}`}
+          </div>
+        </div>
       </div>
     </div>
   );

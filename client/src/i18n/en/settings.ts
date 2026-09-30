@@ -83,6 +83,26 @@ export const settings = {
     added: 'Passkey added',
     failed: 'Could not add passkey',
   },
+  cli: {
+    title: 'Command line (ambb)',
+    intro: 'Manage agents, jobs and repositories from a terminal with the ambb CLI.',
+    os: 'Operating system',
+    osUnix: 'Linux / macOS',
+    osWindows: 'Windows',
+    installStep: '1. Install',
+    installHelpUnix: (version: string) =>
+      `Downloads ambb ${version} from GitHub Releases, verifies its SHA-256 checksum and installs it to /usr/local/bin (or ~/.local/bin).`,
+    installHelpWindows: (version: string) =>
+      `Run in PowerShell. Downloads ambb ${version} from GitHub Releases, verifies its SHA-256 checksum, installs it and adds it to your user PATH.`,
+    loginStep: '2. Sign in',
+    loginHelp:
+      'Opens your browser to approve this device. Signing in creates an API key that appears in the list below.',
+    update: 'Update the CLI later with',
+    manual: 'Manual download:',
+    release: (version: string) => `GitHub release v${version}`,
+    githubAccess: 'The machine you install on needs access to github.com.',
+    copyFailed: 'Copy failed — select and copy manually',
+  },
   apiKeys: {
     title: 'API keys',
     newKey: '+ New key',

@@ -191,6 +191,17 @@ Single small module in `agent/`: `main.go` (enroll + poll loop), `restic.go`
 `AgentTask`). Binary agents use the host's system restic; the Docker agent
 bundles a pinned one.
 
+### CLI (Go)
+
+`cli/` is the standalone `ambb` module (see `cli/README.md`); release binaries
+come from `.github/workflows/cli-release.yml`. `cli/install.sh` and
+`cli/install.ps1` install them from GitHub Releases and are served by the
+server's `cli` module at `GET /api/cli/install.sh|ps1` (public), which rewrites
+their marker default lines with the server version and `PUBLIC_BASE_URL`
+(validated before injection). The scripts are read from `CLI_SCRIPT_DIR`
+(`/app/cli-install` in the image, the repo's `cli/` in dev) — keep the marker
+lines in the scripts and `server/src/cli/cli.service.ts` in sync.
+
 ## Conventions
 
 - The NestJS server follows solutec NestJS conventions — when scaffolding or
