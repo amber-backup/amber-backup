@@ -26,6 +26,7 @@ export const dashboard: DashboardMessages = {
       backup: 'Backup',
       prune: 'Prune',
       check: 'Prüfung',
+      restore: 'Restore',
     } as Record<string, string>,
   },
   schedules: {

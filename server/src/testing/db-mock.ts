@@ -33,6 +33,8 @@ const CHAIN_METHODS = [
   'distinctOn',
   'groupBy',
   'having',
+  'unionAll',
+  'as',
 ];
 
 export function chain(terminals: ChainTerminals = {}): ChainBuilder {

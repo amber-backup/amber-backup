@@ -5,7 +5,9 @@ import {
   Logger,
   OnApplicationShutdown,
 } from '@nestjs/common';
+import { sql } from 'kysely';
 import { Db, KYSELY } from '../database/database.module';
+import { CANCELLED_ON_AGENT_MESSAGE } from '../common/cancel-messages';
 import {
   BackupJobRow,
   CheckInfo,
@@ -135,6 +137,22 @@ export class CheckRunnerService implements OnApplicationShutdown {
       .where('job_runs.kind', '=', 'check')
       .executeTakeFirst();
     if (!run) return;
+    if (outcome.status === 'cancelled') {
+      // The agent stopped a check cancelled on the server. No verdict: the
+      // repository keeps its last one, and nobody is notified.
+      await this.db
+        .updateTable('job_runs')
+        .set({
+          status: 'cancelled',
+          finished_at: sql<Date>`coalesce(finished_at, now())`,
+          error: CANCELLED_ON_AGENT_MESSAGE,
+          log: outcome.log ?? null,
+        })
+        .where('id', '=', runId)
+        .where('status', 'in', ['running', 'cancelled'])
+        .execute();
+      return;
+    }
     const info = parseInfo(run.check_info);
     await this.settle(runId, info, run.repository_id, outcome);
   }

@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative, runDurationMs, statusLabel } from '../core/format';
+import {
+  fmtBytes,
+  fmtDateTime,
+  fmtDuration,
+  fmtRelative,
+  restoreModeLabel,
+  runDurationMs,
+  statusLabel,
+} from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
 import { useToast } from '../ui/toast';
@@ -80,7 +88,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     setPageLoading(true);
     const gen = genRef.current;
     try {
-      const kind = showMaintenance ? '' : '&kind=backup';
+      const kind = showMaintenance ? '' : '&kind=backup,restore';
       const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}`);
       if (gen !== genRef.current) return;
       const fresh = page.filter((r) => !seenRef.current.has(r.id));
@@ -157,20 +165,13 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       if (ag) setAgents(ag);
       setDash(d);
       // `recent` covers every activity, so drop maintenance while it's hidden.
-      const recent = showMaintenanceRef.current ? d.recent : d.recent.filter((r) => r.kind === 'backup');
+      const recent = showMaintenanceRef.current ? d.recent : d.recent.filter((r) => !isMaintenance(r));
       // `recent` is only the newest few, so an older row that is still queued or
       // running (typically a hung one) is fetched on its own to stay current.
       const stale = runsRef.current.filter(
         (r) => isActive(r.status) && !recent.some((x) => x.id === r.id),
       );
-      const refetched = await Promise.all(
-        stale.map((r) =>
-          api
-            .get<Run & { log?: unknown }>(`/runs/${r.id}`)
-            .then(({ log: _log, ...fresh }) => ({ ...r, ...fresh }))
-            .catch(() => null),
-        ),
-      );
+      const refetched = await Promise.all(stale.map((r) => refetchRun(r).catch(() => null)));
       const latest = [...recent, ...refetched.filter((r): r is Run => r !== null)];
       const merge = (r: Run): Run => {
         const fresh = latest.find((x) => x.id === r.id);
@@ -397,7 +398,12 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   const a = t.dashboard.activity;
   const toast = useToast();
   const [cancelling, setCancelling] = useState(false);
-  const bytes = (r.stats?.dataAdded as number) ?? null;
+  const restore = r.kind === 'restore';
+  // What a finished activity moved: the data a backup added, or the size a
+  // restore wrote back.
+  const bytes = restore
+    ? ((r.stats?.totalBytesProcessed ?? r.stats?.totalBytes) as number | undefined) ?? null
+    : ((r.stats?.dataAdded as number) ?? null);
 
   const bytesDone = r.stats?.bytesDone as number | undefined;
   const totalBytes = r.stats?.totalBytes as number | undefined;
@@ -419,7 +425,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   const cancel = async () => {
     setCancelling(true);
     try {
-      await api.post(`/runs/${r.id}/cancel`);
+      await api.post(restore ? `/restores/${r.id}/cancel` : `/runs/${r.id}/cancel`);
       toast(a.cancelled, 'success');
       onCancelled();
     } catch (e) {
@@ -442,7 +448,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
   );
 
   let meta: React.ReactNode;
-  if (r.kind !== 'backup') {
+  if (isMaintenance(r)) {
     // A prune or check has no progress or snapshot: outcome, duration and time.
     meta = (
       <div className="row-meta run-meta">
@@ -457,6 +463,7 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
       </div>
     );
   } else if (r.status === 'running') {
+    // Backups and restores both report bytes done/total while they run.
     meta = (
       <div className="row-meta run-progress">
         {cancelButton}
@@ -512,9 +519,13 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
             ? r.parent_run_id
               ? a.pruneAfterBackup
               : a.manualPrune
-            : r.snapshot_id
-              ? r.snapshot_id.slice(0, 12)
-              : statusLabel(r.status);
+            : restore
+              ? [r.restore_mode && restoreModeLabel(r.restore_mode), r.snapshot_id?.slice(0, 12)]
+                  .filter(Boolean)
+                  .join(' · ')
+              : r.snapshot_id
+                ? r.snapshot_id.slice(0, 12)
+                : statusLabel(r.status);
 
   return (
     <div className="row compact" data-run-id={r.id}>
@@ -547,6 +558,27 @@ function checkSub(r: Run, t: Messages): string {
 
 function isActive(status: string): boolean {
   return status === 'queued' || status === 'running';
+}
+
+/** Prunes and checks: hidden from the feed unless asked for. */
+function isMaintenance(r: Run): boolean {
+  return r.kind === 'prune' || r.kind === 'check';
+}
+
+/**
+ * Current state of one row. A restore lives outside `/runs`: take only the
+ * fields the row shows from it and leave its log, destination and repository
+ * details out.
+ */
+async function refetchRun(r: Run): Promise<Run> {
+  if (r.kind === 'restore') {
+    const { status, started_at, finished_at, stats, error } = await api.get<
+      Pick<Run, 'status' | 'started_at' | 'finished_at' | 'stats' | 'error'>
+    >(`/restores/${r.id}`);
+    return { ...r, status, started_at, finished_at, stats, error };
+  }
+  const { log: _log, ...fresh } = await api.get<Run & { log?: unknown }>(`/runs/${r.id}`);
+  return { ...r, ...fresh };
 }
 
 function StatusBadge({ status }: { status: string }) {

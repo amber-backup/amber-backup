@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentAgent } from '../common/decorators/current-user.decorator';
@@ -45,6 +45,15 @@ export class AgentApiController {
     @Body() dto: TaskProgressDto,
   ) {
     return this.agents.submitProgress(agent.id, id, dto.stats);
+  }
+
+  @UseGuards(AgentAuthGuard)
+  @Get('me/tasks/:id/state')
+  @ApiOperation({
+    summary: 'Whether a task was cancelled meanwhile (polled by the agent while it runs)',
+  })
+  state(@CurrentAgent() agent: RequestAgent, @Param('id') id: string) {
+    return this.agents.taskState(agent.id, id);
   }
 
   @UseGuards(AgentAuthGuard)

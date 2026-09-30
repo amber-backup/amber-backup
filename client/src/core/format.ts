@@ -64,6 +64,17 @@ export function statusLabel(status: string): string {
   return messages().common.status[status] ?? status;
 }
 
+/** Short label for where a restore writes, e.g. "Download". */
+export function restoreModeLabel(mode: string): string {
+  const t = messages().snapshots.history;
+  const labels: Record<string, string> = {
+    original: t.modeOriginal,
+    alternate_path: t.modeAlternate,
+    download: t.modeDownload,
+  };
+  return labels[mode] ?? mode;
+}
+
 /** True when semver `candidate` (e.g. "1.29.0") is newer than `current`. */
 export function isNewerVersion(candidate: string, current: string): boolean {
   const parse = (v: string) => v.replace(/^v/, '').split(/[.+-]/, 3).map((n) => Number.parseInt(n, 10) || 0);

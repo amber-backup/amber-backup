@@ -38,7 +38,7 @@ export class RestoreController {
   }
 
   @Post(':id/cancel')
-  @ApiOperation({ summary: 'Cancel a restore run' })
+  @ApiOperation({ summary: 'Cancel a queued or running restore run' })
   cancel(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.restore.cancel(user, id);
   }

@@ -239,10 +239,16 @@ export interface Report {
 
 export interface Run {
   id: string;
-  job_id: string;
-  job_name?: string;
-  /** A backup, or a `restic prune` / `restic check` of the job's repository. */
-  kind: 'backup' | 'prune' | 'check';
+  /** Null only for a restore whose job was deleted since. */
+  job_id: string | null;
+  job_name?: string | null;
+  /**
+   * A backup, a `restic prune` / `restic check` of the job's repository, or a
+   * restore from it (a `restore_runs` row in the activity feed).
+   */
+  kind: 'backup' | 'prune' | 'check' | 'restore';
+  /** For a restore: where it writes (`original`, `alternate_path`, `download`). */
+  restore_mode?: string | null;
   /** For a prune started by a backup's retention: that backup run. */
   parent_run_id: string | null;
   /** For a check: what it verified and whether it found damage. */

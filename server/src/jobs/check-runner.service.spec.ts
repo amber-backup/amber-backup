@@ -200,6 +200,31 @@ describe('CheckRunnerService', () => {
       expect(repoUpdate.set).not.toHaveBeenCalled();
       expect(notifications.notifyJobRun).not.toHaveBeenCalled();
     });
+
+    it('records a check the agent stopped, without a verdict or notification', async () => {
+      const { service, runsSelect, runUpdate, repoUpdate, notifications } = make();
+      runsSelect.executeTakeFirst.mockResolvedValue({
+        check_info: { level: 'full' },
+        repository_id: 'repo-1',
+      });
+
+      await service.recordAgentResult('agent-1', 'c1', {
+        status: 'cancelled',
+        damaged: false,
+        log: 'signal interrupt received, cleaning up',
+      });
+
+      expect(runUpdate.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'cancelled',
+          error: 'Cancelled on the agent.',
+          log: 'signal interrupt received, cleaning up',
+        }),
+      );
+      expect(runUpdate.where).toHaveBeenCalledWith('status', 'in', ['running', 'cancelled']);
+      expect(repoUpdate.set).not.toHaveBeenCalled();
+      expect(notifications.notifyJobRun).not.toHaveBeenCalled();
+    });
   });
 
   it('aborts a running local check on cancel', async () => {

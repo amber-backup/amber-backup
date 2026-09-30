@@ -62,6 +62,11 @@ export function isDamagedCheckOutput(output: string): boolean {
   return /repository contains errors/i.test(output);
 }
 
+/** A numeric field of restic's JSON output; absent (omitted when 0) reads as 0. */
+function num(value: unknown): number {
+  return typeof value === 'number' ? value : 0;
+}
+
 /**
  * Low-level restic process executor. Prepares the environment (repository,
  * password, backend credentials, temp credential files), streams JSON output,
@@ -490,13 +495,26 @@ export class ResticService {
         try {
           const msg = JSON.parse(line);
           if (msg.message_type === 'status') {
-            stats = { ...stats, percentDone: msg.percent_done };
+            // Skipped files (unchanged under --overwrite if-changed) count as
+            // done, or the progress would stop short of 100 %.
+            stats = {
+              ...stats,
+              percentDone: msg.percent_done,
+              bytesDone: num(msg.bytes_restored) + num(msg.bytes_skipped),
+              totalBytes: msg.total_bytes,
+              filesDone: num(msg.files_restored) + num(msg.files_skipped),
+              totalFiles: msg.total_files,
+            };
             hooks.onProgress?.(stats);
           } else if (msg.message_type === 'summary') {
             stats = {
               totalFilesProcessed: msg.total_files,
               totalBytesProcessed: msg.total_bytes,
               percentDone: 1,
+              bytesDone: msg.total_bytes,
+              totalBytes: msg.total_bytes,
+              filesDone: msg.total_files,
+              totalFiles: msg.total_files,
             };
             hooks.onProgress?.(stats);
           }

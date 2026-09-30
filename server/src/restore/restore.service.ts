@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -8,6 +9,10 @@ import { promises as fs } from 'fs';
 import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
 import { RequestUser } from '../common/auth/request-user';
+import {
+  CANCELLED_NO_PROCESS_MESSAGE,
+  CANCELLED_ON_SERVER_AGENT_MESSAGE,
+} from '../common/cancel-messages';
 import { RestoreDestination } from '../database/database.types';
 import { JobsService } from '../jobs/jobs.service';
 import { RestoreRunnerService } from './restore-runner.service';
@@ -102,17 +107,33 @@ export class RestoreService {
     return run;
   }
 
+  /**
+   * Stops a queued or running restore. A local one is aborted by the runner,
+   * which settles the row itself. Otherwise — queued, running on an agent, or
+   * left `running` by a restart — the row is cancelled here; a current agent
+   * notices through its task-state watch and stops restic.
+   */
   async cancel(user: RequestUser, id: string) {
     const run = await this.get(user, id);
     if (run.job_id) await this.acl.assert(user, 'job', run.job_id, 'operate');
-    const killed = this.runner.cancel(id);
-    if (!killed && run.status === 'queued') {
-      await this.db
-        .updateTable('restore_runs')
-        .set({ status: 'cancelled', finished_at: new Date() })
-        .where('id', '=', id)
-        .execute();
+    if (run.status !== 'queued' && run.status !== 'running') {
+      throw new BadRequestException(`Restore is already ${run.status}`);
     }
+    if (this.runner.cancel(id)) return { cancelled: true };
+
+    const error =
+      run.status === 'queued'
+        ? null
+        : run.agent_id
+          ? CANCELLED_ON_SERVER_AGENT_MESSAGE
+          : CANCELLED_NO_PROCESS_MESSAGE;
+    await this.db
+      .updateTable('restore_runs')
+      .set({ status: 'cancelled', finished_at: new Date(), error })
+      .where('id', '=', id)
+      // Don't overwrite a result that landed meanwhile.
+      .where('status', 'in', ['queued', 'running'])
+      .execute();
     return { cancelled: true };
   }
 

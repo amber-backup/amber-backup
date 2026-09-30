@@ -11,7 +11,9 @@ import { generateKeyPairSync } from 'crypto';
 import { createReadStream, existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
+import { sql } from 'kysely';
 import { Db, KYSELY } from '../database/database.module';
+import { CANCELLED_ON_AGENT_MESSAGE } from '../common/cancel-messages';
 import { CryptoService } from '../crypto/crypto.service';
 import { TargetsService } from '../targets/targets.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -60,6 +62,9 @@ export const AGENT_CAPABILITY_STATS = 'stats';
 
 /** Task id prefix of a `stats` task; the rest is the repository id. */
 const STATS_TASK_PREFIX = 'stats-';
+
+/** Run ids are uuids; anything else (e.g. a stats task id) is no run row. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AgentTask {
   type: 'backup' | 'restore' | 'check' | 'stats';
@@ -804,6 +809,18 @@ echo "Amber agent installed and started."
       .executeTakeFirst();
     if (!run) throw new NotFoundException('Task not found for this agent');
 
+    // The agent stopped a run cancelled on the server: nothing to record
+    // beyond its log, no retry and no notification.
+    if (dto.status === 'cancelled') {
+      await this.db
+        .updateTable('job_runs')
+        .set(cancelledOnAgent(dto))
+        .where('id', '=', taskId)
+        .where('status', 'in', ['running', 'cancelled'])
+        .execute();
+      return;
+    }
+
     await this.db
       .updateTable('job_runs')
       .set({
@@ -880,6 +897,16 @@ echo "Amber agent installed and started."
       .where('agent_id', '=', agentId)
       .executeTakeFirst();
     if (!run) throw new NotFoundException('Task not found for this agent');
+
+    if (dto.status === 'cancelled') {
+      await this.db
+        .updateTable('restore_runs')
+        .set(cancelledOnAgent(dto))
+        .where('id', '=', taskId)
+        .where('status', 'in', ['running', 'cancelled'])
+        .execute();
+      return;
+    }
 
     await this.db
       .updateTable('restore_runs')
@@ -968,6 +995,34 @@ echo "Amber agent installed and started."
   }
 
   /**
+   * Tells an agent whether a task it is running was cancelled meanwhile, so it
+   * can stop restic. A run that no longer exists (its job was deleted) counts
+   * as cancelled too. Stats tasks and runs of another agent are not found.
+   */
+  async taskState(agentId: string, taskId: string): Promise<{ cancelled: boolean }> {
+    // Polled throughout a long task, so it doubles as a heartbeat.
+    await this.touchAgent(agentId);
+    if (!UUID_RE.test(taskId)) throw new NotFoundException('Task not found for this agent');
+
+    const row =
+      (await this.db
+        .selectFrom('job_runs')
+        .select(['status', 'agent_id'])
+        .where('id', '=', taskId)
+        .executeTakeFirst()) ??
+      (await this.db
+        .selectFrom('restore_runs')
+        .select(['status', 'agent_id'])
+        .where('id', '=', taskId)
+        .executeTakeFirst());
+    if (!row) return { cancelled: true };
+    if (row.agent_id !== agentId) {
+      throw new NotFoundException('Task not found for this agent');
+    }
+    return { cancelled: row.status === 'cancelled' };
+  }
+
+  /**
    * Refreshes an agent's liveness (last_seen_at + online status) on any
    * authenticated agent traffic. This complements poll()-based heartbeats so a
    * task that outlives the offline timeout keeps the agent online — and an agent
@@ -1014,6 +1069,20 @@ echo "Amber agent installed and started."
 /** Trims entries and drops blanks and duplicates, keeping the first occurrence's order. */
 function uniqueTrimmed(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+}
+
+/**
+ * Row patch for a run the agent stopped because it was cancelled. A row the
+ * server already cancelled keeps its finish time; the error now says restic
+ * really stopped.
+ */
+function cancelledOnAgent(dto: TaskResultDto) {
+  return {
+    status: 'cancelled' as const,
+    finished_at: sql<Date>`coalesce(finished_at, now())`,
+    error: CANCELLED_ON_AGENT_MESSAGE,
+    log: dto.log ?? null,
+  };
 }
 
 /** The repository figures an agent reported on a task result. */

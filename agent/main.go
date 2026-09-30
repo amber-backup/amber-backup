@@ -222,37 +222,110 @@ func (a *agent) poll() ([]Task, int, string, error) {
 
 // --- Task execution ---------------------------------------------------------
 
+// cancelPollInterval is how often a running task asks the server whether it
+// was cancelled meanwhile.
+var cancelPollInterval = 5 * time.Second
+
 func (a *agent) runTask(t *Task) {
+	// Every run task gets its own context, cancelled when the operator cancels
+	// the task on the server. A stats task has no run row to cancel.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if t.Type != "stats" {
+		w := &cancelWatch{agent: a, taskID: t.TaskID, cancel: cancel}
+		// A task cancelled while it waited behind another one never starts.
+		if w.check(ctx) {
+			a.cancelTask(t, "Cancelled before the agent started it.\n")
+			return
+		}
+		go w.run(ctx)
+	}
+
 	log.Printf("running %s task %s", t.Type, t.TaskID)
 	switch t.Type {
 	case "backup":
-		a.runBackup(t)
+		a.runBackup(ctx, t)
 	case "restore":
-		a.runRestore(t)
+		a.runRestore(ctx, t)
 	case "check":
-		a.runCheck(t)
+		a.runCheck(ctx, t)
 	case "stats":
-		a.runStats(t)
+		a.runStats(ctx, t)
 	default:
 		log.Printf("unknown task type: %s", t.Type)
 	}
 }
 
-func (a *agent) runBackup(t *Task) {
+// cancelWatch polls the state of a running task and cancels its context once
+// the server reports it cancelled. A server that predates the endpoint answers
+// 404; that and transient errors are logged once per task and otherwise
+// ignored, so the task simply runs to completion as before.
+type cancelWatch struct {
+	agent  *agent
+	taskID string
+	cancel context.CancelFunc
+	warned bool
+}
+
+func (w *cancelWatch) run(ctx context.Context) {
+	ticker := time.NewTicker(cancelPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if w.check(ctx) {
+				return
+			}
+		}
+	}
+}
+
+// check asks the server once and cancels the task if it was cancelled there.
+func (w *cancelWatch) check(ctx context.Context) bool {
+	var state TaskState
+	err := w.agent.get(ctx, "/api/agents/me/tasks/"+w.taskID+"/state", w.agent.state.AgentKey, &state)
+	if err != nil {
+		if ctx.Err() == nil && !w.warned {
+			w.warned = true
+			log.Printf("task %s: cannot check for a cancel (ignored): %v", w.taskID, err)
+		}
+		return false
+	}
+	if !state.Cancelled {
+		return false
+	}
+	log.Printf("task %s was cancelled on the server, stopping it", w.taskID)
+	w.cancel()
+	return true
+}
+
+func (a *agent) runBackup(ctx context.Context, t *Task) {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 	result := TaskResult{Status: "success"}
 	var lastProgress time.Time
 
 	// handleFailure runs the on-failure script (best-effort) and reports the run
-	// as failed. Used for pre-script, init and backup failures alike.
+	// as failed — or as cancelled once the operator stopped it. The script runs
+	// on a cancel too: it often restarts services the pre-script stopped. It
+	// runs detached from the cancelled context, bounded by its own timeout.
 	handleFailure := func(msg string) {
+		status := "failed"
+		if ctx.Err() != nil {
+			status, msg = "cancelled", "cancelled on the server"
+		}
 		if t.Options != nil && t.Options.PostFailureScript != "" {
 			appendLog("[post-failure-script] " + t.Options.PostFailureScript)
 			if err := runScriptLogged(t.Options.PostFailureScript,
-				scriptEnv(t, "post-failure", "failed", "", msg), appendLog); err != nil {
+				scriptEnv(t, "post-failure", status, "", msg), appendLog); err != nil {
 				appendLog("[post-failure-script] " + err.Error())
 			}
+		}
+		if status == "cancelled" {
+			a.cancelTask(t, logBuf.String())
+			return
 		}
 		a.failTask(t, msg, logBuf.String())
 	}
@@ -265,13 +338,17 @@ func (a *agent) runBackup(t *Task) {
 			return
 		}
 	}
+	if ctx.Err() != nil {
+		handleFailure("")
+		return
+	}
 
-	if err := a.runner.ensureInitialized(t); err != nil {
+	if err := a.runner.ensureInitialized(ctx, t); err != nil {
 		handleFailure(err.Error())
 		return
 	}
 
-	code, err := a.runner.run(t, backupArgs(t), func(msg map[string]any) {
+	code, err := a.runner.run(ctx, t, backupArgs(t), func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			if time.Since(lastProgress) > time.Second {
@@ -291,6 +368,13 @@ func (a *agent) runBackup(t *Task) {
 		}
 	}, appendLog)
 
+	if ctx.Err() != nil {
+		if result.SnapshotID != "" {
+			appendLog("backup finished before the cancel took effect: snapshot " + result.SnapshotID)
+		}
+		handleFailure("")
+		return
+	}
 	if err != nil || (code != 0 && code != 3) {
 		handleFailure(fmt.Sprintf("backup exited %d: %v", code, err))
 		return
@@ -299,17 +383,23 @@ func (a *agent) runBackup(t *Task) {
 	// Retention as part of the run (§7). Only the forget happens inside the
 	// backup; the prune it may ask for is reported as an activity of its own.
 	if t.Options != nil && hasRetention(t.Options.Retention) {
-		fcode, ferr := a.runner.run(t, forgetArgs(t.Options.Retention), nil, appendLog)
+		fcode, ferr := a.runner.run(ctx, t, forgetArgs(t.Options.Retention), nil, appendLog)
 		if ferr != nil || fcode != 0 {
 			appendLog(fmt.Sprintf("forget failed: code=%d err=%v", fcode, ferr))
 		} else if t.Options.Retention.Prune {
-			result.Prune = a.runPrune(t)
+			result.Prune = a.runPrune(ctx, t)
 		}
+	}
+	// A cancel during the forget or prune stops the rest of the run too.
+	if ctx.Err() != nil {
+		appendLog("backup finished before the cancel took effect: snapshot " + result.SnapshotID)
+		handleFailure("")
+		return
 	}
 
 	// The repository just changed (and maybe shrank through the prune): read
 	// its figures here so the server doesn't have to.
-	a.readRepoStats(t, &result)
+	a.readRepoStats(ctx, t, &result)
 
 	// On-success script runs after a successful backup; failure only logged.
 	if t.Options != nil && t.Options.PostSuccessScript != "" {
@@ -327,11 +417,11 @@ func (a *agent) runBackup(t *Task) {
 
 // runPrune reclaims unreferenced storage after a backup's forget. It is timed
 // and logged separately so the server can show it as its own activity.
-func (a *agent) runPrune(t *Task) *PruneResult {
+func (a *agent) runPrune(ctx context.Context, t *Task) *PruneResult {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 	res := &PruneResult{Status: "success", StartedAt: time.Now().UTC().Format(time.RFC3339)}
-	code, err := a.runner.run(t, []string{"prune"}, nil, appendLog)
+	code, err := a.runner.run(ctx, t, []string{"prune"}, nil, appendLog)
 	if err != nil || code != 0 {
 		res.Status = "failed"
 		res.Error = fmt.Sprintf("prune exited %d: %v", code, err)
@@ -342,24 +432,28 @@ func (a *agent) runPrune(t *Task) *PruneResult {
 	return res
 }
 
-func (a *agent) runRestore(t *Task) {
+func (a *agent) runRestore(ctx context.Context, t *Task) {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 	result := TaskResult{Status: "success"}
 	var lastProgress time.Time
 
-	code, err := a.runner.run(t, restoreArgs(t), func(msg map[string]any) {
+	code, err := a.runner.run(ctx, t, restoreArgs(t), func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
-			if time.Since(lastProgress) > 2*time.Second {
+			if time.Since(lastProgress) > time.Second {
 				lastProgress = time.Now()
-				a.postProgress(t.TaskID, map[string]any{"percentDone": msg["percent_done"]})
+				a.postProgress(t.TaskID, restoreProgress(msg))
 			}
 		case "summary":
-			result.Stats = summaryToStats(msg)
+			result.Stats = restoreSummaryToStats(msg)
 		}
 	}, appendLog)
 
+	if ctx.Err() != nil {
+		a.cancelTask(t, logBuf.String())
+		return
+	}
 	if err != nil || code != 0 {
 		a.failTask(t, fmt.Sprintf("restore exited %d: %v", code, err), logBuf.String())
 		return
@@ -372,12 +466,14 @@ func (a *agent) runRestore(t *Task) {
 // runCheck verifies the repository. Damage found by restic is reported as a
 // failed result flagged Damaged; any other non-zero exit means the check could
 // not run (lock, backend, password) and is reported as a plain failure.
-func (a *agent) runCheck(t *Task) {
+func (a *agent) runCheck(ctx context.Context, t *Task) {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 
-	code, err := a.runner.run(t, checkArgs(t), nil, appendLog)
+	code, err := a.runner.run(ctx, t, checkArgs(t), nil, appendLog)
 	switch {
+	case ctx.Err() != nil:
+		a.cancelTask(t, logBuf.String())
 	case err == nil && code == 0:
 		a.postResult(t.TaskID, TaskResult{Status: "success", Log: logBuf.String()})
 		log.Printf("check task %s passed", t.TaskID)
@@ -395,9 +491,9 @@ func (a *agent) runCheck(t *Task) {
 }
 
 // runStats reads the repository figures the server asked for.
-func (a *agent) runStats(t *Task) {
+func (a *agent) runStats(ctx context.Context, t *Task) {
 	result := TaskResult{Status: "success"}
-	a.readRepoStats(t, &result)
+	a.readRepoStats(ctx, t, &result)
 	if result.RepoStats == nil {
 		result.Status = "failed"
 		result.Error = result.RepoStatsError
@@ -408,10 +504,10 @@ func (a *agent) runStats(t *Task) {
 
 // readRepoStats runs `restic stats` and puts the figures — or why they could
 // not be read — on the result.
-func (a *agent) readRepoStats(t *Task, result *TaskResult) {
+func (a *agent) readRepoStats(ctx context.Context, t *Task, result *TaskResult) {
 	var logBuf strings.Builder
 	var stats map[string]any
-	code, err := a.runner.run(t, statsArgs(), func(msg map[string]any) { stats = msg },
+	code, err := a.runner.run(ctx, t, statsArgs(), func(msg map[string]any) { stats = msg },
 		func(s string) { logBuf.WriteString(s + "\n") })
 	if err != nil || code != 0 || stats == nil {
 		msg := strings.TrimSpace(logBuf.String())
@@ -427,6 +523,12 @@ func (a *agent) readRepoStats(t *Task, result *TaskResult) {
 func (a *agent) failTask(t *Task, msg, logStr string) {
 	log.Printf("task %s failed: %s", t.TaskID, msg)
 	a.postResult(t.TaskID, TaskResult{Status: "failed", Error: msg, Log: logStr})
+}
+
+// cancelTask reports a task stopped because it was cancelled on the server.
+func (a *agent) cancelTask(t *Task, logStr string) {
+	log.Printf("%s task %s cancelled", t.Type, t.TaskID)
+	a.postResult(t.TaskID, TaskResult{Status: "cancelled", Log: logStr})
 }
 
 func (a *agent) postProgress(taskID string, stats map[string]any) {
@@ -452,6 +554,20 @@ func (a *agent) post(path, bearer string, body any, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return a.do(req, bearer, out)
+}
+
+// get fetches a JSON resource; ctx aborts the request (e.g. when a task ends).
+func (a *agent) get(ctx context.Context, path, bearer string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	return a.do(req, bearer, out)
+}
+
+// do sends a request and decodes a JSON response body into out (if non-nil).
+func (a *agent) do(req *http.Request, bearer string, out any) error {
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}

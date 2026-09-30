@@ -10,7 +10,10 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List activities: backup, prune and check runs (history + live)' })
+  @ApiOperation({
+    summary:
+      'List activities: backup, prune and check runs plus restores (history + live); `kind` takes a comma list, e.g. `backup,restore`',
+  })
   list(
     @CurrentUser() user: RequestUser,
     @Query('limit') limit?: string,
@@ -29,7 +32,7 @@ export class RunsController {
   }
 
   @Get('dashboard')
-  @ApiOperation({ summary: 'Dashboard aggregates' })
+  @ApiOperation({ summary: 'Dashboard aggregates (recent activities incl. restores, backup counters)' })
   dashboard(@CurrentUser() user: RequestUser) {
     return this.runs.dashboard(user);
   }

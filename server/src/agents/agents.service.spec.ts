@@ -428,6 +428,104 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
 
       expect(update.where).toHaveBeenCalledWith('status', '=', 'running');
     });
+
+    it('records a backup the agent stopped without retrying or notifying', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+      (retries.finalize as jest.Mock).mockClear();
+
+      await service.submitBackupResult('agent-1', 'run-1', {
+        status: 'cancelled',
+        log: '[post-failure-script] /opt/start.sh',
+      } as never);
+
+      const patch = update.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(patch.status).toBe('cancelled');
+      expect(patch.error).toBe('Cancelled on the agent.');
+      expect(patch.log).toBe('[post-failure-script] /opt/start.sh');
+      // The server may have cancelled it already; the agent's word replaces the
+      // "may still be running" hint.
+      expect(update.where).toHaveBeenCalledWith('status', 'in', ['running', 'cancelled']);
+      expect(retries.finalize).not.toHaveBeenCalled();
+    });
+
+    it('records a restore the agent stopped', async () => {
+      const update = chain({ execute: [] });
+      const service = makeService(update);
+
+      await service.submitRestoreResult('agent-1', 'run-1', {
+        status: 'cancelled',
+        log: 'restore interrupted',
+      } as never);
+
+      const patch = update.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(patch.status).toBe('cancelled');
+      expect(patch.error).toBe('Cancelled on the agent.');
+      expect(update.where).toHaveBeenCalledWith('status', 'in', ['running', 'cancelled']);
+    });
+  });
+
+  describe('task state (cancel watch)', () => {
+    const RUN_ID = '0b6f4a52-1c3e-4d5f-8a9b-0c1d2e3f4a5b';
+
+    function makeService(rows: { job?: unknown; restore?: unknown }) {
+      const jobRuns = chain({ executeTakeFirst: rows.job });
+      const restoreRuns = chain({ executeTakeFirst: rows.restore });
+      const agents = chain({ execute: [] });
+      const { db, selectFrom } = createDbMock({
+        selectFrom: (table) => (table === 'job_runs' ? jobRuns : restoreRuns),
+        updateTable: agents,
+      });
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+      return { service, selectFrom, agents };
+    }
+
+    it('reports a backup cancelled on the server', async () => {
+      const { service } = makeService({ job: { status: 'cancelled', agent_id: 'agent-1' } });
+
+      await expect(service.taskState('agent-1', RUN_ID)).resolves.toEqual({ cancelled: true });
+    });
+
+    it('lets a running task carry on', async () => {
+      const { service } = makeService({ job: { status: 'running', agent_id: 'agent-1' } });
+
+      await expect(service.taskState('agent-1', RUN_ID)).resolves.toEqual({ cancelled: false });
+    });
+
+    it('looks up restores too', async () => {
+      const { service } = makeService({ restore: { status: 'cancelled', agent_id: 'agent-1' } });
+
+      await expect(service.taskState('agent-1', RUN_ID)).resolves.toEqual({ cancelled: true });
+    });
+
+    it('treats a run that no longer exists as cancelled', async () => {
+      const { service } = makeService({});
+
+      await expect(service.taskState('agent-1', RUN_ID)).resolves.toEqual({ cancelled: true });
+    });
+
+    it("hides another agent's task", async () => {
+      const { service } = makeService({ job: { status: 'cancelled', agent_id: 'agent-2' } });
+
+      await expect(service.taskState('agent-1', RUN_ID)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('does not look up a stats task, which has no run row', async () => {
+      const { service, selectFrom } = makeService({});
+
+      await expect(service.taskState('agent-1', 'stats-repo-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(selectFrom).not.toHaveBeenCalled();
+    });
+
+    it('counts as a heartbeat', async () => {
+      const { service, agents } = makeService({ job: { status: 'running', agent_id: 'agent-1' } });
+
+      await service.taskState('agent-1', RUN_ID);
+
+      expect(agents.set).toHaveBeenCalledWith(expect.objectContaining({ status: 'online' }));
+    });
   });
 
   describe('integrity checks', () => {

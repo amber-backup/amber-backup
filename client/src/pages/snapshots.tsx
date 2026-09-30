@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, type Job, type Snapshot, type LsEntry, type RestoreRun } from '../core/api';
 import { Icon } from '../core/icons';
-import { fmtBytes, fmtDateTime, fmtRelative, statusLabel } from '../core/format';
+import { fmtBytes, fmtDateTime, fmtRelative, restoreModeLabel, statusLabel } from '../core/format';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
@@ -481,11 +481,6 @@ function HistoryPanel({ runs }: { runs: RestoreRun[] | undefined }) {
 
 function HistoryRow({ run: r }: { run: RestoreRun }) {
   const t = useT().snapshots.history;
-  const modeLabels: Record<string, string> = {
-    original: t.modeOriginal,
-    alternate_path: t.modeAlternate,
-    download: t.modeDownload,
-  };
   const canDownload =
     r.mode === 'download' &&
     r.status === 'success' &&
@@ -495,7 +490,7 @@ function HistoryRow({ run: r }: { run: RestoreRun }) {
     <div className="row compact">
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
-        <div className="row-title">{`${modeLabels[r.mode] ?? r.mode} · ${r.snapshot_id.slice(0, 12)}`}</div>
+        <div className="row-title">{`${restoreModeLabel(r.mode)} · ${r.snapshot_id.slice(0, 12)}`}</div>
         <div className="row-sub">{`${statusLabel(r.status)} · ${fmtRelative(r.finished_at ?? r.created_at)}${r.error ? ' · ' + r.error : ''}`}</div>
       </div>
       {canDownload && (

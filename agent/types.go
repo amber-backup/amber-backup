@@ -105,7 +105,15 @@ type PollResponse struct {
 	LatestAgentVersion string `json:"latestAgentVersion,omitempty"`
 }
 
+// TaskState mirrors the server's GET /agents/me/tasks/:id/state response,
+// polled while a task runs so a cancel on the server stops restic here.
+type TaskState struct {
+	Cancelled bool `json:"cancelled"`
+}
+
 type TaskResult struct {
+	// "success", "failed", or "cancelled" once a cancel from the server
+	// stopped the task (mirrors the server's TaskResultDto).
 	Status       string         `json:"status"`
 	SnapshotID   string         `json:"snapshotId,omitempty"`
 	Stats        map[string]any `json:"stats,omitempty"`

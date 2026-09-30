@@ -16,6 +16,9 @@ import { RestoreDestination, RestoreOptions, RunStats } from '../database/databa
 /** Download artifacts live this long before cleanup (§10.3). */
 const DOWNLOAD_TTL_MS = 24 * 3600_000;
 
+/** Live progress is written at most this often. */
+const PROGRESS_WRITE_INTERVAL_MS = 1000;
+
 /**
  * Executes local restore runs (§10). Server executor handles original (local
  * source), alternate_path (server), and download modes. Agent-bound restores
@@ -109,6 +112,7 @@ export class RestoreRunnerService implements OnApplicationShutdown {
       };
 
       let targetPath: string;
+      let lastProgressWrite = 0;
       let downloadRef: string | null = null;
       let downloadExpires: Date | null = null;
 
@@ -139,7 +143,14 @@ export class RestoreRunnerService implements OnApplicationShutdown {
           dryRun: options.dryRun,
         },
         {
-          onProgress: (s) => void this.writeStats(restoreRunId, s),
+          onProgress: (s) => {
+            // restic emits status lines many times a second; the final
+            // figures are written with the result below.
+            const now = Date.now();
+            if (now - lastProgressWrite < PROGRESS_WRITE_INTERVAL_MS) return;
+            lastProgressWrite = now;
+            void this.writeStats(restoreRunId, s);
+          },
           onLog: appendLog,
         },
         abort.signal,
@@ -189,6 +200,8 @@ export class RestoreRunnerService implements OnApplicationShutdown {
       .updateTable('restore_runs')
       .set({ stats: JSON.stringify(stats) })
       .where('id', '=', id)
+      // A late progress write must not replace the final figures.
+      .where('status', '=', 'running')
       .execute()
       .catch(() => undefined);
   }

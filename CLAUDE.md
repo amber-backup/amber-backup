@@ -96,7 +96,10 @@ Key cross-cutting flows to understand before editing:
   credential temp files), streams JSON output line-by-line, cleans up transient
   secrets. The Go agent mirrors this logic for remote hosts — changes to run
   behavior often need to be made in both `restic/restic.service.ts` and
-  `agent/restic.go`.
+  `agent/restic.go` (e.g. the live progress fields `percentDone`, `bytesDone`,
+  `totalBytes`, `filesDone`, `totalFiles` that backups and restores report).
+  The agent's `resticRunner.run` takes a `context.Context`; cancelling it is
+  how a task is stopped.
 
 - **Agent dispatch is poll-based.** Agents enroll with a token, then poll
   `agent-api.controller.ts` for `AgentTask`s (backup/restore/check). The server hands
@@ -107,6 +110,13 @@ Key cross-cutting flows to understand before editing:
   Task types added later are gated by `PollDto.capabilities` (the agent
   announces e.g. `check`), so an older agent is never handed a task it would
   drop.
+  Cancel is poll-based too: cancelling a run handed to an agent only marks the
+  row `cancelled` ("the agent may still be running this task"). While a task
+  runs, the agent polls `GET me/tasks/:id/state` every 5 s; on
+  `cancelled: true` it cancels the task's context (restic gets SIGINT, killed
+  after a grace period) and reports `status: 'cancelled'`, which settles the
+  row as "Cancelled on the agent." — never retried or notified. Older
+  servers/agents without the endpoint simply ignore it.
 
 - **One timezone for the whole system.** `SettingsService` stores it in
   `app_settings` (key `timezone`, default = the server process zone) and caches

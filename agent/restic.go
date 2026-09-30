@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 var credentialFileRefRE = regexp.MustCompile(`\{\{credentialFile:([^}]+)\}\}`)
@@ -32,10 +35,15 @@ func substituteCredentialPaths(args []string, paths map[string]string) []string 
 	return out
 }
 
+// defaultStopGrace is how long restic may take to wind down after a cancel
+// (SIGINT: it removes its repository lock) before it is killed.
+const defaultStopGrace = 30 * time.Second
+
 // resticRunner executes restic on the agent host, mirroring the server executor.
 type resticRunner struct {
-	binary   string
-	cacheDir string
+	binary    string
+	cacheDir  string
+	stopGrace time.Duration
 }
 
 func newResticRunner() *resticRunner {
@@ -47,7 +55,7 @@ func newResticRunner() *resticRunner {
 	if cache == "" {
 		cache = filepath.Join(os.TempDir(), "amber-restic-cache")
 	}
-	return &resticRunner{binary: bin, cacheDir: cache}
+	return &resticRunner{binary: bin, cacheDir: cache, stopGrace: defaultStopGrace}
 }
 
 // prepareEnv builds the process environment and writes credential files. It
@@ -79,7 +87,10 @@ func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, map[string
 }
 
 // run executes restic with the given args, streaming JSON stdout lines to onLine.
-func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), onLog func(string)) (int, error) {
+// Cancelling ctx interrupts restic (SIGINT, so it releases its repository lock)
+// and kills it if it hasn't exited after stopGrace; callers tell a cancel apart
+// from a failure by ctx.Err().
+func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine func(map[string]any), onLog func(string)) (int, error) {
 	workDir, err := os.MkdirTemp("", "amber-restic-")
 	if err != nil {
 		return -1, err
@@ -95,16 +106,22 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 	// Global options (e.g. sftp.command) must precede the subcommand.
 	extraArgs := substituteCredentialPaths(t.ExtraArgs, credPaths)
 	fullArgs := append(append([]string{}, extraArgs...), args...)
-	cmd := exec.Command(r.binary, fullArgs...)
+	cmd := exec.CommandContext(ctx, r.binary, fullArgs...)
 	cmd.Env = env
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = r.stopGrace
+	// Output goes through in-process pipes rather than StdoutPipe: exec then
+	// copies it itself, so Wait returns only once all output (e.g. restic's
+	// final "Fatal: …" line) is through, and WaitDelay also bounds a child
+	// process (such as sftp's ssh) that keeps the stream open after a kill.
+	stdout, stdoutW := io.Pipe()
+	stderr, stderrW := io.Pipe()
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 	if err := cmd.Start(); err != nil {
 		return -1, err
 	}
 
-	// Wait must not run before the pipes are drained, or trailing output (e.g.
-	// restic's final "Fatal: …" line) can be lost.
 	var readers sync.WaitGroup
 	readers.Add(2)
 	// Both streams feed the same log; callers append to a plain strings.Builder.
@@ -144,9 +161,12 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 		io.Copy(io.Discard, stderr)
 	}()
 
-	readers.Wait()
 	err = cmd.Wait()
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	stdoutW.Close()
+	stderrW.Close()
+	readers.Wait()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode(), nil
 	}
 	if err != nil {
@@ -155,15 +175,15 @@ func (r *resticRunner) run(t *Task, args []string, onLine func(map[string]any), 
 	return 0, nil
 }
 
-func (r *resticRunner) ensureInitialized(t *Task) error {
-	code, err := r.run(t, []string{"cat", "config"}, nil, nil)
+func (r *resticRunner) ensureInitialized(ctx context.Context, t *Task) error {
+	code, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil)
 	if err != nil {
 		return err
 	}
 	if code == 0 {
 		return nil
 	}
-	code, err = r.run(t, []string{"init"}, nil, nil)
+	code, err = r.run(ctx, t, []string{"init"}, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -294,6 +314,42 @@ func repoStatsFrom(msg map[string]any) *RepoStats {
 		return int64(v)
 	}
 	return &RepoStats{SizeBytes: num("total_size"), SnapshotCount: num("snapshots_count")}
+}
+
+// jsonNum reads a numeric field of restic's JSON output; restic omits zero
+// values, so an absent field reads as 0.
+func jsonNum(msg map[string]any, key string) float64 {
+	v, _ := msg[key].(float64)
+	return v
+}
+
+// restoreProgress maps a `restic restore --json` status line to the progress
+// fields a backup reports (mirrors the server's ResticService.restore).
+// Skipped files count as done, or `--overwrite if-changed` never reaches 100 %.
+func restoreProgress(msg map[string]any) map[string]any {
+	return map[string]any{
+		"percentDone": jsonNum(msg, "percent_done"),
+		"bytesDone":   jsonNum(msg, "bytes_restored") + jsonNum(msg, "bytes_skipped"),
+		"totalBytes":  jsonNum(msg, "total_bytes"),
+		"filesDone":   jsonNum(msg, "files_restored") + jsonNum(msg, "files_skipped"),
+		"totalFiles":  jsonNum(msg, "total_files"),
+	}
+}
+
+// restoreSummaryToStats maps the restore summary to the final stats (mirrors
+// the server): totals processed, and the progress fields at 100 %.
+func restoreSummaryToStats(msg map[string]any) map[string]any {
+	files := jsonNum(msg, "total_files")
+	bytes := jsonNum(msg, "total_bytes")
+	return map[string]any{
+		"totalFilesProcessed": files,
+		"totalBytesProcessed": bytes,
+		"percentDone":         1,
+		"bytesDone":           bytes,
+		"totalBytes":          bytes,
+		"filesDone":           files,
+		"totalFiles":          files,
+	}
 }
 
 // isDamagedCheckOutput tells a check that found errors apart from one that

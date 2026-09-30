@@ -214,9 +214,12 @@ export class RepoStatsDto {
 }
 
 export class TaskResultDto {
-  @ApiProperty({ enum: ['success', 'failed'] })
-  @IsIn(['success', 'failed'])
-  status!: 'success' | 'failed';
+  @ApiProperty({
+    enum: ['success', 'failed', 'cancelled'],
+    description: 'cancelled: the agent stopped the task after it was cancelled on the server',
+  })
+  @IsIn(['success', 'failed', 'cancelled'])
+  status!: 'success' | 'failed' | 'cancelled';
 
   @ApiPropertyOptional()
   @IsOptional()

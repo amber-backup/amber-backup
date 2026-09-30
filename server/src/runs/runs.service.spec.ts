@@ -42,6 +42,121 @@ function setup(
   return { service, update, jobRunner, pruneRunner, checkRunner, acl };
 }
 
+/** A `where(sql\`false\`)` predicate: the union side is ruled out by the kind filter. */
+function isFalsePredicate(call: unknown[]): boolean {
+  const node = (call[0] as { toOperationNode?: () => { sqlFragments?: string[] } })
+    ?.toOperationNode?.();
+  return call.length === 1 && node?.sqlFragments?.join('') === 'false';
+}
+
+describe('RunsService.list (activity feed)', () => {
+  function setupList(visible: string[] | 'all') {
+    const jobs = chain();
+    const restores = chain();
+    const outer = chain({ execute: [{ id: 'r1' }] });
+    const { db, selectFrom } = createDbMock({
+      selectFrom: (table) =>
+        table === 'job_runs' ? jobs : table === 'restore_runs' ? restores : outer,
+    });
+    const acl = {
+      visibleResourceIds: jest.fn(async () => visible),
+    } as unknown as AccessControlService;
+    const service = new RunsService(
+      db,
+      acl,
+      {} as JobRunnerService,
+      {} as PruneRunnerService,
+      {} as CheckRunnerService,
+    );
+    return { service, jobs, restores, outer, selectFrom };
+  }
+
+  it('unions job runs and restores, newest first with a stable tiebreaker', async () => {
+    const { service, jobs, restores, outer } = setupList('all');
+
+    await expect(service.list(user, { limit: 20, offset: 40 })).resolves.toEqual([{ id: 'r1' }]);
+
+    expect(jobs.unionAll).toHaveBeenCalledWith(restores);
+    expect(outer.orderBy.mock.calls).toEqual([
+      ['created_at', 'desc'],
+      ['id', 'desc'],
+    ]);
+    expect(outer.limit).toHaveBeenCalledWith(20);
+    expect(outer.offset).toHaveBeenCalledWith(40);
+    // Restores join their job loosely: it may have been deleted since.
+    expect(restores.leftJoin).toHaveBeenCalledWith(
+      'backup_jobs',
+      'backup_jobs.id',
+      'restore_runs.job_id',
+    );
+  });
+
+  it('shows an admin every restore, including those of deleted jobs', async () => {
+    const { service, restores } = setupList('all');
+
+    await service.list(user);
+
+    expect(restores.where).not.toHaveBeenCalled();
+  });
+
+  it('limits both kinds to the jobs a user can see', async () => {
+    const { service, jobs, restores } = setupList(['j1', 'j2']);
+
+    await service.list({ id: 'u2', isAdmin: false } as RequestUser);
+
+    expect(jobs.where).toHaveBeenCalledWith('backup_jobs.id', 'in', ['j1', 'j2']);
+    // `in` never matches a null job_id, so orphaned restores stay admin-only.
+    expect(restores.where).toHaveBeenCalledWith('restore_runs.job_id', 'in', ['j1', 'j2']);
+  });
+
+  it('returns nothing without querying when no job is visible', async () => {
+    const { service, selectFrom } = setupList([]);
+
+    await expect(service.list({ id: 'u2', isAdmin: false } as RequestUser)).resolves.toEqual([]);
+    expect(selectFrom).not.toHaveBeenCalled();
+  });
+
+  it('takes a comma list of kinds spanning job runs and restores', async () => {
+    const { service, jobs, restores } = setupList('all');
+
+    await service.list(user, { kind: 'backup,restore' });
+
+    expect(jobs.where).toHaveBeenCalledWith('job_runs.kind', 'in', ['backup']);
+    expect(jobs.where.mock.calls.some(isFalsePredicate)).toBe(false);
+    expect(restores.where.mock.calls.some(isFalsePredicate)).toBe(false);
+  });
+
+  it('rules out job runs when only restores are asked for', async () => {
+    const { service, jobs, restores } = setupList('all');
+
+    await service.list(user, { kind: 'restore' });
+
+    expect(jobs.where.mock.calls.some(isFalsePredicate)).toBe(true);
+    expect(jobs.where).not.toHaveBeenCalledWith('job_runs.kind', 'in', expect.anything());
+    expect(restores.where.mock.calls.some(isFalsePredicate)).toBe(false);
+  });
+
+  it('rules out restores when only job-run kinds are asked for', async () => {
+    const { service, jobs, restores } = setupList('all');
+
+    await service.list(user, { kind: 'prune,check' });
+
+    expect(jobs.where).toHaveBeenCalledWith('job_runs.kind', 'in', ['prune', 'check']);
+    expect(restores.where.mock.calls.some(isFalsePredicate)).toBe(true);
+  });
+
+  it('applies the job and status filters to both kinds', async () => {
+    const { service, jobs, restores } = setupList('all');
+
+    await service.list(user, { jobId: 'j1', status: 'running' });
+
+    expect(jobs.where).toHaveBeenCalledWith('job_runs.job_id', '=', 'j1');
+    expect(jobs.where).toHaveBeenCalledWith('job_runs.status', '=', 'running');
+    expect(restores.where).toHaveBeenCalledWith('restore_runs.job_id', '=', 'j1');
+    expect(restores.where).toHaveBeenCalledWith('restore_runs.status', '=', 'running');
+  });
+});
+
 describe('RunsService.cancel', () => {
   it('aborts a locally running backup through the job runner without touching the row', async () => {
     const { service, update, jobRunner } = setup(
