@@ -43,17 +43,36 @@ export function totalStorageSeries(history: RepositoryStatsHistory, now: number)
   return out;
 }
 
-/** "Nice" tick values for a byte axis from 0 to `max` (1024-based steps). */
-function byteTicks(max: number, count: number): number[] {
-  if (max <= 0) return [0];
-  const raw = max / count;
-  const unit = Math.pow(1024, Math.floor(Math.log(raw) / Math.log(1024)));
-  const frac = raw / unit;
-  const nice = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : frac <= 10 ? 10 : frac <= 20 ? 20 : frac <= 50 ? 50 : 100;
-  const step = nice * unit;
+/** A "nice" byte step: 1, 2, 2.5 or 5 × a power of ten, in the largest fitting 1024-based unit. */
+function niceByteStep(raw: number): number {
+  const r = Math.max(raw, 1);
+  const unit = Math.pow(1024, Math.floor(Math.log(r) / Math.log(1024)));
+  const frac = r / unit;
+  const mag = Math.pow(10, Math.floor(Math.log10(frac)));
+  const f = frac / mag;
+  return (f < 1.5 ? 1 : f < 2.25 ? 2 : f < 3.5 ? 2.5 : f < 7.5 ? 5 : 10) * mag * unit;
+}
+
+/**
+ * Value range of the y-axis and its tick values. Starts at zero unless the
+ * readings move in a band that sits far above it (e.g. 830 → 890 GB); then the
+ * axis zooms into that band so the growth is visible instead of a flat line.
+ */
+function byteAxis(vMin: number, vMax: number, count: number): { lo: number; hi: number; ticks: number[] } {
+  const span = vMax - vMin;
+  let lo = 0;
+  // Headroom above the highest reading so the line never touches the top.
+  let hi = Math.max(vMax * 1.15, 1);
+  if (vMin > span) {
+    // Pad the band on both sides; a flat series still gets some room around it.
+    const pad = Math.max(span * 0.15, vMax * 0.02);
+    lo = vMin - pad;
+    hi = vMax + pad;
+  }
+  const step = niceByteStep((hi - lo) / count);
   const ticks: number[] = [];
-  for (let v = 0; v <= max + step * 0.001; v += step) ticks.push(v);
-  return ticks;
+  for (let i = Math.ceil(lo / step); i * step <= hi + step * 0.001; i++) ticks.push(i * step);
+  return { lo, hi, ticks };
 }
 
 function fmtDay(t: number): string {
@@ -64,8 +83,77 @@ function fmtDay(t: number): string {
   });
 }
 
+function fmtMonth(t: number): string {
+  return new Date(t).toLocaleDateString(intlLocale(), { month: 'short', timeZone: appTimezone() });
+}
+
+const DAY_MS = 86_400_000;
+/** Approximate advance of one character of `.chart-label` (10.5px monospace). */
+const LABEL_CHAR_W = 6.4;
+
+/** Wall-clock time of `t` in the zone of `fmt`, encoded as if it were UTC. */
+function wallClock(fmt: Intl.DateTimeFormat, t: number): number {
+  const p = Object.fromEntries(fmt.formatToParts(t).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+}
+
+/** Instant at which the wall-clock time `wall` (UTC-encoded) occurs in the zone of `fmt`. */
+function zonedInstant(fmt: Intl.DateTimeFormat, wall: number): number {
+  let t = wall;
+  // Two passes settle the zone offset, DST changes included.
+  for (let i = 0; i < 2; i++) t = wall - (wallClock(fmt, t) - t);
+  return t;
+}
+
+/**
+ * X-axis labels at midnight in the app timezone, one per day. When days get
+ * too narrow for their labels, every 2nd/7th/14th day is labelled instead, and
+ * beyond that the first of every 1st/2nd/3rd/6th/12th month.
+ */
+function dayLabels(tMin: number, tMax: number, pxPerMs: number): { t: number; label: string }[] {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: appTimezone(),
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  });
+  const start = new Date(wallClock(fmt, tMin));
+  const [y, m, d] = [start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()];
+  // Widest day label (two-digit day) plus a gap between neighbours.
+  const minGap = fmtDay(Date.UTC(2000, 8, 30, 12)).length * LABEL_CHAR_W + 16;
+  const out: { t: number; label: string }[] = [];
+
+  const dayStride = [1, 2, 7, 14].find((n) => n * DAY_MS * pxPerMs >= minGap);
+  if (dayStride) {
+    // Aligned to the calendar so labels stay put as the window moves: weekly
+    // strides land on Mondays (day 4 counted from the Thursday 1970-01-01).
+    const align = dayStride >= 7 ? 4 : 0;
+    let first = Date.UTC(y, m, d) / DAY_MS;
+    while ((first - align) % dayStride !== 0) first++;
+    for (let wall = first * DAY_MS; ; wall += dayStride * DAY_MS) {
+      const t = zonedInstant(fmt, wall);
+      if (t > tMax) break;
+      if (t >= tMin) out.push({ t, label: fmtDay(t) });
+    }
+    return out;
+  }
+
+  const monthStride = [1, 2, 3, 6, 12].find((n) => n * 30.4 * DAY_MS * pxPerMs >= minGap) ?? 12;
+  // Aligned to the calendar (e.g. quarters start in Jan/Apr/Jul/Oct).
+  for (let month = Math.ceil(m / monthStride) * monthStride; ; month += monthStride) {
+    const t = zonedInstant(fmt, Date.UTC(y, month, 1));
+    if (t > tMax) break;
+    if (t >= tMin) out.push({ t, label: fmtMonth(t) });
+  }
+  return out;
+}
+
 const PAD = { top: 14, right: 16, bottom: 24, left: 8 };
-const Y_LABEL_W = 52;
+const Y_LABEL_W = 60;
 
 /**
  * Step-area chart of total repository storage over time. Single series, so no
@@ -106,13 +194,11 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
   const y1 = h - PAD.bottom;
   const tMin = +new Date(history.since);
   const tMax = now;
-  const vMax = Math.max(...series.map((p) => p.bytes));
-  // Headroom above the highest reading so the line never touches the top.
-  const vTop = Math.max(vMax * 1.15, 1);
-  const ticks = byteTicks(vTop, 3);
+  const values = series.map((p) => p.bytes);
+  const { lo, hi, ticks } = byteAxis(Math.min(...values), Math.max(...values), 5);
 
   const sx = (t: number) => x0 + ((t - tMin) / Math.max(1, tMax - tMin)) * (x1 - x0);
-  const sy = (v: number) => y1 - (v / vTop) * (y1 - y0);
+  const sy = (v: number) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
 
   // Step-after: a reading holds until the next one.
   let line = `M${sx(series[0].t).toFixed(1)},${sy(series[0].bytes).toFixed(1)}`;
@@ -121,9 +207,11 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
   }
   const area = `${line} V${y1.toFixed(1)} H${sx(series[0].t).toFixed(1)} Z`;
 
-  // Roughly one date label per 90px, from the window start.
-  const nLabels = Math.max(2, Math.floor((x1 - x0) / 90));
-  const xLabels = Array.from({ length: nLabels + 1 }, (_, i) => tMin + ((tMax - tMin) * i) / nLabels);
+  // Drop labels that would stick out of the chart at either edge.
+  const xLabels = dayLabels(tMin, tMax, (x1 - x0) / Math.max(1, tMax - tMin)).filter(({ t, label }) => {
+    const half = (label.length * LABEL_CHAR_W) / 2;
+    return sx(t) - half >= 0 && sx(t) + half <= w;
+  });
 
   const onMove = (e: PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -159,15 +247,9 @@ export function StorageChart({ history }: { history: RepositoryStatsHistory }) {
               </text>
             </g>
           ))}
-          {xLabels.map((tx, i) => (
-            <text
-              key={tx}
-              className="chart-label"
-              x={sx(tx)}
-              y={h - 6}
-              textAnchor={i === 0 ? 'start' : i === nLabels ? 'end' : 'middle'}
-            >
-              {fmtDay(tx)}
+          {xLabels.map(({ t: tx, label }) => (
+            <text key={tx} className="chart-label" x={sx(tx)} y={h - 6} textAnchor="middle">
+              {label}
             </text>
           ))}
           <path className="chart-area" d={area} />
