@@ -1,3 +1,11 @@
+# [1.37.0](https://github.com/amber-backup/amber-backup/compare/v1.36.0...v1.37.0) (2026-09-30)
+
+
+### Features
+
+* **cli:** install ambb with a one-liner served by the server ([39f3099](https://github.com/amber-backup/amber-backup/commit/39f30998c3aea619bf7472ee978dc5760dbe3e03))
+* **restore:** show restores in the dashboard with progress and cancel ([d139e82](https://github.com/amber-backup/amber-backup/commit/d139e825a8dc0c94507192bcb65c3ae60fe54d10))
+
 # [1.36.0](https://github.com/amber-backup/amber-backup/compare/v1.35.0...v1.36.0) (2026-09-23)
 
 
