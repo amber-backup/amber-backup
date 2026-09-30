@@ -1,3 +1,10 @@
+# [1.38.0](https://github.com/amber-backup/amber-backup/compare/v1.37.0...v1.38.0) (2026-09-30)
+
+
+### Features
+
+* **dashboard:** zoom storage chart into its value band and label each day ([ba868d9](https://github.com/amber-backup/amber-backup/commit/ba868d9b038db9856471901372a24932b8f720e1))
+
 # [1.37.0](https://github.com/amber-backup/amber-backup/compare/v1.36.0...v1.37.0) (2026-09-30)
 
 
