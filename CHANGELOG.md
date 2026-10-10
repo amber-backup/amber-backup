@@ -1,3 +1,11 @@
+# [1.39.0](https://github.com/amber-backup/amber-backup/compare/v1.38.0...v1.39.0) (2026-10-10)
+
+
+### Features
+
+* **dashboard:** add a filter to show only failed activities ([d781d57](https://github.com/amber-backup/amber-backup/commit/d781d57bce60f0bebd001c0958177ed9aa6b266e))
+* **jobs:** show last backup run and flag failures in the job list ([9484748](https://github.com/amber-backup/amber-backup/commit/9484748519b18cb13132bd98a24e1fdd8ed8d334))
+
 # [1.38.0](https://github.com/amber-backup/amber-backup/compare/v1.37.0...v1.38.0) (2026-09-30)
 
 
