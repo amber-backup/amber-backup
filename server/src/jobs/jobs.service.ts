@@ -14,6 +14,7 @@ import { RequestUser } from '../common/auth/request-user';
 import {
   BackupJobRow,
   IntegrityCheckConfig,
+  JobRun,
   RunTrigger,
 } from '../database/database.types';
 import {
@@ -25,6 +26,12 @@ import { uniqueSlug } from '../common/slug';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 import { IntegrityCheckConfigDto } from './dto/integrity-check.dto';
 import { DEFAULT_RETRY_DELAY_SECONDS } from './run-retry.service';
+
+/** A job's latest finished backup, as shown in the job list. */
+export type LastBackupRun = Pick<
+  JobRun,
+  'id' | 'status' | 'started_at' | 'finished_at' | 'error'
+>;
 
 @Injectable()
 export class JobsService {
@@ -173,6 +180,25 @@ export class JobsService {
       q = q.where('j.id', 'in', ids);
     }
     return q.execute();
+  }
+
+  /**
+   * The most recent finished backup run of each given job, keyed by job id.
+   * Jobs that never finished a backup are absent from the map.
+   */
+  async lastBackupRuns(jobIds: string[]): Promise<Map<string, LastBackupRun>> {
+    if (jobIds.length === 0) return new Map();
+    const rows = await this.db
+      .selectFrom('job_runs')
+      .distinctOn('job_id')
+      .select(['job_id', 'id', 'status', 'started_at', 'finished_at', 'error'])
+      .where('job_id', 'in', jobIds)
+      .where('kind', '=', 'backup')
+      .where('finished_at', 'is not', null)
+      .orderBy('job_id')
+      .orderBy('finished_at', 'desc')
+      .execute();
+    return new Map(rows.map(({ job_id, ...run }) => [job_id, run]));
   }
 
   /** All enabled jobs — for the scheduler (bypasses per-user ACL). */

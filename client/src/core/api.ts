@@ -175,6 +175,17 @@ export interface Job {
   retry_delay_seconds?: number;
   enabled: boolean;
   next_run?: string | null;
+  /** Latest finished backup run; null ⇒ the job has not finished one yet. */
+  last_run?: JobLastRun | null;
+}
+
+/** A job's latest finished backup, as listed with the job. */
+export interface JobLastRun {
+  id: string;
+  status: 'success' | 'failed' | 'cancelled';
+  started_at: string | null;
+  finished_at: string;
+  error: string | null;
 }
 
 /** Result of POST /repositories/:id/stats. */

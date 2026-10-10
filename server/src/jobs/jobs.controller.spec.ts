@@ -12,7 +12,7 @@ import { BackupJobRow } from '../database/database.types';
 describe('JobsController', () => {
   const user = { id: 'u1' } as RequestUser;
 
-  function make(job: Partial<BackupJobRow>) {
+  function make(job: Partial<BackupJobRow>, lastRuns = new Map()) {
     const row = {
       id: 'job-1',
       cron_expr: '0 3 * * *',
@@ -23,6 +23,7 @@ describe('JobsController', () => {
       list: jest.fn().mockResolvedValue([row]),
       get: jest.fn().mockResolvedValue(row),
       nextRun: jest.fn().mockReturnValue(null),
+      lastBackupRuns: jest.fn().mockResolvedValue(lastRuns),
     };
     const targets = {
       get: jest.fn().mockResolvedValue({}),
@@ -54,6 +55,27 @@ describe('JobsController', () => {
     });
     expect(await without.controller.list(user)).toEqual([
       expect.objectContaining({ has_credential_override: false }),
+    ]);
+  });
+
+  it("attaches each job's latest finished backup", async () => {
+    const failed = {
+      id: 'run-1',
+      status: 'failed',
+      started_at: new Date('2026-10-09T03:00:00Z'),
+      finished_at: new Date('2026-10-09T03:02:00Z'),
+      error: 'repository locked',
+    };
+    const { controller } = make({}, new Map([['job-1', failed]]));
+
+    expect(await controller.list(user)).toEqual([
+      expect.objectContaining({ last_run: failed }),
+    ]);
+    expect(await controller.get(user, 'job-1')).toMatchObject({
+      last_run: failed,
+    });
+    expect(await make({}).controller.list(user)).toEqual([
+      expect.objectContaining({ last_run: null }),
     ]);
   });
 

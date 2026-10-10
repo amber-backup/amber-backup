@@ -14,7 +14,7 @@ import { RequestUser } from '../common/auth/request-user';
 import { SlugResolverService } from '../common/slug-resolver.service';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
-import { JobsService } from './jobs.service';
+import { JobsService, LastBackupRun } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
 import { CheckRunnerService, parseIntegrityConfig } from './check-runner.service';
@@ -36,11 +36,12 @@ export class JobsController {
   ) {}
 
   /**
-   * API read shape of a job: the stored row plus its next scheduled run. The
-   * credential override is exposed as a flag only — neither its values (they
-   * are encrypted) nor its secret id leave the server.
+   * API read shape of a job: the stored row plus its next scheduled run and
+   * latest finished backup. The credential override is exposed as a flag
+   * only — neither its values (they are encrypted) nor its secret id leave
+   * the server.
    */
-  private toApi(job: BackupJobRow) {
+  private toApi(job: BackupJobRow, lastRun: LastBackupRun | null = null) {
     const { credential_secret_id, ...rest } = job;
     const integrity = parseIntegrityConfig(job.integrity_check);
     return {
@@ -54,15 +55,23 @@ export class JobsController {
         job.enabled && integrity.enabled && integrity.cronExpr
           ? this.jobs.nextRun(integrity.cronExpr)
           : null,
+      last_run: lastRun,
       has_credential_override: credential_secret_id != null,
     };
+  }
+
+  /** `toApi` for a single job, looking up its latest finished backup. */
+  private async toApiWithLastRun(job: BackupJobRow) {
+    const lastRuns = await this.jobs.lastBackupRuns([job.id]);
+    return this.toApi(job, lastRuns.get(job.id) ?? null);
   }
 
   @Get()
   @ApiOperation({ summary: 'List jobs the user can view' })
   async list(@CurrentUser() user: RequestUser) {
     const jobs = await this.jobs.list(user);
-    return jobs.map((j) => this.toApi(j));
+    const lastRuns = await this.jobs.lastBackupRuns(jobs.map((j) => j.id));
+    return jobs.map((j) => this.toApi(j, lastRuns.get(j.id) ?? null));
   }
 
   @Post('test-repo')
@@ -92,7 +101,7 @@ export class JobsController {
   @ApiOperation({ summary: 'Get a job (by id or slug)' })
   async get(@CurrentUser() user: RequestUser, @Param('id') idOrSlug: string) {
     const id = await this.slugs.resolve('backup_jobs', idOrSlug);
-    return this.toApi(await this.jobs.get(user, id));
+    return this.toApiWithLastRun(await this.jobs.get(user, id));
   }
 
   @Patch(':id')
@@ -105,7 +114,7 @@ export class JobsController {
     const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     const job = await this.jobs.update(user, id, dto);
     await this.scheduler.sync(job.id);
-    return this.toApi(job);
+    return this.toApiWithLastRun(job);
   }
 
   @Delete(':id')
@@ -150,6 +159,6 @@ export class JobsController {
     const id = await this.slugs.resolve('backup_jobs', idOrSlug);
     const job = await this.jobs.setIntegrityCheck(user, id, dto);
     await this.scheduler.sync(job.id);
-    return this.toApi(job);
+    return this.toApiWithLastRun(job);
   }
 }

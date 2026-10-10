@@ -124,9 +124,27 @@ function JobRow({
       .map(String)
       .join('/') || '—';
 
+  // The dot turns red while the latest finished backup is a failure.
+  const last = j.last_run ?? null;
+  const lastFailed = last?.status === 'failed';
+  const dotClass = !j.enabled ? 'offline' : lastFailed ? 'failed' : 'online';
+  const lastWhen = last ? fmtDateTime(last.finished_at) : '';
+  const lastStatus = !last
+    ? m.statusNeverRun
+    : last.status === 'failed'
+      ? m.statusFailed(lastWhen)
+      : last.status === 'cancelled'
+        ? m.statusCancelled(lastWhen)
+        : m.statusSuccess(lastWhen);
+  const lastError =
+    lastFailed && last.error
+      ? `\n${last.error.length > 300 ? `${last.error.slice(0, 300)}…` : last.error}`
+      : '';
+  const dotTitle = (j.enabled ? lastStatus : `${m.statusDisabled}\n${lastStatus}`) + lastError;
+
   return (
     <div className="row">
-      <span className={`status-dot ${j.enabled ? 'online' : 'offline'}`} />
+      <span className={`status-dot ${dotClass}`} title={dotTitle} />
       <div className="row-main">
         <div className="row-title">{j.name}</div>
         <div className="row-sub">
@@ -136,6 +154,12 @@ function JobRow({
         </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
+        {last && (
+          <span title={lastStatus}>
+            {m.last} <span style={{ color: 'var(--amber)' }}>{fmtRelative(last.finished_at)}</span>
+            {' · '}
+          </span>
+        )}
         {j.enabled && j.next_run ? (
           <span>
             {m.next} <span style={{ color: 'var(--amber)' }}>{fmtRelative(j.next_run)}</span>
