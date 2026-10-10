@@ -6,8 +6,10 @@ export const dashboard = {
   activity: {
     title: 'Recent activities',
     showMaintenance: 'Show prunes & checks',
+    onlyFailed: 'Only show failed',
     allJobs: 'All jobs →',
     empty: 'No activities yet.',
+    emptyFailed: 'No failed activities.',
     cancelled: 'Activity cancelled',
     cancelFailed: 'Could not cancel the activity',
     cancelTitle: 'Cancel this activity',

@@ -62,6 +62,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   // Maintenance (prunes, integrity checks) is noise next to the backups, so it
   // stays hidden until asked for.
   const [showMaintenance, setShowMaintenance] = useState(false);
+  // Narrows the feed to failures, to work through what went wrong.
+  const [onlyFailed, setOnlyFailed] = useState(false);
 
   const seenRef = useRef<Set<string>>(new Set());
   const offsetRef = useRef(0);
@@ -72,9 +74,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   // Bumped when the filter changes so a page still in flight for the previous
   // filter is discarded instead of mixed into the list.
   const genRef = useRef(0);
-  // The poll timer is installed once, so it reads the filter through a ref.
+  // The poll timer is installed once, so it reads the filters through refs.
   const showMaintenanceRef = useRef(showMaintenance);
   showMaintenanceRef.current = showMaintenance;
+  const onlyFailedRef = useRef(onlyFailed);
+  onlyFailedRef.current = onlyFailed;
   // Same for the rows, so a poll can see which ones still need a live status.
   const runsRef = useRef(runs);
   runsRef.current = runs;
@@ -89,7 +93,10 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     const gen = genRef.current;
     try {
       const kind = showMaintenance ? '' : '&kind=backup,restore';
-      const page = await api.get<Run[]>(`/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}`);
+      const status = onlyFailed ? '&status=failed' : '';
+      const page = await api.get<Run[]>(
+        `/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}${status}`,
+      );
       if (gen !== genRef.current) return;
       const fresh = page.filter((r) => !seenRef.current.has(r.id));
       fresh.forEach((r) => seenRef.current.add(r.id));
@@ -104,11 +111,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         setPageLoading(false);
       }
     }
-  }, [showMaintenance]);
+  }, [showMaintenance, onlyFailed]);
 
-  // Toggling the filter starts the list over: the offset and the seen-ids set
+  // Toggling a filter starts the list over: the offset and the seen-ids set
   // belong to the previous query. The load effect re-runs on the new filter.
-  const toggleShowMaintenance = useCallback((next: boolean): void => {
+  const resetFeed = useCallback((): void => {
     genRef.current += 1;
     seenRef.current = new Set();
     offsetRef.current = 0;
@@ -116,8 +123,15 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     doneRef.current = false;
     setRuns([]);
     setPageLoading(false);
-    setShowMaintenance(next);
   }, []);
+  const toggleShowMaintenance = useCallback((next: boolean): void => {
+    resetFeed();
+    setShowMaintenance(next);
+  }, [resetFeed]);
+  const toggleOnlyFailed = useCallback((next: boolean): void => {
+    resetFeed();
+    setOnlyFailed(next);
+  }, [resetFeed]);
 
   // Keep pulling pages until the scroller is filled (first page may be short).
   const fillViewport = useCallback(async (): Promise<void> => {
@@ -164,8 +178,12 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       ]);
       if (ag) setAgents(ag);
       setDash(d);
-      // `recent` covers every activity, so drop maintenance while it's hidden.
-      const recent = showMaintenanceRef.current ? d.recent : d.recent.filter((r) => !isMaintenance(r));
+      // `recent` covers every activity, so apply the feed's filters to it.
+      const recent = d.recent.filter(
+        (r) =>
+          (showMaintenanceRef.current || !isMaintenance(r)) &&
+          (!onlyFailedRef.current || r.status === 'failed'),
+      );
       // `recent` is only the newest few, so an older row that is still queued or
       // running (typically a hung one) is fetched on its own to stay current.
       const stale = runsRef.current.filter(
@@ -239,6 +257,14 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                   />
                   {t.dashboard.activity.showMaintenance}
                 </label>
+                <label className="checkbox sm">
+                  <input
+                    type="checkbox"
+                    checked={onlyFailed}
+                    onChange={(e) => toggleOnlyFailed(e.target.checked)}
+                  />
+                  {t.dashboard.activity.onlyFailed}
+                </label>
                 <span className="link" onClick={() => navigate('/jobs')}>
                   {t.dashboard.activity.allJobs}
                 </span>
@@ -255,7 +281,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                   </div>
                 )}
                 {runs.length === 0 && !pageLoading && doneRef.current && (
-                  <div className="empty">{t.dashboard.activity.empty}</div>
+                  <div className="empty">
+                    {onlyFailed ? t.dashboard.activity.emptyFailed : t.dashboard.activity.empty}
+                  </div>
                 )}
               </div>
               <div ref={sentinelRef} style={{ height: 1 }} />

@@ -8,8 +8,10 @@ export const dashboard: DashboardMessages = {
   activity: {
     title: 'Letzte Aktivitäten',
     showMaintenance: 'Prunes & Prüfungen anzeigen',
+    onlyFailed: 'Nur fehlgeschlagene anzeigen',
     allJobs: 'Alle Jobs →',
     empty: 'Noch keine Aktivitäten.',
+    emptyFailed: 'Keine fehlgeschlagenen Aktivitäten.',
     cancelled: 'Aktivität abgebrochen',
     cancelFailed: 'Die Aktivität konnte nicht abgebrochen werden',
     cancelTitle: 'Diese Aktivität abbrechen',
