@@ -87,6 +87,8 @@ export const admin: AdminMessages = {
     issuerUrlHelp: 'Basis-URL, unter der /.well-known/openid-configuration erreichbar ist.',
     tenantId: 'Verzeichnis-ID (Tenant ID)',
     tenantIdPlaceholder: 'Verzeichnis-ID (Tenant ID)',
+    tenantIdHelp:
+      'Fügen Sie in der App-Registrierung unter „Tokenkonfiguration“ die optionalen ID-Token-Claims „email“ und „xms_edov“ hinzu – ohne sie werden Erstanmeldungen abgelehnt.',
     clientId: 'Client ID',
     clientSecret: 'Client Secret',
     secretStored: 'Ein Secret ist gespeichert. Leer lassen, um es beizubehalten.',

@@ -114,6 +114,11 @@ offline timeout and the single sign-on configuration — a master toggle plus an
 number of providers (generic OIDC, Microsoft Entra ID, Google, GitHub); client
 secrets are encrypted at rest.
 
+A first SSO login is linked to an account by e-mail only when the provider
+vouches for the address. Entra ID does not send `email_verified`, so add the
+optional ID token claims `email` and `xms_edov` in the app registration
+(Token configuration); without them a user's first login is refused.
+
 The timezone applies system-wide. Cron schedules for backup jobs, integrity
 checks and reports are read in it (so "daily at 02:00" follows daylight saving
 time), and the UI renders every timestamp in it. It defaults to the server

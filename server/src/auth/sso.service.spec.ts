@@ -40,6 +40,7 @@ interface TokenOverrides {
   sub?: string;
   email?: string;
   emailVerified?: boolean;
+  extra?: Record<string, unknown>;
   key?: typeof privateKey;
 }
 
@@ -56,6 +57,7 @@ function idToken(nonce: string, o: TokenOverrides = {}): string {
     name: 'A Person',
     iat: now,
     exp: o.exp ?? now + 300,
+    ...o.extra,
   };
   if (o.nonce !== null) claims.nonce = o.nonce ?? nonce;
   const b64 = (v: unknown) =>
@@ -88,6 +90,7 @@ describe('SsoService (callback)', () => {
     create: jest.Mock;
   };
   let auth: { issue: jest.Mock };
+  let settings: { getResolvedSso: jest.Mock };
   let fetchMock: jest.Mock;
 
   /** The id_token the mocked token endpoint hands back for the next exchange. */
@@ -141,15 +144,16 @@ describe('SsoService (callback)', () => {
     fetchMock = jest.fn((url: string) => respond(url, issuedToken));
     global.fetch = fetchMock as unknown as typeof fetch;
 
+    settings = {
+      getResolvedSso: jest
+        .fn()
+        .mockResolvedValue({ enabled: true, providers: [PROVIDER] }),
+    };
     service = new SsoService(
       users as unknown as UsersService,
       auth as unknown as AuthService,
       jwt,
-      {
-        getResolvedSso: jest
-          .fn()
-          .mockResolvedValue({ enabled: true, providers: [PROVIDER] }),
-      } as unknown as SettingsService,
+      settings as unknown as SettingsService,
     );
   });
 
@@ -220,6 +224,48 @@ describe('SsoService (callback)', () => {
       ).rejects.toMatchObject({ status: 401 });
       expect(users.linkSsoIdentity).not.toHaveBeenCalled();
       expect(users.create).not.toHaveBeenCalled();
+    });
+
+    describe('Entra', () => {
+      const ENTRA = { ...PROVIDER, type: 'entra' as const, tenantId: 't1' };
+
+      /** An Entra id_token: no `email_verified`, optionally `xms_edov`. */
+      const entraToken = (nonce: string, extra: Record<string, unknown>) =>
+        idToken(nonce, { extra: { email_verified: undefined, ...extra } });
+
+      beforeEach(() => {
+        settings.getResolvedSso.mockResolvedValue({
+          enabled: true,
+          providers: [ENTRA],
+        });
+        users.findByEmailRaw.mockResolvedValue(makeUser());
+      });
+
+      it('accepts a domain-verified e-mail (xms_edov) for linking', async () => {
+        const result = await callback((n) => entraToken(n, { xms_edov: true }));
+
+        expect(result.reason).toBeNull();
+        expect(users.linkSsoIdentity).toHaveBeenCalledWith('u1', 'p1', 'subject-1');
+      });
+
+      it('refuses to link without xms_edov', async () => {
+        await expect(callback((n) => entraToken(n, {}))).rejects.toMatchObject({
+          status: 401,
+        });
+        expect(users.linkSsoIdentity).not.toHaveBeenCalled();
+      });
+
+      it('ignores xms_edov from a non-Entra provider', async () => {
+        settings.getResolvedSso.mockResolvedValue({
+          enabled: true,
+          providers: [PROVIDER],
+        });
+
+        await expect(
+          callback((n) => entraToken(n, { xms_edov: true })),
+        ).rejects.toMatchObject({ status: 401 });
+        expect(users.linkSsoIdentity).not.toHaveBeenCalled();
+      });
     });
   });
 

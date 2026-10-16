@@ -339,8 +339,12 @@ export class SsoService {
     // Only the `email` claim is an email; `preferred_username` is a display
     // handle the user can often set freely, so it must never stand in as an
     // account key. `email_verified` gates any account linking downstream.
+    // Entra never sends `email_verified`; its counterpart is the optional
+    // `xms_edov` claim (the e-mail's domain is verified by the tenant).
     const email = typeof claims.email === 'string' ? claims.email : '';
-    const emailVerified = claims.email_verified === true;
+    const emailVerified =
+      claims.email_verified === true ||
+      (provider.type === 'entra' && claims.xms_edov === true);
     const name =
       (claims.name as string) ?? (claims.preferred_username as string) ?? email;
     return { subject: String(claims.sub ?? ''), email, name, emailVerified };

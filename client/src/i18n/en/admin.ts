@@ -84,6 +84,8 @@ export const admin = {
     issuerUrlHelp: 'Base URL exposing /.well-known/openid-configuration.',
     tenantId: 'Directory (tenant) ID',
     tenantIdPlaceholder: 'directory (tenant) id',
+    tenantIdHelp:
+      'In the app registration, add the optional ID token claims "email" and "xms_edov" (Token configuration) — without them first-time sign-ins are refused.',
     clientId: 'Client ID',
     clientSecret: 'Client secret',
     secretStored: 'A secret is stored. Leave blank to keep it.',

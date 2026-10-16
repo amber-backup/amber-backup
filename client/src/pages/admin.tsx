@@ -775,7 +775,7 @@ function ProviderCard({
         </Field>
       )}
       {meta.tenant && (
-        <Field label={t.admin.sso.tenantId}>
+        <Field label={t.admin.sso.tenantId} help={t.admin.sso.tenantIdHelp}>
           <input
             className="input"
             type="text"
