@@ -74,8 +74,12 @@ const CLOCK_SKEW = 60;
 export interface CallbackResult {
   token: string;
   reason: 'pending' | 'local_account' | null;
+  /** Display label of the provider that handled the login. */
+  provider: string;
+  /** E-mail the provider asserted — set on refusals too, for the audit log. */
+  email: string;
   /** Account behind the issued session; unset when `reason` is. */
-  user?: { email: string; isAdmin: boolean };
+  user?: { id: string; email: string; isAdmin: boolean };
 }
 
 /** Default login-button labels per provider type. */
@@ -244,19 +248,26 @@ export class SsoService {
       throw new UnauthorizedException('SSO response missing email');
     }
 
+    const who = {
+      provider: provider.label || DEFAULT_LABEL[provider.type],
+      email: profile.email,
+    };
     const user = await this.resolveUser(provider, profile);
-    if (user === 'local_account') return { token: '', reason: 'local_account' };
+    if (user === 'local_account') {
+      return { token: '', reason: 'local_account', ...who };
+    }
 
     if (user.disabled) {
       // Provisioned but not yet approved by an admin.
-      return { token: '', reason: 'pending' };
+      return { token: '', reason: 'pending', ...who };
     }
     void this.users.touchSsoIdentity(provider.id, profile.subject);
     const result = await this.auth.issue(user.id, user.email, user.is_admin);
     return {
       token: result.token,
       reason: null,
-      user: { email: user.email, isAdmin: user.is_admin },
+      ...who,
+      user: { id: user.id, email: user.email, isAdmin: user.is_admin },
     };
   }
 

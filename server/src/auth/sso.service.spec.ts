@@ -166,7 +166,9 @@ describe('SsoService (callback)', () => {
       expect(result).toEqual({
         token: 'session-jwt',
         reason: null,
-        user: { email: 'person@example.com', isAdmin: false },
+        provider: 'SSO',
+        email: 'person@example.com',
+        user: { id: 'u1', email: 'person@example.com', isAdmin: false },
       });
       expect(users.findBySsoIdentity).toHaveBeenCalledWith('p1', 'subject-1');
       // The subject decided it — no e-mail lookup was needed.
@@ -178,7 +180,12 @@ describe('SsoService (callback)', () => {
 
       const result = await callback((n) => idToken(n));
 
-      expect(result).toEqual({ token: '', reason: 'local_account' });
+      expect(result).toEqual({
+        token: '',
+        reason: 'local_account',
+        provider: 'SSO',
+        email: 'person@example.com',
+      });
       expect(auth.issue).not.toHaveBeenCalled();
       expect(users.linkSsoIdentity).not.toHaveBeenCalled();
     });
@@ -188,7 +195,12 @@ describe('SsoService (callback)', () => {
 
       const result = await callback((n) => idToken(n));
 
-      expect(result).toEqual({ token: '', reason: 'local_account' });
+      expect(result).toEqual({
+        token: '',
+        reason: 'local_account',
+        provider: 'SSO',
+        email: 'person@example.com',
+      });
       expect(auth.issue).not.toHaveBeenCalled();
     });
 
@@ -212,7 +224,12 @@ describe('SsoService (callback)', () => {
         expect.objectContaining({ email: 'person@example.com' }),
         'sso',
       );
-      expect(result).toEqual({ token: '', reason: 'pending' });
+      expect(result).toEqual({
+        token: '',
+        reason: 'pending',
+        provider: 'SSO',
+        email: 'person@example.com',
+      });
     });
 
     it('refuses to link or provision when the email is not verified', async () => {

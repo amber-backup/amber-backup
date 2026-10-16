@@ -24,7 +24,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AuditService } from '../audit/audit.service';
 import { clientIp } from '../audit/audit.util';
 import { AuthService } from './auth.service';
-import { SsoService } from './sso.service';
+import { CallbackResult, SsoService } from './sso.service';
 import { UsersService } from './users.service';
 import { TotpService } from './totp.service';
 import { PasskeysService } from './passkeys.service';
@@ -411,25 +411,79 @@ export class AuthController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    const ip = clientIp(req);
+    const userAgent = (req.headers['user-agent'] as string) ?? null;
+    const failed = (
+      statusCode: number,
+      details: Record<string, unknown>,
+      email?: string,
+    ) =>
+      void this.audit.record({
+        actorEmail: email,
+        actorType: 'session',
+        action: 'Failed SSO login',
+        method: 'GET',
+        path: '/api/auth/callback',
+        resourceType: 'auth',
+        statusCode,
+        outcome: 'failure',
+        ip,
+        userAgent,
+        details,
+      });
+
     const stateCookie = (
       req as Request & { cookies?: Record<string, string> }
     ).cookies?.[OIDC_STATE_COOKIE];
-    const result = await this.sso.handleCallback(code, state, stateCookie);
+    let result: CallbackResult;
+    try {
+      result = await this.sso.handleCallback(code, state, stateCookie);
+    } catch (err) {
+      failed((err as { status?: number } | null)?.status ?? 401, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     res.clearCookie(OIDC_STATE_COOKIE, { path: '/' });
 
     if (result.reason) {
+      failed(
+        403,
+        { provider: result.provider, reason: result.reason },
+        result.email,
+      );
       res.redirect(`/?sso=${result.reason}`);
       return;
     }
     if (result.user?.isAdmin) {
       try {
-        await this.adminIps.assertAllowed(clientIp(req), result.user.email);
+        await this.adminIps.assertAllowed(ip, result.user.email);
       } catch {
+        failed(
+          403,
+          { provider: result.provider, reason: 'ip_not_allowed' },
+          result.email,
+        );
         res.redirect('/?sso=ip_not_allowed');
         return;
       }
     }
     res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());
+    void this.audit.record({
+      actorId: result.user?.id,
+      actorEmail: result.user?.email,
+      actorType: 'session',
+      actorIsAdmin: result.user?.isAdmin,
+      action: 'Log in',
+      method: 'GET',
+      path: '/api/auth/callback',
+      resourceType: 'auth',
+      statusCode: 302,
+      outcome: 'success',
+      ip,
+      userAgent,
+      details: { provider: result.provider },
+    });
     res.redirect('/');
   }
 }
