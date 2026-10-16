@@ -1,3 +1,10 @@
+## [1.39.1](https://github.com/amber-backup/amber-backup/compare/v1.39.0...v1.39.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **sso:** accept entra's xms_edov claim as a verified email ([fb9923b](https://github.com/amber-backup/amber-backup/commit/fb9923b6b871367f483b97d768d063a2997182bc))
+
 # [1.39.0](https://github.com/amber-backup/amber-backup/compare/v1.38.0...v1.39.0) (2026-10-10)
 
 
