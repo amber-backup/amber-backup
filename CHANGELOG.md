@@ -1,3 +1,10 @@
+## [1.39.2](https://github.com/amber-backup/amber-backup/compare/v1.39.1...v1.39.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **audit:** record sso logins in the audit log ([d4ab6cd](https://github.com/amber-backup/amber-backup/commit/d4ab6cde200c6f93fdf36748c947651f65d922ac))
+
 ## [1.39.1](https://github.com/amber-backup/amber-backup/compare/v1.39.0...v1.39.1) (2026-10-16)
 
 
