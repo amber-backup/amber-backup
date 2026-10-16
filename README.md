@@ -125,6 +125,10 @@ time), and the UI renders every timestamp in it. It defaults to the server
 process timezone (`TZ`, or UTC in a bare container). Changing it re-registers
 every schedule, which moves existing ones to the new zone.
 
+## Partner
+
+[![solutec it](docs/assets/solutec.png)](https://solutec.de)
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
