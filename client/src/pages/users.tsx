@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { api, type User, type Target, type Job } from '../core/api';
 import { Icon } from '../core/icons';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, ListSearch } from '../ui/primitives';
 import { useT } from '../i18n';
 
 interface Grant {
@@ -18,9 +19,11 @@ export function Users() {
   const t = useT();
   const { data, loading, reload } = useAsync(() => api.get<User[]>('/users'));
   const { open } = useModal();
+  const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const users = data;
+  const shown = users.filter((u) => matchesSearch(query, [u.display_name, u.email, u.auth_source]));
 
   const newUser = () => open((close) => <CreateUser onClose={close} onSaved={reload} />);
 
@@ -34,10 +37,13 @@ export function Users() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.users.title}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
-        {users.map((u) => (
-          <UserRow key={u.id} user={u} reload={reload} />
-        ))}
+        {shown.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
+        ) : (
+          shown.map((u) => <UserRow key={u.id} user={u} reload={reload} />)
+        )}
       </div>
     </div>
   );

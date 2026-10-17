@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { api, type Target, type BackendDef } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton, ListSearch } from '../ui/primitives';
 import { BackendFields, PublicKeyBox } from '../ui/backend-fields';
 import { useT } from '../i18n';
 
@@ -15,9 +16,13 @@ export function Targets() {
   );
   const { open } = useModal();
   const t = useT();
+  const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const [targets, backends] = data;
+  const shown = targets.filter((tg) =>
+    matchesSearch(query, [tg.name, tg.backend_type, backends.find((b) => b.type === tg.backend_type)?.label]),
+  );
 
   const newTarget = () =>
     open((close) => <TargetEditor backends={backends} onClose={close} onSaved={reload} />);
@@ -32,11 +37,14 @@ export function Targets() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.targets.panelTitle}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
         {targets.length === 0 ? (
           <Empty>{t.targets.empty}</Empty>
+        ) : shown.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
         ) : (
-          targets.map((tg) => (
+          shown.map((tg) => (
             <TargetRow key={tg.id} target={tg} backends={backends} reload={reload} />
           ))
         )}

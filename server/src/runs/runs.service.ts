@@ -103,8 +103,9 @@ export class RunsService {
   /**
    * The activity feed: backups, prunes, checks and restores, newest first.
    * `kind` takes a comma list (e.g. `backup,restore`); `jobId` and `status`
-   * filter every kind. Restores of a deleted job are visible to admins only,
-   * as in `RestoreService`.
+   * filter every kind, as does `search` (a case-insensitive substring of the
+   * job name). Restores of a deleted job are visible to admins only, as in
+   * `RestoreService`.
    */
   async list(
     user: RequestUser,
@@ -114,6 +115,7 @@ export class RunsService {
       jobId?: string;
       status?: string;
       kind?: string;
+      search?: string;
     } = {},
   ) {
     const ids = await this.acl.visibleResourceIds(user, 'job');
@@ -126,6 +128,8 @@ export class RunsService {
     const jobKinds = kinds?.filter((k) => k !== 'restore') ?? [];
     const withJobRuns = !kinds?.length || jobKinds.length > 0;
     const withRestores = !kinds?.length || kinds.includes('restore');
+    // The term is matched literally, so LIKE wildcards in it are escaped.
+    const like = opts.search ? `%${opts.search.replace(/[\\%_]/g, '\\$&')}%` : null;
 
     // Both sides always take part in the union; a kind filter that rules one
     // out makes it a constant false, which Postgres drops at plan time.
@@ -135,6 +139,7 @@ export class RunsService {
     if (ids !== 'all') jobs = jobs.where('backup_jobs.id', 'in', ids);
     if (opts.jobId) jobs = jobs.where('job_runs.job_id', '=', opts.jobId);
     if (opts.status) jobs = jobs.where('job_runs.status', '=', opts.status as never);
+    if (like) jobs = jobs.where('backup_jobs.name', 'ilike', like);
 
     let restores = this.restoreRunsQuery();
     if (!withRestores) restores = restores.where(sql<boolean>`false`);
@@ -143,6 +148,7 @@ export class RunsService {
     if (opts.jobId) restores = restores.where('restore_runs.job_id', '=', opts.jobId);
     if (opts.status)
       restores = restores.where('restore_runs.status', '=', opts.status as never);
+    if (like) restores = restores.where('backup_jobs.name', 'ilike', like);
 
     let q = this.db
       .selectFrom(jobs.unionAll(restores).as('activity'))

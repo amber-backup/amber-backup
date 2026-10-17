@@ -3,10 +3,11 @@ import { api, type Report, type Job, type NotificationChannel } from '../core/ap
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
 import { describeCron } from '../core/cron';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton, ListSearch } from '../ui/primitives';
 import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 
@@ -45,9 +46,11 @@ export function Reports() {
     ]),
   );
   const { open } = useModal();
+  const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const [reports, jobs, channels] = data;
+  const shown = reports.filter((r) => matchesSearch(query, [r.name, ...(r.tags ?? [])]));
 
   const newReport = () =>
     open((close) => (
@@ -64,11 +67,14 @@ export function Reports() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.reports.definitions}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
         {reports.length === 0 ? (
           <Empty>{t.reports.empty}</Empty>
+        ) : shown.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
         ) : (
-          reports.map((r) => (
+          shown.map((r) => (
             <ReportRow key={r.id} report={r} jobs={jobs} channels={channels} reload={reload} />
           ))
         )}

@@ -3,13 +3,14 @@ import { api } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
 import { copyToClipboard } from '../core/clipboard';
+import { matchesSearch } from '../core/search';
 import { useAuth } from '../core/auth';
 import { passkeysSupported, registerPasskey, type Passkey } from '../core/passkeys';
 import { useAsync } from '../hooks/useAsync';
 import { LOCALES, useI18n, useT, type Locale } from '../i18n';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, ListSearch } from '../ui/primitives';
 
 interface ApiKey {
   id: string;
@@ -26,8 +27,16 @@ export function Settings() {
   const { user, isAdmin, logout, refresh } = useAuth();
   const { open } = useModal();
   const { data: keys, loading, reload } = useAsync(() => api.get<ApiKey[]>('/api-keys'));
+  const [keyQuery, setKeyQuery] = useState('');
 
   if (loading || !keys) return <Loading label={t.common.loading} />;
+  const shownKeys = keys.filter((k) =>
+    matchesSearch(keyQuery, [
+      k.name,
+      k.prefix,
+      ...k.scopes.actions.map((a) => t.settings.createKey.scopeLabels[a] ?? a),
+    ]),
+  );
 
   const isLocal = user?.auth_source === 'local';
 
@@ -107,17 +116,22 @@ export function Settings() {
       <div className="panel section-gap">
         <div className="panel-head">
           <h2>{t.settings.apiKeys.title}</h2>
-          <span
-            className="link"
-            onClick={() => open((close) => <CreateKeyModal onClose={close} onCreated={reload} />)}
-          >
-            {t.settings.apiKeys.newKey}
-          </span>
+          <div className="panel-head-actions">
+            <ListSearch value={keyQuery} onChange={setKeyQuery} />
+            <span
+              className="link"
+              onClick={() => open((close) => <CreateKeyModal onClose={close} onCreated={reload} />)}
+            >
+              {t.settings.apiKeys.newKey}
+            </span>
+          </div>
         </div>
         {keys.length === 0 ? (
           <Empty>{t.settings.apiKeys.empty}</Empty>
+        ) : shownKeys.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
         ) : (
-          keys.map((k) => <KeyRow key={k.id} apiKey={k} reload={reload} />)
+          shownKeys.map((k) => <KeyRow key={k.id} apiKey={k} reload={reload} />)
         )}
       </div>
     </div>
@@ -643,24 +657,31 @@ function PasskeysPanel() {
   const { data: passkeys, loading, reload } = useAsync(() =>
     api.get<Passkey[]>('/auth/passkeys'),
   );
+  const [query, setQuery] = useState('');
+  const shown = (passkeys ?? []).filter((p) => matchesSearch(query, [p.name]));
 
   return (
     <div className="panel section-gap">
       <div className="panel-head">
         <h2>{t.settings.passkeys.title}</h2>
-        <span
-          className="link"
-          onClick={() => open((close) => <AddPasskeyModal onClose={close} onAdded={reload} />)}
-        >
-          {t.settings.passkeys.add}
-        </span>
+        <div className="panel-head-actions">
+          <ListSearch value={query} onChange={setQuery} />
+          <span
+            className="link"
+            onClick={() => open((close) => <AddPasskeyModal onClose={close} onAdded={reload} />)}
+          >
+            {t.settings.passkeys.add}
+          </span>
+        </div>
       </div>
       {loading || !passkeys ? (
         <Loading label={t.common.loading} />
       ) : passkeys.length === 0 ? (
         <Empty>{t.settings.passkeys.empty}</Empty>
+      ) : shown.length === 0 ? (
+        <Empty>{t.common.noMatches}</Empty>
       ) : (
-        passkeys.map((p) => (
+        shown.map((p) => (
           <div className="row" key={p.id}>
             <span className="stat-icon" style={{ background: 'var(--bg-3)', color: 'var(--text-2)' }}>
               <Icon name="key" size={16} />

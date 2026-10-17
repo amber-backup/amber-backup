@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Icon } from '../core/icons';
+import { useT } from '../i18n';
 
 /** Labelled form field: label, control, optional help text. */
 export function Field({
@@ -118,4 +119,25 @@ export function Loading({ label }: { label?: string }) {
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
+}
+
+/** Search box for a panel header; the panel filters its list by the value. Esc clears it. */
+export function ListSearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const t = useT();
+  return (
+    <div className="list-search">
+      <Icon name="search" size={14} />
+      <input
+        className="input"
+        type="search"
+        placeholder={t.common.search}
+        aria-label={t.common.search}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onChange('');
+        }}
+      />
+    </div>
+  );
 }

@@ -13,6 +13,8 @@ export const common: CommonMessages = {
   actionFailed: 'Aktion fehlgeschlagen',
   administrator: 'Administrator',
   user: 'Benutzer',
+  search: 'Suchen…',
+  noMatches: 'Keine Treffer.',
   nav: {
     overview: 'Übersicht',
     agents: 'Agents',

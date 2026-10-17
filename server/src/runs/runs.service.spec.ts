@@ -155,6 +155,15 @@ describe('RunsService.list (activity feed)', () => {
     expect(restores.where).toHaveBeenCalledWith('restore_runs.job_id', '=', 'j1');
     expect(restores.where).toHaveBeenCalledWith('restore_runs.status', '=', 'running');
   });
+
+  it('matches the search term against the job name of both kinds, wildcards literal', async () => {
+    const { service, jobs, restores } = setupList('all');
+
+    await service.list(user, { search: '50%_off' });
+
+    expect(jobs.where).toHaveBeenCalledWith('backup_jobs.name', 'ilike', '%50\\%\\_off%');
+    expect(restores.where).toHaveBeenCalledWith('backup_jobs.name', 'ilike', '%50\\%\\_off%');
+  });
 });
 
 describe('RunsService.cancel', () => {

@@ -495,11 +495,15 @@ input, select, textarea {
 
 .panel-head-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
+    justify-content: flex-end;
+    gap: 8px 14px;
+    margin-left: auto;
 }
 
 .panel-head a, .panel-head .link {
+    white-space: nowrap;
     font-size: 13px;
     color: var(--amber);
     font-weight: 500;
@@ -508,6 +512,53 @@ input, select, textarea {
 
 .panel-head a:hover, .panel-head .link:hover {
     color: var(--amber-light);
+}
+
+/* Search box in a panel header (ListSearch); sits right-aligned. */
+.list-search {
+    position: relative;
+    display: flex;
+    flex: 0 1 220px;
+    align-items: center;
+    width: 220px;
+    min-width: 110px;
+    max-width: 100%;
+    margin-left: auto;
+    color: var(--text-3);
+}
+
+/* A header with a search keeps it on the title line, also on phones: the box
+   and the title shrink instead (the title with an ellipsis). Other header
+   actions next to the search may still wrap below it. */
+.panel-head:has(.list-search) {
+    flex-wrap: nowrap;
+    align-items: baseline;
+}
+
+.panel-head:has(.list-search) h2 {
+    flex-shrink: 0;
+    /* Leaves room for the search box at its minimum width plus the gap. */
+    max-width: calc(100% - 124px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.panel-head:has(.list-search) .panel-head-actions {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.list-search svg {
+    position: absolute;
+    left: 10px;
+    pointer-events: none;
+}
+
+.list-search .input {
+    width: 100%;
+    padding: 6px 10px 6px 30px;
+    font-size: 13px;
 }
 
 .section-gap {

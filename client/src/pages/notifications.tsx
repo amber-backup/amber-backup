@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { api, type NotificationChannel, type ChannelDef, type BackendField } from '../core/api';
 import { Icon } from '../core/icons';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton, ListSearch } from '../ui/primitives';
 import { useT } from '../i18n';
 
 export function Notifications() {
@@ -16,9 +17,13 @@ export function Notifications() {
     ]),
   );
   const { open } = useModal();
+  const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const [channels, providers] = data;
+  const shown = channels.filter((c) =>
+    matchesSearch(query, [c.name, c.type, providers.find((p) => p.type === c.type)?.label]),
+  );
 
   const newChannel = () =>
     open((close) => <ChannelEditor providers={providers} onClose={close} onSaved={reload} />);
@@ -33,11 +38,14 @@ export function Notifications() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.notifications.channels}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
         {channels.length === 0 ? (
           <Empty>{t.notifications.empty}</Empty>
+        ) : shown.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
         ) : (
-          channels.map((c) => (
+          shown.map((c) => (
             <ChannelRow key={c.id} channel={c} providers={providers} reload={reload} />
           ))
         )}

@@ -12,7 +12,7 @@ export class RunsController {
   @Get()
   @ApiOperation({
     summary:
-      'List activities: backup, prune and check runs plus restores (history + live); `kind` takes a comma list, e.g. `backup,restore`',
+      'List activities: backup, prune and check runs plus restores (history + live); `kind` takes a comma list, e.g. `backup,restore`; `search` matches the job name',
   })
   list(
     @CurrentUser() user: RequestUser,
@@ -21,6 +21,7 @@ export class RunsController {
     @Query('jobId') jobId?: string,
     @Query('status') status?: string,
     @Query('kind') kind?: string,
+    @Query('search') search?: string,
   ) {
     return this.runs.list(user, {
       limit: limit ? Number(limit) : undefined,
@@ -28,6 +29,7 @@ export class RunsController {
       jobId,
       status,
       kind,
+      search: search?.trim() || undefined,
     });
   }
 

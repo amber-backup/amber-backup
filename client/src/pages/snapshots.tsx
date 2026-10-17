@@ -3,10 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, type Job, type Snapshot, type LsEntry, type RestoreRun } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtRelative, restoreModeLabel, statusLabel } from '../core/format';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, Field, Loading, Spinner } from '../ui/primitives';
+import { PageHeader, Field, Loading, Spinner, ListSearch } from '../ui/primitives';
 import { IntegrityBadge, IntegrityPanel } from '../ui/integrity';
 import { useT } from '../i18n';
 import type { SnapshotsMessages } from '../i18n/en/snapshots';
@@ -60,15 +61,21 @@ export function Snapshots() {
 
 function JobListPanel({ jobs, onSelect }: { jobs: Job[]; onSelect: (j: Job) => void }) {
   const t = useT().snapshots.jobList;
+  const noMatches = useT().common.noMatches;
+  const [query, setQuery] = useState('');
+  const shown = jobs.filter((j) => matchesSearch(query, [j.name, ...j.paths]));
   return (
     <div className="panel">
       <div className="panel-head">
         <h2>{t.title(jobs.length)}</h2>
+        <ListSearch value={query} onChange={setQuery} />
       </div>
       {jobs.length === 0 ? (
         <div className="empty">{t.empty}</div>
+      ) : shown.length === 0 ? (
+        <div className="empty">{noMatches}</div>
       ) : (
-        jobs.map((j) => (
+        shown.map((j) => (
           // The whole row opens the job; the chevron only hints at that. Without
           // a button inside, the row itself takes keyboard focus.
           <div
@@ -108,9 +115,14 @@ function repoSizeLabel(j: Job, t: SnapshotsMessages['jobList']): string {
 
 function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () => void }) {
   const t = useT().snapshots.list;
+  const noMatches = useT().common.noMatches;
+  const [query, setQuery] = useState('');
   const { data: snaps, loading, error, reload } = useAsync<Snapshot[]>(
     () => api.get<Snapshot[]>(`/jobs/${job.id}/snapshots`),
     [job.id],
+  );
+  const shown = (snaps ?? []).filter((s) =>
+    matchesSearch(query, [fmtDateTime(s.time), s.id, s.hostname, ...(s.tags ?? []), ...s.paths]),
   );
 
   let body: React.ReactNode;
@@ -125,8 +137,10 @@ function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () =>
     body = <div className="empty">{error.message}</div>;
   } else if (!snaps || snaps.length === 0) {
     body = <div className="empty">{t.empty}</div>;
+  } else if (shown.length === 0) {
+    body = <div className="empty">{noMatches}</div>;
   } else {
-    body = snaps.map((s) => (
+    body = shown.map((s) => (
       <SnapshotRow key={s.id} jobId={job.id} snap={s} reload={reload} reloadHistory={reloadHistory} />
     ));
   }
@@ -135,6 +149,7 @@ function SnapshotsPanel({ job, reloadHistory }: { job: Job; reloadHistory: () =>
     <div className="panel">
       <div className="panel-head">
         <h2>{t.title(job.name, snaps?.length)}</h2>
+        <ListSearch value={query} onChange={setQuery} />
       </div>
       {body}
     </div>
@@ -463,17 +478,25 @@ function RestoreDialog({
 
 function HistoryPanel({ runs }: { runs: RestoreRun[] | undefined }) {
   const t = useT().snapshots.history;
+  const noMatches = useT().common.noMatches;
+  const [query, setQuery] = useState('');
+  const shown = (runs ?? []).filter((r) =>
+    matchesSearch(query, [restoreModeLabel(r.mode), r.snapshot_id, statusLabel(r.status), r.error]),
+  );
   return (
     <div className="panel section-gap">
       <div className="panel-head">
         <h2>{t.title}</h2>
+        <ListSearch value={query} onChange={setQuery} />
       </div>
       {!runs ? (
         <Loading />
       ) : runs.length === 0 ? (
         <div className="empty">{t.empty}</div>
+      ) : shown.length === 0 ? (
+        <div className="empty">{noMatches}</div>
       ) : (
-        runs.map((r) => <HistoryRow key={r.id} run={r} />)
+        shown.map((r) => <HistoryRow key={r.id} run={r} />)
       )}
     </div>
   );

@@ -13,6 +13,8 @@ export const common = {
   actionFailed: 'Action failed',
   administrator: 'Administrator',
   user: 'User',
+  search: 'Search…',
+  noMatches: 'No matches.',
   nav: {
     overview: 'Overview',
     agents: 'Agents',

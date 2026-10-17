@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { api, type Agent } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtRelative } from '../core/format';
+import { matchesSearch } from '../core/search';
 import { copyToClipboard } from '../core/clipboard';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, ModalFrame, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, ListSearch } from '../ui/primitives';
 import { useT } from '../i18n';
 import type { AgentsMessages } from '../i18n/en/agents';
 
@@ -62,6 +63,7 @@ export function Agents() {
   const { open } = useModal();
   // Quiet background refresh; `reload()` would flash the loading screen each time.
   const [live, setLive] = useState<Agent[] | null>(null);
+  const [query, setQuery] = useState('');
 
   // A fresh load (e.g. after removing an agent) supersedes the last poll.
   useEffect(() => setLive(null), [data]);
@@ -82,6 +84,17 @@ export function Agents() {
   if (loading || !data) return <Loading label={t.common.loading} />;
   const agents = live ?? data;
   const online = agents.filter((a) => a.status === 'online').length;
+  const shown = agents.filter((a) =>
+    matchesSearch(query, [
+      a.name,
+      a.hostname,
+      a.os,
+      a.last_ip,
+      a.agent_version,
+      a.restic_version,
+      ...(a.labels ?? []),
+    ]),
+  );
 
   const openEnroll = async (): Promise<void> => {
     let global: GlobalEnroll = { enabled: false, token: null, commands: null, namePlaceholder: '' };
@@ -107,6 +120,7 @@ export function Agents() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.agents.page.fleet}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
         {agents.length > 0 && (
           <div className="table-head agents-grid">
@@ -119,8 +133,10 @@ export function Agents() {
         )}
         {agents.length === 0 ? (
           <div className="empty">{t.agents.page.empty}</div>
+        ) : shown.length === 0 ? (
+          <div className="empty">{t.common.noMatches}</div>
         ) : (
-          agents.map((a) => <AgentRow key={a.id} agent={a} reload={reload} />)
+          shown.map((a) => <AgentRow key={a.id} agent={a} reload={reload} />)
         )}
       </div>
     </div>

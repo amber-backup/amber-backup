@@ -13,10 +13,11 @@ import {
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative } from '../core/format';
 import { describeCron } from '../core/cron';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
 import { useModal, FormModal } from '../ui/modal';
-import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton } from '../ui/primitives';
+import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton, ListSearch } from '../ui/primitives';
 import { BackendFields } from '../ui/backend-fields';
 import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
@@ -37,9 +38,19 @@ export function Jobs() {
   );
   const { open } = useModal();
   const t = useT();
+  const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const [jobs, targets, agents, channels, backends] = data;
+  const shown = jobs.filter((j) =>
+    matchesSearch(query, [
+      j.name,
+      agents.find((a) => a.id === j.agent_id)?.name,
+      targets.find((x) => x.id === j.target_id)?.name,
+      ...Object.values(j.repo_config ?? {}).map(String),
+      ...j.paths,
+    ]),
+  );
 
   const newJob = () =>
     open((close) => (
@@ -63,11 +74,14 @@ export function Jobs() {
       <div className="panel">
         <div className="panel-head">
           <h2>{t.jobs.panelTitle}</h2>
+          <ListSearch value={query} onChange={setQuery} />
         </div>
         {jobs.length === 0 ? (
           <Empty>{t.jobs.empty}</Empty>
+        ) : shown.length === 0 ? (
+          <Empty>{t.common.noMatches}</Empty>
         ) : (
-          jobs.map((j) => (
+          shown.map((j) => (
             <JobRow
               key={j.id}
               job={j}

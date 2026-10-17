@@ -11,8 +11,9 @@ import {
   runDurationMs,
   statusLabel,
 } from '../core/format';
+import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
-import { PageHeader, ActionButton, Loading, Spinner } from '../ui/primitives';
+import { PageHeader, ActionButton, Loading, Spinner, ListSearch } from '../ui/primitives';
 import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
 import { checkLevelLabel } from '../ui/integrity';
@@ -64,6 +65,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   const [showMaintenance, setShowMaintenance] = useState(false);
   // Narrows the feed to failures, to work through what went wrong.
   const [onlyFailed, setOnlyFailed] = useState(false);
+  // Job-name search over the feed: typed text, and the debounced term the
+  // server filters by.
+  const [search, setSearch] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [scheduleQuery, setScheduleQuery] = useState('');
 
   const seenRef = useRef<Set<string>>(new Set());
   const offsetRef = useRef(0);
@@ -79,6 +85,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   showMaintenanceRef.current = showMaintenance;
   const onlyFailedRef = useRef(onlyFailed);
   onlyFailedRef.current = onlyFailed;
+  const activeSearchRef = useRef(activeSearch);
+  activeSearchRef.current = activeSearch;
   // Same for the rows, so a poll can see which ones still need a live status.
   const runsRef = useRef(runs);
   runsRef.current = runs;
@@ -94,8 +102,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     try {
       const kind = showMaintenance ? '' : '&kind=backup,restore';
       const status = onlyFailed ? '&status=failed' : '';
+      const q = activeSearch ? `&search=${encodeURIComponent(activeSearch)}` : '';
       const page = await api.get<Run[]>(
-        `/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}${status}`,
+        `/runs?limit=${RUNS_PAGE}&offset=${offsetRef.current}${kind}${status}${q}`,
       );
       if (gen !== genRef.current) return;
       const fresh = page.filter((r) => !seenRef.current.has(r.id));
@@ -111,7 +120,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         setPageLoading(false);
       }
     }
-  }, [showMaintenance, onlyFailed]);
+  }, [showMaintenance, onlyFailed, activeSearch]);
 
   // Toggling a filter starts the list over: the offset and the seen-ids set
   // belong to the previous query. The load effect re-runs on the new filter.
@@ -132,6 +141,17 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     resetFeed();
     setOnlyFailed(next);
   }, [resetFeed]);
+
+  // A new search term starts the feed over too, once typing pauses.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const next = search.trim();
+      if (next === activeSearchRef.current) return;
+      resetFeed();
+      setActiveSearch(next);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, resetFeed]);
 
   // Keep pulling pages until the scroller is filled (first page may be short).
   const fillViewport = useCallback(async (): Promise<void> => {
@@ -179,10 +199,12 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
       if (ag) setAgents(ag);
       setDash(d);
       // `recent` covers every activity, so apply the feed's filters to it.
+      const term = activeSearchRef.current.toLowerCase();
       const recent = d.recent.filter(
         (r) =>
           (showMaintenanceRef.current || !isMaintenance(r)) &&
-          (!onlyFailedRef.current || r.status === 'failed'),
+          (!onlyFailedRef.current || r.status === 'failed') &&
+          (!term || (r.job_name ?? '').toLowerCase().includes(term)),
       );
       // `recent` is only the newest few, so an older row that is still queued or
       // running (typically a hung one) is fetched on its own to stay current.
@@ -221,7 +243,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   };
 
   const nextJobs = jobs
-    .filter((j) => j.enabled && j.next_run)
+    .filter((j) => j.enabled && j.next_run && matchesSearch(scheduleQuery, [j.name, j.cron_expr]))
     .sort((a, b) => +new Date(a.next_run!) - +new Date(b.next_run!));
 
   return (
@@ -249,6 +271,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
             <div className="panel-head">
               <h2>{t.dashboard.activity.title}</h2>
               <div className="panel-head-actions">
+                <ListSearch value={search} onChange={setSearch} />
                 <label className="checkbox sm">
                   <input
                     type="checkbox"
@@ -282,7 +305,11 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                 )}
                 {runs.length === 0 && !pageLoading && doneRef.current && (
                   <div className="empty">
-                    {onlyFailed ? t.dashboard.activity.emptyFailed : t.dashboard.activity.empty}
+                    {activeSearch
+                      ? t.common.noMatches
+                      : onlyFailed
+                        ? t.dashboard.activity.emptyFailed
+                        : t.dashboard.activity.empty}
                   </div>
                 )}
               </div>
@@ -295,13 +322,16 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
           <div className="panel fill-col">
             <div className="panel-head">
               <h2>{t.dashboard.schedules.title}</h2>
-              <span className="link" onClick={() => navigate('/jobs')}>
-                {t.dashboard.schedules.edit}
-              </span>
+              <div className="panel-head-actions">
+                <ListSearch value={scheduleQuery} onChange={setScheduleQuery} />
+                <span className="link" onClick={() => navigate('/jobs')}>
+                  {t.dashboard.schedules.edit}
+                </span>
+              </div>
             </div>
             <div className="panel-scroll">
               {nextJobs.length === 0 ? (
-                <div className="empty">{t.dashboard.schedules.empty}</div>
+                <div className="empty">{scheduleQuery.trim() ? t.common.noMatches : t.dashboard.schedules.empty}</div>
               ) : (
                 nextJobs.map((j) => (
                   <div className="row compact" key={j.id} title={fmtDateTime(j.next_run)}>
