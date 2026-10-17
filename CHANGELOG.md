@@ -1,3 +1,10 @@
+# [1.40.0](https://github.com/amber-backup/amber-backup/compare/v1.39.2...v1.40.0) (2026-10-17)
+
+
+### Features
+
+* **client:** add a search box to every list panel header ([ad373f8](https://github.com/amber-backup/amber-backup/commit/ad373f87a21772385e95bc302a49625b70e6dfb1))
+
 ## [1.39.2](https://github.com/amber-backup/amber-backup/compare/v1.39.1...v1.39.2) (2026-10-16)
 
 
