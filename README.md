@@ -62,7 +62,8 @@ docker run -d --name amber-backup \
   devpatf/amber-backup
 ```
 
-The image bundles a pinned restic (`RESTIC_VERSION` build arg) and serves both the
+The image bundles a pinned restic (`RESTIC_VERSION` build arg, built from the
+checksum-verified release source with a current Go toolchain) and serves both the
 API and the SPA on port 3000. Pending database migrations are applied
 automatically on startup (the standalone `dist/database/migrate.js up` remains
 available for manual/CI use).
