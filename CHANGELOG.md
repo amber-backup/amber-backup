@@ -1,3 +1,11 @@
+## [1.40.2](https://github.com/amber-backup/amber-backup/compare/v1.40.1...v1.40.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **deps:** update server dependencies with known vulnerabilities ([1055413](https://github.com/amber-backup/amber-backup/commit/1055413d4f9d3d91960d2dc2ed30ad6437cd9abe))
+* **docker:** build bundled restic from source and slim the runtime image ([cdf4a42](https://github.com/amber-backup/amber-backup/commit/cdf4a4246919833fd93156dd0547e40153fc19e9))
+
 ## [1.40.1](https://github.com/amber-backup/amber-backup/compare/v1.40.0...v1.40.1) (2026-10-24)
 
 
