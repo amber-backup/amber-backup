@@ -26,6 +26,6 @@
     "semantic-release": "^25.0.6"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=26.12.1"
   }
 }

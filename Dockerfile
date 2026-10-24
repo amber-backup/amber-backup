@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 
+# Pinned to a patch release so a rebuild never silently picks up an older,
+# vulnerable Node (floor: 26.12.1, the CVE-2026-111497 Brotli fix).
+ARG NODE_IMAGE=node:26.12.1-alpine
+
 # --- Stage 1: build client (Vite) ---
-FROM node:22-alpine AS client-build
+FROM ${NODE_IMAGE} AS client-build
 WORKDIR /build
 COPY package.json package-lock.json* ./
 COPY client/package.json ./client/
@@ -11,7 +15,7 @@ COPY client ./client
 RUN npm run build --workspace @amber/client
 
 # --- Stage 2: build server (NestJS) ---
-FROM node:22-alpine AS server-build
+FROM ${NODE_IMAGE} AS server-build
 WORKDIR /build
 COPY package.json package-lock.json* ./
 COPY server/package.json ./server/
@@ -36,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
  && cp VERSION /out/version
 
 # --- Stage 4: runtime ---
-FROM node:22-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 # Pinned restic version bundled in the image.
 ARG RESTIC_VERSION=0.17.3
 # Populated by buildx (amd64 / arm64) so the bundled restic matches the target.

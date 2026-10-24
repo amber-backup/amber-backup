@@ -66,7 +66,7 @@
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
-    "@types/node": "^22.10.5",
+    "@types/node": "^26.6.5",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.6",
