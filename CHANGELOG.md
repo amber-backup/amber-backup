@@ -1,3 +1,10 @@
+## [1.40.1](https://github.com/amber-backup/amber-backup/compare/v1.40.0...v1.40.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **docker:** upgrade node to 26.12.1 for the brotli rce fix ([af50a64](https://github.com/amber-backup/amber-backup/commit/af50a64cdca75a013617bfbc04fafa7b58b3bac0))
+
 # [1.40.0](https://github.com/amber-backup/amber-backup/compare/v1.39.2...v1.40.0) (2026-10-17)
 
 
