@@ -137,6 +137,10 @@ export interface Job {
   location: 'local' | 'agent';
   agent_id: string | null;
   paths: string[];
+  /** files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent). */
+  source_kind?: 'files' | 'hyperv';
+  hyperv_host_id?: string | null;
+  hyperv_config?: HypervJobConfig | null;
   /** Shared connection the repository lives on; null ⇒ local filesystem repo. */
   target_id: string | null;
   /** Repository-specific fields (bucket, prefix, path). */
@@ -334,4 +338,86 @@ export interface RestoreRun {
   download_expires_at: string | null;
   error: string | null;
   created_at: string;
+}
+
+// --- Hyper-V ------------------------------------------------------------------
+
+export interface HypervJobConfig {
+  allVms: boolean;
+  vmIds: string[];
+  excludeVmIds?: string[];
+  checkpointMode?: 'Production' | 'ProductionOnly';
+}
+
+export interface HypervDisk {
+  path: string;
+  controllerType: string;
+  controllerNumber: number;
+  controllerLocation: number;
+  fileSizeBytes: number;
+  sizeBytes: number;
+}
+
+export interface HypervVm {
+  id: string;
+  name: string;
+  state: string;
+  generation: number;
+  version: string;
+  processorCount: number;
+  memoryStartupBytes: number;
+  checkpointType: string;
+  backupIntegration: boolean;
+  configurationLocation: string;
+  disks: HypervDisk[];
+  staleCheckpoints: string[];
+  notes?: string;
+}
+
+export interface HypervInventory {
+  computerName: string;
+  os: string;
+  vms: HypervVm[];
+}
+
+export interface HypervHost {
+  id: string;
+  name: string;
+  slug: string;
+  mode: 'local' | 'remote';
+  agent_id: string;
+  agent_name: string | null;
+  agent_status: string | null;
+  address: string | null;
+  username: string | null;
+  inventory_at: string | null;
+  inventory_error: string | null;
+  inventory_requested_at: string | null;
+  vm_count: number | null;
+}
+
+export interface HypervVmRunResult {
+  vmId: string;
+  name: string;
+  status: 'success' | 'failed';
+  snapshotId?: string;
+  consistency?: 'application' | 'crash';
+  error?: string;
+}
+
+export interface HypervVmProtection {
+  vmId: string;
+  jobs: { id: string; name: string; enabled: boolean }[];
+  lastBackup: (HypervVmRunResult & { jobId: string; finishedAt: string | null }) | null;
+}
+
+export interface HypervHostDetail extends HypervHost {
+  inventory: HypervInventory | null;
+  protection: HypervVmProtection[];
+}
+
+export interface HypervVmSnapshot {
+  jobId: string;
+  jobName: string;
+  snapshot: { id: string; short_id: string; time: string; hostname: string; tags?: string[] };
 }

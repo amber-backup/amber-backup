@@ -539,6 +539,15 @@ func (a *agent) restoreVM(ctx context.Context, t *Task, appendLog func(string)) 
 	}
 	defer done()
 
+	// A known name is checked before anything is restored (the manifest
+	// supplies the default name, checked once it is read).
+	if spec.NewName != "" {
+		existing := a.hyperv.AgentPath(conn, joinHostPath(spec.TargetPath, safeFileName(spec.NewName)))
+		if _, err := os.Stat(existing); err == nil {
+			return nil, fmt.Errorf("%s already exists; choose another name or folder", joinHostPath(spec.TargetPath, safeFileName(spec.NewName)))
+		}
+	}
+
 	// 1. The snapshot's files go into a staging folder next to the target.
 	stagingHost := joinHostPath(spec.TargetPath, ".amber-restore-"+shortID(t.TaskID))
 	staging := a.hyperv.AgentPath(conn, stagingHost)

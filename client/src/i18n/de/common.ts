@@ -18,6 +18,7 @@ export const common: CommonMessages = {
   nav: {
     overview: 'Übersicht',
     agents: 'Agents',
+    hyperv: 'Hyper-V',
     targets: 'Ziele',
     jobs: 'Jobs',
     snapshots: 'Snapshots',

@@ -425,10 +425,14 @@ export class HypervService {
       q = q.where('id', 'in', visible);
     }
     const out: { jobId: string; jobName: string; snapshot: ResticSnapshot }[] = [];
+    // Jobs may share a repository; its snapshots are listed once.
+    const seen = new Set<string>();
     for (const job of await q.execute()) {
       const ctx = await this.targets.resolveForJob(await this.jobs.getRow(job.id));
       try {
         for (const snapshot of await this.restic.snapshots(ctx, { tags: [vmTag(vmId)] })) {
+          if (seen.has(snapshot.id)) continue;
+          seen.add(snapshot.id);
           out.push({ jobId: job.id, jobName: job.name, snapshot });
         }
       } catch (e) {

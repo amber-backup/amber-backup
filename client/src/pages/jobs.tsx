@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
@@ -10,6 +10,9 @@ import {
   type BackendDef,
   type RepositoryStats,
   type RepositoryStatsRefresh,
+  type HypervHost,
+  type HypervHostDetail,
+  type HypervJobConfig,
 } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative } from '../core/format';
@@ -35,6 +38,8 @@ export function Jobs() {
       // Channels are admin-only; non-admins simply get an empty list.
       api.get<NotificationChannel[]>('/notification-channels').catch(() => [] as NotificationChannel[]),
       api.get<BackendDef[]>('/targets/backends'),
+      // Hyper-V hosts are admin-only too.
+      api.get<HypervHost[]>('/hyperv/hosts').catch(() => [] as HypervHost[]),
     ]),
   );
   const { open } = useModal();
@@ -42,7 +47,7 @@ export function Jobs() {
   const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
-  const [jobs, targets, agents, channels, backends] = data;
+  const [jobs, targets, agents, channels, backends, hypervHosts] = data;
   const shown = jobs.filter((j) =>
     matchesSearch(query, [
       j.name,
@@ -60,6 +65,7 @@ export function Jobs() {
         agents={agents}
         channels={channels}
         backends={backends}
+        hypervHosts={hypervHosts}
         onClose={close}
         onSaved={reload}
       />
@@ -90,6 +96,7 @@ export function Jobs() {
               agents={agents}
               channels={channels}
               backends={backends}
+              hypervHosts={hypervHosts}
               reload={reload}
             />
           ))
@@ -105,6 +112,7 @@ function JobRow({
   agents,
   channels,
   backends,
+  hypervHosts,
   reload,
 }: {
   job: Job;
@@ -112,6 +120,7 @@ function JobRow({
   agents: Agent[];
   channels: NotificationChannel[];
   backends: BackendDef[];
+  hypervHosts: HypervHost[];
   reload: () => void;
 }) {
   const toast = useToast();
@@ -163,6 +172,20 @@ function JobRow({
       <div className="row-main">
         <div className="row-title">{j.name}</div>
         <div className="row-sub">
+          {j.source_kind === 'hyperv' && (
+            <>
+              <Icon name="vm" size={13} />{' '}
+              <span style={{ color: 'var(--amber)' }}>
+                {t.hyperv.job.rowSource(
+                  hypervHosts.find((h) => h.id === j.hyperv_host_id)?.name ?? '?',
+                  j.hyperv_config?.allVms
+                    ? t.hyperv.job.rowAllVms
+                    : t.hyperv.page.vmCount(j.hyperv_config?.vmIds.length ?? 0),
+                )}
+              </span>
+              {' · '}
+            </>
+          )}
           {m.agent} <span style={{ color: 'var(--amber)' }}>{agentName}</span>
           {' · '}{m.target} <span style={{ color: 'var(--amber)' }}>{targetName}</span>
           {' · '}{m.repository} <span style={{ color: 'var(--amber)' }}>{repoName}</span>
@@ -210,6 +233,7 @@ function JobRow({
                 agents={agents}
                 channels={channels}
                 backends={backends}
+                hypervHosts={hypervHosts}
                 job={j}
                 onClose={close}
                 onSaved={reload}
@@ -229,6 +253,7 @@ function JobRow({
                 agents={agents}
                 channels={channels}
                 backends={backends}
+                hypervHosts={hypervHosts}
                 job={j}
                 duplicate
                 onClose={close}
@@ -351,11 +376,19 @@ function NumInput({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
-function JobEditor({
+/** A new Hyper-V job prefilled from the Hyper-V page's VM selection. */
+export interface HypervJobPreset {
+  hostId: string;
+  vmIds: string[];
+}
+
+export function JobEditor({
   targets,
   agents,
   channels,
   backends,
+  hypervHosts = [],
+  preset,
   job,
   duplicate = false,
   onClose,
@@ -365,6 +398,8 @@ function JobEditor({
   agents: Agent[];
   channels: NotificationChannel[];
   backends: BackendDef[];
+  hypervHosts?: HypervHost[];
+  preset?: HypervJobPreset;
   job?: Job;
   duplicate?: boolean;
   onClose: () => void;
@@ -393,6 +428,52 @@ function JobEditor({
   // VSS (`--use-fs-snapshot`) exists only for Windows agents.
   const [useFsSnapshot, setUseFsSnapshot] = useState<boolean>(!!opts.useFsSnapshot);
   const onWindows = isWindowsAgent(agents.find((a) => a.id === where));
+
+  // Hyper-V source: one host's VMs; the job then runs on the host's agent. A
+  // saved job keeps its kind.
+  const hv = t.hyperv.job;
+  const [sourceKind, setSourceKind] = useState<'files' | 'hyperv'>(
+    job?.source_kind ?? (preset ? 'hyperv' : 'files'),
+  );
+  const isHyperv = sourceKind === 'hyperv';
+  const hvConfig: HypervJobConfig | null = job?.hyperv_config ?? null;
+  const [hvHostId, setHvHostId] = useState<string>(
+    job?.hyperv_host_id ?? preset?.hostId ?? hypervHosts[0]?.id ?? '',
+  );
+  const [hvAll, setHvAll] = useState<boolean>(hvConfig?.allVms ?? false);
+  const [hvVmIds, setHvVmIds] = useState<Set<string>>(
+    () => new Set((hvConfig?.vmIds ?? preset?.vmIds ?? []).map((v) => v.toLowerCase())),
+  );
+  const [hvExclude, setHvExclude] = useState<Set<string>>(
+    () => new Set((hvConfig?.excludeVmIds ?? []).map((v) => v.toLowerCase())),
+  );
+  const [hvMode, setHvMode] = useState<'Production' | 'ProductionOnly'>(hvConfig?.checkpointMode ?? 'Production');
+  const [hvDetail, setHvDetail] = useState<HypervHostDetail | null>(null);
+  useEffect(() => {
+    if (!isHyperv || !hvHostId) return;
+    let live = true;
+    api
+      .get<HypervHostDetail>(`/hyperv/hosts/${hvHostId}`)
+      .then((d) => live && setHvDetail(d))
+      .catch(() => live && setHvDetail(null));
+    return () => {
+      live = false;
+    };
+  }, [isHyperv, hvHostId]);
+  const hvVms = [...(hvDetail?.inventory?.vms ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const toggleIn = (setter: typeof setHvVmIds, id: string, on: boolean) =>
+    setter((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id.toLowerCase());
+      else next.delete(id.toLowerCase());
+      return next;
+    });
+  // A Hyper-V job runs where its host's agent is.
+  const hvAgentId = hypervHosts.find((h) => h.id === hvHostId)?.agent_id;
+  useEffect(() => {
+    if (isHyperv && hvAgentId && where !== hvAgentId) changeWhere(hvAgentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHyperv, hvAgentId]);
 
   // Repository: a connection (target) plus the repo-specific fields
   // (bucket/prefix/path), or the local filesystem (LOCAL_REPO ⇒ target_id null).
@@ -511,6 +592,27 @@ function JobEditor({
 
     const pathList = paths.split('\n').map((p) => p.trim()).filter(Boolean);
 
+    let hypervPayload: Record<string, unknown> = {};
+    if (isHyperv) {
+      if (!hvHostId) {
+        toast(hv.noHosts, 'error');
+        return false;
+      }
+      if (!hvAll && hvVmIds.size === 0) {
+        toast(hv.selectVms, 'error');
+        return false;
+      }
+      hypervPayload = {
+        hypervHostId: hvHostId,
+        hypervConfig: {
+          allVms: hvAll,
+          vmIds: hvAll ? [] : [...hvVmIds],
+          excludeVmIds: hvAll ? [...hvExclude] : [],
+          checkpointMode: hvMode,
+        },
+      };
+    }
+
     // 'local' means the server; any other value is an agent id.
     const location = where === 'local' ? 'local' : 'agent';
     const agentId = where === 'local' ? undefined : where;
@@ -559,9 +661,7 @@ function JobEditor({
       if (isEdit) {
         const patch: Record<string, unknown> = {
           name,
-          location,
-          agentId,
-          paths: pathList,
+          ...(isHyperv ? hypervPayload : { location, agentId, paths: pathList }),
           targetId: targetIdPayload,
           repoConfig,
           cronExpr: cron,
@@ -577,8 +677,8 @@ function JobEditor({
       } else {
         const payload: Record<string, unknown> = {
           name,
-          location,
-          paths: pathList,
+          location: isHyperv ? 'agent' : location,
+          ...(isHyperv ? { sourceKind: 'hyperv', ...hypervPayload } : { paths: pathList }),
           targetId: targetIdPayload,
           repoConfig,
           repoPassword,
@@ -588,7 +688,7 @@ function JobEditor({
           ...retryPayload,
           enabled,
         };
-        if (agentId) payload.agentId = agentId;
+        if (agentId && !isHyperv) payload.agentId = agentId;
         if (repoCredentials) payload.repoCredentials = repoCredentials;
         await api.post('/jobs', payload);
       }
@@ -628,6 +728,58 @@ function JobEditor({
         </Section>
 
         <Section title={m.source.title} sub={m.source.sub}>
+          {(hypervHosts.length > 0 || isHyperv) && (
+            <Field label={hv.sourceKind}>
+              <select
+                value={sourceKind}
+                disabled={isEdit}
+                onChange={(e) => setSourceKind(e.target.value as 'files' | 'hyperv')}
+              >
+                <option value="files">{hv.kindFiles}</option>
+                <option value="hyperv">{hv.kindHyperv}</option>
+              </select>
+            </Field>
+          )}
+          {isHyperv ? (
+            <>
+              <Field label={hv.host} help={hypervHosts.length ? undefined : hv.noHosts}>
+                <select value={hvHostId} onChange={(e) => setHvHostId(e.target.value)}>
+                  {hypervHosts.map((h) => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <label className="checkbox">
+                <input type="checkbox" checked={hvAll} onChange={(e) => setHvAll(e.target.checked)} />
+                {hv.allVms}
+              </label>
+              <Field label={hvAll ? hv.excludeVms : hv.vms} help={hvDetail && !hvDetail.inventory ? hv.noInventory : undefined}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                  {hvVms.map((vm) => {
+                    const set = hvAll ? hvExclude : hvVmIds;
+                    const setter = hvAll ? setHvExclude : setHvVmIds;
+                    return (
+                      <label key={vm.id} className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={set.has(vm.id.toLowerCase())}
+                          onChange={(e) => toggleIn(setter, vm.id, e.target.checked)}
+                        />
+                        {vm.name} <span className="muted" style={{ fontSize: 12 }}>{vm.state}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+              <Field label={hv.checkpointMode} help={hv.checkpointHelp}>
+                <select value={hvMode} onChange={(e) => setHvMode(e.target.value as 'Production' | 'ProductionOnly')}>
+                  <option value="Production">{hv.checkpointProduction}</option>
+                  <option value="ProductionOnly">{hv.checkpointProductionOnly}</option>
+                </select>
+              </Field>
+            </>
+          ) : (
+            <>
           <Field label={m.source.runOn} help={m.source.runOnHelp}>
             <select value={where} onChange={(e) => changeWhere(e.target.value)}>
               <option value="local">{m.source.serverOption}</option>
@@ -653,6 +805,8 @@ function JobEditor({
                 {m.source.vss}
               </label>
             </Field>
+          )}
+            </>
           )}
         </Section>
 

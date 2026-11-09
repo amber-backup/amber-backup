@@ -6,6 +6,7 @@ import { dashboard } from './dashboard';
 import { targets } from './targets';
 import { jobs } from './jobs';
 import { agents } from './agents';
+import { hyperv } from './hyperv';
 import { snapshots } from './snapshots';
 import { users } from './users';
 import { notifications } from './notifications';
@@ -25,6 +26,7 @@ export const de: Messages = {
   targets,
   jobs,
   agents,
+  hyperv,
   snapshots,
   users,
   notifications,

@@ -16,6 +16,7 @@ interface NavEntry {
 const NAV: NavEntry[] = [
   { path: '/', label: (t) => t.common.nav.overview, iconName: 'dashboard' },
   { path: '/agents', label: (t) => t.common.nav.agents, iconName: 'agent', adminOnly: true },
+  { path: '/hyperv', label: (t) => t.common.nav.hyperv, iconName: 'vm', adminOnly: true },
   { path: '/targets', label: (t) => t.common.nav.targets, iconName: 'target' },
   { path: '/jobs', label: (t) => t.common.nav.jobs, iconName: 'job' },
   { path: '/snapshots', label: (t) => t.common.nav.snapshots, iconName: 'snapshot' },

@@ -208,6 +208,27 @@ when the host has none. A restic in the install dir is "managed": the agent
 replaces it when the poll's `latestResticVersion` differs. The Docker agent
 bundles a pinned one.
 
+### Hyper-V
+
+`server/src/hyperv/` (module, controller `/api/hyperv`, `hyperv.contract.ts` =
+the task payload shared with `agent/hyperv.go`) and migration `025_hyperv`:
+`hyperv_hosts` (mode `local` = agent on the host, `remote` = proxy agent with a
+`hyperv_credential` secret), `backup_jobs.source_kind` (`files` | `hyperv`) +
+`hyperv_host_id` + `hyperv_config`, restore mode `hyperv`
+(`destination.hyperv`). A Hyper-V job keeps `location = 'agent'` with the
+host's agent, so the existing run/claim paths apply; `AgentsService` turns it
+into a `hyperv-backup` task (or `hyperv-restore`, `hyperv-inventory` with task
+id `hvinv-<hostId>`), gated by the `hyperv` capability — a run for an agent
+without it is failed, not dropped. Per-VM outcomes live in
+`job_runs.stats.hypervVms`.
+
+Agent: `hyperv.go` (flow, manifest, restore file matching by path suffix),
+`hyperv_powershell.go` + embedded `hyperv/*.ps1` (stdin JSON in, one
+`AMBER-RESULT:` line out; `Invoke-OnHost` runs locally or via Invoke-Command),
+`hyperv_mock.go` (`AMBER_HYPERV_MOCK=<dir>`). The PowerShell side has never run
+against a real Hyper-V host in CI — only parsed; behaviour is verified through
+the mock (`AMBER_TEST_RESTIC=… go test -run HypervE2E`).
+
 ### CLI (Go)
 
 `cli/` is the standalone `ambb` module (see `cli/README.md`); release binaries
