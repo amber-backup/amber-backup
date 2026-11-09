@@ -51,6 +51,15 @@ export interface VmProtection {
   lastBackup: (HypervVmRunResult & { jobId: string; finishedAt: Date | null }) | null;
 }
 
+export interface HypervVmIssue {
+  hostId: string;
+  hostName: string;
+  vmId: string;
+  vmName: string;
+  error?: string;
+  finishedAt?: Date | null;
+}
+
 export interface HypervHostDetail extends PublicHypervHost {
   inventory: HypervInventory | null;
   protection: VmProtection[];
@@ -95,6 +104,38 @@ export class HypervService {
   async list(): Promise<PublicHypervHost[]> {
     const rows = await this.hostQuery().orderBy('h.name', 'asc').execute();
     return Promise.all(rows.map((r) => this.toPublic(r)));
+  }
+
+  /**
+   * What needs attention across all hosts: VMs no job covers, and VMs whose
+   * latest backup failed. Feeds the dashboard.
+   */
+  async summary(): Promise<{
+    hosts: number;
+    vms: number;
+    unprotected: HypervVmIssue[];
+    failed: HypervVmIssue[];
+  }> {
+    const hosts = await this.db
+      .selectFrom('hyperv_hosts')
+      .select(['id', 'name', 'inventory'])
+      .orderBy('name', 'asc')
+      .execute();
+    const out = { hosts: hosts.length, vms: 0, unprotected: [] as HypervVmIssue[], failed: [] as HypervVmIssue[] };
+    for (const host of hosts) {
+      const inventory = parseJson<HypervInventory>(host.inventory);
+      if (!inventory) continue;
+      out.vms += inventory.vms.length;
+      const names = new Map(inventory.vms.map((v) => [v.id.toLowerCase(), v.name]));
+      for (const p of await this.protection(host.id, inventory)) {
+        const issue = { hostId: host.id, hostName: host.name, vmId: p.vmId, vmName: names.get(p.vmId.toLowerCase()) ?? p.vmId };
+        if (p.jobs.length === 0) out.unprotected.push(issue);
+        else if (p.lastBackup?.status === 'failed') {
+          out.failed.push({ ...issue, error: p.lastBackup.error, finishedAt: p.lastBackup.finishedAt });
+        }
+      }
+    }
+    return out;
   }
 
   async getRow(id: string): Promise<HypervHost> {

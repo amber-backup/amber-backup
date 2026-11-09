@@ -263,6 +263,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
       <Stats dash={dash} agents={agents} />
 
+      <HypervAttention />
+
       <div className="content-grid dashboard-grid">
         <div className="main-stack fill-col">
           <StoragePanel />
@@ -643,4 +645,52 @@ function StatusBadge({ status }: { status: string }) {
   const cls =
     status === 'failed' || status === 'error' ? 'danger' : status === 'queued' ? 'info' : 'muted';
   return <span className={`badge ${cls}`}>{statusLabel(status)}</span>;
+}
+
+interface HypervSummary {
+  hosts: number;
+  vms: number;
+  unprotected: { hostId: string; hostName: string; vmId: string; vmName: string }[];
+  failed: { hostId: string; hostName: string; vmId: string; vmName: string; error?: string }[];
+}
+
+/**
+ * Hyper-V VMs that need attention: not covered by any job, or whose latest
+ * backup failed. Hidden when there is nothing to report (or no Hyper-V at all;
+ * the summary is admin-only and simply fails for other users).
+ */
+function HypervAttention() {
+  const t = useT();
+  const m = t.dashboard.hyperv;
+  const navigate = useNavigate();
+  const { data } = useAsync(() => api.get<HypervSummary>('/hyperv/summary').catch(() => null));
+  if (!data || (data.unprotected.length === 0 && data.failed.length === 0)) return null;
+  const items = [
+    ...data.failed.map((v) => ({ ...v, label: m.failed, color: 'var(--red, #e5534b)' })),
+    ...data.unprotected.map((v) => ({ ...v, error: undefined, label: m.unprotected, color: 'var(--amber)' })),
+  ];
+  return (
+    <div className="panel" style={{ marginBottom: 20 }}>
+      <div className="panel-head">
+        <h2>{m.title(data.unprotected.length, data.failed.length)}</h2>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/hyperv')}>
+          <Icon name="vm" size={14} />
+          {m.open}
+        </button>
+      </div>
+      {items.slice(0, 8).map((v) => (
+        <div key={`${v.hostId}:${v.vmId}`} className="row" style={{ cursor: 'pointer' }} onClick={() => navigate(`/hyperv/${v.hostId}`)}>
+          <span className="status-dot" style={{ background: v.color }} />
+          <div className="row-main">
+            <div className="row-title">{v.vmName}</div>
+            <div className="row-sub" title={v.error ?? ''}>
+              {v.hostName} · <span style={{ color: v.color }}>{v.label}</span>
+              {v.error && <> · {v.error.length > 120 ? `${v.error.slice(0, 120)}…` : v.error}</>}
+            </div>
+          </div>
+        </div>
+      ))}
+      {items.length > 8 && <div className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>{m.more(items.length - 8)}</div>}
+    </div>
+  );
 }

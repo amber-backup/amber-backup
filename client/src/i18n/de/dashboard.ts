@@ -59,4 +59,14 @@ export const dashboard: DashboardMessages = {
     offlineCount: (n: number) => `${n} offline`,
     allOnline: 'alle online',
   },
+  hyperv: {
+    title: (unprotected: number, failed: number) =>
+      [failed && `${failed} Hyper-V-${failed === 1 ? 'VM' : 'VMs'} fehlgeschlagen`, unprotected && `${unprotected} Hyper-V-${unprotected === 1 ? 'VM' : 'VMs'} nicht geschützt`]
+        .filter(Boolean)
+        .join(' · '),
+    failed: 'letztes Backup fehlgeschlagen',
+    unprotected: 'kein Backup-Job',
+    open: 'Hyper-V',
+    more: (n: number) => `und ${n} weitere`,
+  },
 };

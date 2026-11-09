@@ -36,6 +36,12 @@ export class HypervController {
     return this.hyperv.list();
   }
 
+  @Get('summary')
+  @ApiOperation({ summary: 'VMs without a job and VMs whose last backup failed, across all hosts' })
+  summary() {
+    return this.hyperv.summary();
+  }
+
   @Post('hosts')
   @ApiOperation({ summary: 'Add a Hyper-V host (local agent or remote via a proxy agent)' })
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateHypervHostDto) {

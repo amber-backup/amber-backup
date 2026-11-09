@@ -167,3 +167,36 @@ describe('HypervService.followReplacedVm', () => {
     });
   });
 });
+
+describe('HypervService.summary', () => {
+  it('reports VMs without a job and VMs whose last backup failed', async () => {
+    const vm = (id: string, name: string) => ({ id, name });
+    const inventory = { computerName: 'HV01', os: 'x', vms: [vm(VM, 'dc01'), vm('bbbbbbbb-0000-0000-0000-000000000002', 'web01')] };
+    const { db } = createDbMock({
+      selectFrom: (t) =>
+        t === 'hyperv_hosts'
+          ? chain({ execute: [{ id: 'host-1', name: 'hv01', inventory }] })
+          : t === 'backup_jobs'
+            ? chain({ execute: [{ id: 'job-1', name: 'Nightly', enabled: true, hyperv_config: { allVms: false, vmIds: [VM] } }] })
+            : chain({
+                execute: [
+                  {
+                    job_id: 'job-1',
+                    finished_at: new Date(),
+                    stats: { hypervVms: [{ vmId: VM, name: 'dc01', status: 'failed', error: 'checkpoint failed' }] },
+                  },
+                ],
+              }),
+    });
+    const service = new HypervService(db, {} as never, {} as never, {} as never, {} as never, {} as never);
+
+    const summary = await service.summary();
+
+    expect(summary).toMatchObject({
+      hosts: 1,
+      vms: 2,
+      unprotected: [{ hostId: 'host-1', vmName: 'web01' }],
+      failed: [{ hostId: 'host-1', vmName: 'dc01', error: 'checkpoint failed' }],
+    });
+  });
+});
