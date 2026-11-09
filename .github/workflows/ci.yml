@@ -1,0 +1,166 @@
+name: CI
+
+# Tests every push and pull request: server (types + jest), client (types +
+# build), agent (Linux and native Windows), PowerShell script syntax, and the
+# app/agent images (built, not pushed).
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*.*.*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-client:
+    name: Server + client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.12.1'
+          cache: npm
+      - run: npm ci
+      - name: Server types
+        run: npx tsc --noEmit -p tsconfig.json
+        working-directory: server
+      - name: Server tests
+        run: npx jest --ci
+        working-directory: server
+      - name: Server build
+        run: npm run build --workspace server
+      - name: Client build (tsc + vite)
+        run: npm run build --workspace client
+
+  agent:
+    name: Agent (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows runs the agent's Windows code natively: the service-less
+        # CTRL_BREAK cancel, the .exe swap and the Windows build tags.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))" || { gofmt -l $(git ls-files '*.go'); exit 1; }
+      - run: go vet ./...
+      - name: Vet the other platform
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then GOOS=linux go vet ./...; else GOOS=windows go vet ./...; fi
+      - run: go test -race ./...
+        if: runner.os == 'Linux'
+      - run: go test ./...
+        if: runner.os == 'Windows'
+      - name: Cross-compile every bundled target
+        if: runner.os == 'Linux'
+        run: |
+          for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" go build -o /dev/null . || exit 1
+          done
+
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  powershell:
+    name: PowerShell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.12.1'
+          cache: npm
+      - run: npm ci --workspace @amber/server --include-workspace-root
+      # The served installers and the agent's embedded scripts must parse; the
+      # runner's pwsh checks syntax only (Hyper-V cmdlets don't exist here).
+      - name: Render served scripts
+        run: node scripts/ci/render-install-scripts.mjs "$RUNNER_TEMP/rendered"
+      - name: Parse
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "$env:RUNNER_TEMP/rendered/*.ps1") +
+                   @(Get-ChildItem cli/install.ps1) +
+                   @(Get-ChildItem agent -Recurse -Filter *.ps1)
+          $failed = $false
+          foreach ($f in $files) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors) { $failed = $true; $errors | ForEach-Object { Write-Host "::error file=$($f.FullName)::$($_.Message) (line $($_.Extent.StartLineNumber))" } }
+            else { Write-Host "ok  $($f.FullName)" }
+          }
+          if ($failed) { exit 1 }
+      - name: Shell installer syntax
+        run: sh -n "$RUNNER_TEMP/rendered/install.sh"
+
+  images:
+    name: Image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            context: .
+            dockerfile: ./Dockerfile
+          - name: agent
+            context: ./agent
+            dockerfile: ./agent/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # amd64 only: arm64 is the same Dockerfile under QEMU and doubles the
+      # build time; the release workflow builds both.
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          load: ${{ matrix.name == 'app' }}
+          tags: amber-ci-${{ matrix.name }}:test
+          cache-from: type=gha,scope=${{ matrix.name }}
+          provenance: false
+      - name: Image serves every agent target with checksums
+        if: matrix.name == 'app'
+        run: |
+          docker run --rm --entrypoint sh amber-ci-app:test -c '
+            set -e; cd /app/agent-bin
+            for t in linux-amd64 linux-arm64 windows-amd64.exe windows-arm64.exe; do
+              test -s "amber-agent-$t"; test -s "restic-$t"
+            done
+            test -s version; test -s restic-version
+            sha256sum -c SHA256SUMS
+            /usr/local/bin/restic version'
