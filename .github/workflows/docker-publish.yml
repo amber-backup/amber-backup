@@ -2,6 +2,13 @@ name: Publish Docker images
 
 # Builds and pushes the app and agent images for linux/amd64 + linux/arm64.
 # Triggered by the version tags semantic-release creates (v1.2.3), or manually.
+#
+# Only a version tag moves `latest` (and the semver tags). A manual run on a
+# branch publishes an experimental build instead, tagged
+# `exp-<branch>` (e.g. exp-feat-windows-agent-hyperv) and `exp-sha-<sha>`:
+# Actions → "Publish Docker images" → Run workflow → pick the branch. The tags
+# come from the branch the run is started on, so pick the branch there rather
+# than passing it as `ref`.
 on:
   push:
     tags:
@@ -60,9 +67,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
-            type=ref,event=branch,enable=${{ github.ref_type != 'tag' }}
-            type=sha,enable=${{ github.ref_type != 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=ref,event=branch,prefix=exp-,enable=${{ github.ref_type != 'tag' }}
+            type=sha,prefix=exp-sha-,enable=${{ github.ref_type != 'tag' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
