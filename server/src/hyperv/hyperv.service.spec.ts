@@ -59,6 +59,9 @@ describe('HypervService', () => {
       password: 'pw',
     });
     expect(await service.connection({ mode: 'local' } as never)).toEqual({ mode: 'local' });
+    expect(
+      await service.connection({ mode: 'cluster', address: 'hvclu', credential_secret_id: 'secret-1' } as never),
+    ).toMatchObject({ mode: 'cluster', address: 'hvclu', username: 'CORP\\backup' });
   });
 
   it('records an inventory only from the agent that drives the host', async () => {

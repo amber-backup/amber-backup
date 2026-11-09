@@ -69,7 +69,7 @@ export function Hyperv() {
               <div className="row-main">
                 <div className="row-title">{h.name}</div>
                 <div className="row-sub">
-                  {h.mode === 'remote' ? `${m.modeRemote} · ${h.address}` : m.modeLocal}
+                  {h.mode === 'local' ? m.modeLocal : `${h.mode === 'cluster' ? m.modeCluster : m.modeRemote} · ${h.address}`}
                   {' · '}
                   {m.viaAgent} <span style={{ color: 'var(--amber)' }}>{h.agent_name ?? '?'}</span>
                 </div>
@@ -106,7 +106,8 @@ function HostEditor({
   const m = t.hyperv.editor;
   const toast = useToast();
   const [name, setName] = useState(host?.name ?? '');
-  const [mode, setMode] = useState<'local' | 'remote'>(host?.mode ?? 'local');
+  const [mode, setMode] = useState<'local' | 'remote' | 'cluster'>(host?.mode ?? 'local');
+  const remoteLike = mode !== 'local';
   // A local host's agent runs on it, so an agent can be the local agent of one host only.
   const takenLocal = new Set(hosts.filter((h) => h.mode === 'local' && h.id !== host?.id).map((h) => h.agent_id));
   const windowsAgents = agents.filter(
@@ -123,7 +124,7 @@ function HostEditor({
       toast(m.nameRequired, 'error');
       return false;
     }
-    if (mode === 'remote' && (!address.trim() || !username.trim() || (!host && !password))) {
+    if (remoteLike && (!address.trim() || !username.trim() || (!host && !password))) {
       toast(m.remoteRequired, 'error');
       return false;
     }
@@ -131,7 +132,7 @@ function HostEditor({
       let saved: HypervHost;
       if (host) {
         const patch: Record<string, unknown> = { name: name.trim(), agentId };
-        if (mode === 'remote') {
+        if (remoteLike) {
           patch.address = address.trim();
           patch.username = username.trim();
           if (password) patch.password = password;
@@ -139,7 +140,7 @@ function HostEditor({
         saved = await api.patch<HypervHost>(`/hyperv/hosts/${host.id}`, patch);
       } else {
         const body: Record<string, unknown> = { name: name.trim(), mode, agentId };
-        if (mode === 'remote') Object.assign(body, { address: address.trim(), username: username.trim(), password });
+        if (remoteLike) Object.assign(body, { address: address.trim(), username: username.trim(), password });
         saved = await api.post<HypervHost>('/hyperv/hosts', body);
       }
       toast(m.saved, 'success');
@@ -156,10 +157,14 @@ function HostEditor({
         <Field label={m.name}>
           <input type="text" value={name} placeholder="hv-01" onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label={m.mode} help={mode === 'local' ? m.modeHelpLocal : m.modeHelpRemote}>
-          <select value={mode} disabled={!!host} onChange={(e) => setMode(e.target.value as 'local' | 'remote')}>
+        <Field
+          label={m.mode}
+          help={mode === 'local' ? m.modeHelpLocal : mode === 'cluster' ? m.modeHelpCluster : m.modeHelpRemote}
+        >
+          <select value={mode} disabled={!!host} onChange={(e) => setMode(e.target.value as 'local' | 'remote' | 'cluster')}>
             <option value="local">{m.modeLocal}</option>
             <option value="remote">{m.modeRemote}</option>
+            <option value="cluster">{m.modeCluster}</option>
           </select>
         </Field>
         <Field label={m.agent} help={choices.length ? (mode === 'local' ? m.agentLocalHelp : m.agentRemoteHelp) : m.noWindowsAgents}>
@@ -169,9 +174,9 @@ function HostEditor({
             ))}
           </select>
         </Field>
-        {mode === 'remote' && (
+        {remoteLike && (
           <>
-            <Field label={m.address}>
+            <Field label={mode === 'cluster' ? m.clusterName : m.address}>
               <input type="text" value={address} placeholder="hv01.corp.local" onChange={(e) => setAddress(e.target.value)} />
             </Field>
             <Field label={m.username}>
@@ -392,6 +397,7 @@ function VmRow({
       <div className="row-main">
         <div className="row-title">
           {vm.name} <span className="muted" style={{ fontSize: 12 }}>{vm.state}</span>
+          {vm.node && <span className="muted" style={{ fontSize: 12 }}> · {vm.node}</span>}
         </div>
         <div className="row-sub">
           {m.gen(vm.generation)} · {m.cpu(vm.processorCount)} · {fmtBytes(vm.memoryStartupBytes)} RAM ·{' '}
@@ -473,6 +479,8 @@ function VmRestoreModal({
   const [replace, setReplace] = useState(false);
   const [start, setStart] = useState(false);
   const [connectNetwork, setConnectNetwork] = useState(false);
+  const targetHost = hosts.find((h) => h.id === targetHostId);
+  const [node, setNode] = useState('');
 
   const chosen =
     snapshots?.find((s) => `${s.jobId}:${s.snapshot.id}` === snapshotKey) ?? snapshots?.[0];
@@ -493,6 +501,7 @@ function VmRestoreModal({
           replaceOriginal: canReplace && replace,
           start: action === 'vm' && start,
           connectNetwork: action === 'vm' && connectNetwork,
+          node: targetHost?.mode === 'cluster' && node.trim() ? node.trim() : undefined,
         },
       },
     });
@@ -554,6 +563,11 @@ function VmRestoreModal({
               ))}
             </select>
           </Field>
+          {targetHost?.mode === 'cluster' && (
+            <Field label={m.node} help={m.nodeHelp}>
+              <input type="text" value={node} placeholder={vm.node ?? 'NODE1'} onChange={(e) => setNode(e.target.value)} />
+            </Field>
+          )}
           <Field label={m.targetPath} help={m.targetPathHelp}>
             <input type="text" value={path} placeholder="D:\Hyper-V\Restore" onChange={(e) => setPath(e.target.value)} />
           </Field>

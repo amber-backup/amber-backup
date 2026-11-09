@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,7 +49,9 @@ type HypervRestoreSpec struct {
 	ReplaceOriginal bool   `json:"replaceOriginal,omitempty"`
 	Start           bool   `json:"start,omitempty"`
 	ConnectNetwork  bool   `json:"connectNetwork,omitempty"`
-	TargetPath      string `json:"targetPath"`
+	// Cluster hosts: the node to register the VM on (default: the first node).
+	Node       string `json:"node,omitempty"`
+	TargetPath string `json:"targetPath"`
 }
 
 type HypervTask struct {
@@ -57,6 +60,7 @@ type HypervTask struct {
 	VMIDs          []string           `json:"vmIds,omitempty"`
 	ExcludeVMIDs   []string           `json:"excludeVmIds,omitempty"`
 	CheckpointMode string             `json:"checkpointMode,omitempty"` // Production | ProductionOnly
+	ParallelVMs    int                `json:"parallelVms,omitempty"`
 	Restore        *HypervRestoreSpec `json:"restore,omitempty"`
 }
 
@@ -83,6 +87,8 @@ type HypervVM struct {
 	Disks                 []HypervDisk `json:"disks"`
 	StaleCheckpoints      []string     `json:"staleCheckpoints"`
 	Notes                 string       `json:"notes,omitempty"`
+	// Cluster hosts: the node that currently owns the VM.
+	Node string `json:"node,omitempty"`
 }
 
 type HypervInventory struct {
@@ -173,6 +179,8 @@ type registerRequest struct {
 	ConnectNetwork bool          `json:"connectNetwork"`
 	// Keep static MAC addresses: only when the VM replaces the original.
 	KeepMac bool `json:"keepMac"`
+	// Make the VM highly available (Add-ClusterVirtualMachineRole).
+	ClusterRole bool `json:"clusterRole"`
 }
 
 type registeredVM struct {
@@ -186,6 +194,8 @@ type hypervBackend interface {
 	// Connect prepares access to a remote host (SMB session for the disks);
 	// the returned func ends it. Local hosts need nothing.
 	Connect(ctx context.Context, conn HypervConnection) (func(), error)
+	// ClusterNodes lists the nodes of a failover cluster (conn.Mode "cluster").
+	ClusterNodes(ctx context.Context, conn HypervConnection) ([]string, error)
 	Inventory(ctx context.Context, conn HypervConnection) (*HypervInventory, error)
 	PrepareBackup(ctx context.Context, conn HypervConnection, vmID, checkpoint, mode string) (*vmBackupSet, error)
 	RemoveCheckpoints(ctx context.Context, conn HypervConnection, vmID string, names []string) error
@@ -241,6 +251,109 @@ func selectVMs(inv *HypervInventory, h *HypervTask) (vms []HypervVM, missing []s
 	return vms, missing
 }
 
+// --- Sessions -----------------------------------------------------------------
+
+// hvSession hands out connections for one task. A local or remote host has one;
+// a cluster has one per node — each VM is reached through the node that owns
+// it, like a remote host — opened on first use and all closed at the end.
+type hvSession struct {
+	backend hypervBackend
+	base    HypervConnection
+	mu      sync.Mutex
+	open    map[string]HypervConnection
+	closers []func()
+}
+
+func (a *agent) newSession(ctx context.Context, conn HypervConnection) (*hvSession, error) {
+	s := &hvSession{backend: a.hyperv, base: conn, open: map[string]HypervConnection{}}
+	if conn.Mode != "cluster" {
+		if _, err := s.conn(ctx, ""); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// conn returns the connection for a VM's node ("" for a plain host).
+func (s *hvSession) conn(ctx context.Context, node string) (HypervConnection, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := strings.ToLower(node)
+	if c, ok := s.open[key]; ok {
+		return c, nil
+	}
+	c := s.base
+	if s.base.Mode == "cluster" {
+		if node == "" {
+			return c, errors.New("no cluster node given")
+		}
+		c.Mode, c.Address = "remote", node
+	}
+	done, err := s.backend.Connect(ctx, c)
+	if err != nil {
+		return c, err
+	}
+	s.open[key] = c
+	s.closers = append(s.closers, done)
+	return c, nil
+}
+
+func (s *hvSession) close() {
+	for _, done := range s.closers {
+		done()
+	}
+}
+
+// inventory reads the host's VMs; for a cluster, every node's, each VM tagged
+// with its owner node and the cluster named as the computer (so snapshots stay
+// together when a VM moves between nodes).
+func (s *hvSession) inventory(ctx context.Context) (*HypervInventory, error) {
+	if s.base.Mode != "cluster" {
+		c, err := s.conn(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		return s.backend.Inventory(ctx, c)
+	}
+	nodes, err := s.backend.ClusterNodes(ctx, s.base)
+	if err != nil {
+		return nil, fmt.Errorf("listing the cluster nodes: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, errors.New("the cluster reports no node that is up")
+	}
+	inv := &HypervInventory{ComputerName: clusterName(s.base.Address), VMs: []HypervVM{}}
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		c, err := s.conn(ctx, node)
+		if err != nil {
+			return nil, fmt.Errorf("node %s: %w", node, err)
+		}
+		part, err := s.backend.Inventory(ctx, c)
+		if err != nil {
+			return nil, fmt.Errorf("node %s: %w", node, err)
+		}
+		if inv.OS == "" {
+			inv.OS = part.OS
+		}
+		for _, vm := range part.VMs {
+			// A VM caught mid-migration may show up twice; the first wins.
+			if seen[strings.ToLower(vm.ID)] {
+				continue
+			}
+			seen[strings.ToLower(vm.ID)] = true
+			vm.Node = node
+			inv.VMs = append(inv.VMs, vm)
+		}
+	}
+	return inv, nil
+}
+
+// clusterName is the short, upper-case cluster name used as restic's host.
+func clusterName(address string) string {
+	return strings.ToUpper(strings.SplitN(address, ".", 2)[0])
+}
+
 // --- Inventory ----------------------------------------------------------------
 
 func (a *agent) runHypervInventory(ctx context.Context, t *Task) {
@@ -248,11 +361,11 @@ func (a *agent) runHypervInventory(ctx context.Context, t *Task) {
 		a.postResult(t.TaskID, TaskResult{Status: "failed", Error: "Hyper-V is not available on this agent"})
 		return
 	}
-	done, err := a.hyperv.Connect(ctx, t.Hyperv.Connection)
+	sess, err := a.newSession(ctx, t.Hyperv.Connection)
 	if err == nil {
-		defer done()
+		defer sess.close()
 		var inv *HypervInventory
-		if inv, err = a.hyperv.Inventory(ctx, t.Hyperv.Connection); err == nil {
+		if inv, err = sess.inventory(ctx); err == nil {
 			a.postResult(t.TaskID, TaskResult{Status: "success", HypervInventory: inv})
 			log.Printf("Hyper-V inventory %s: %d VMs", t.TaskID, len(inv.VMs))
 			return
@@ -274,20 +387,22 @@ func hypervForgetArgs(ret *Retention) []string {
 	return append(args, "--tag", hypervSnapshotTag, "--group-by", "host,tags")
 }
 
-// backupVMs backs up each selected VM into a snapshot of its own. One failing
-// VM doesn't stop the others; the run fails if any did, with every outcome in
-// the stats.
+// maxParallelVMs caps how many VMs one run backs up at the same time.
+const maxParallelVMs = 4
+
+// backupVMs backs up each selected VM into a snapshot of its own, up to
+// ParallelVMs at a time. One failing VM doesn't stop the others; the run fails
+// if any did, with every outcome in the stats.
 func (a *agent) backupVMs(ctx context.Context, t *Task, result *TaskResult, appendLog func(string)) error {
 	if a.hyperv == nil || t.Hyperv == nil {
 		return errors.New("Hyper-V is not available on this agent")
 	}
-	conn := t.Hyperv.Connection
-	done, err := a.hyperv.Connect(ctx, conn)
+	sess, err := a.newSession(ctx, t.Hyperv.Connection)
 	if err != nil {
 		return fmt.Errorf("connecting to the Hyper-V host: %w", err)
 	}
-	defer done()
-	inv, err := a.hyperv.Inventory(ctx, conn)
+	defer sess.close()
+	inv, err := sess.inventory(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the VMs: %w", err)
 	}
@@ -301,26 +416,55 @@ func (a *agent) backupVMs(ctx context.Context, t *Task, result *TaskResult, appe
 		return errors.New("no VM matches the job's selection")
 	}
 
-	var dataAdded, totalBytes, files float64
-	for i, vm := range vms {
-		if ctx.Err() != nil {
-			break
-		}
-		r := a.backupVM(ctx, t, inv, vm, i, len(vms), appendLog)
-		results = append(results, r)
-		if r.Status == "success" {
-			result.SnapshotID = r.SnapshotID
-			dataAdded += r.DataAdded
-			totalBytes += r.TotalBytes
-			files++
-		}
+	// Parallel VMs share the log and the progress: both are serialized here.
+	var logMu sync.Mutex
+	safeLog := func(line string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		appendLog(line)
 	}
+	progress := newVMProgress(a, t.TaskID, len(vms))
 
+	parallel := t.Hyperv.ParallelVMs
+	if parallel < 1 {
+		parallel = 1
+	}
+	if parallel > maxParallelVMs {
+		parallel = maxParallelVMs
+	}
+	vmResults := make([]HypervVMResult, len(vms))
+	sem := make(chan struct{}, parallel)
+	var wg sync.WaitGroup
+	for i, vm := range vms {
+		sem <- struct{}{}
+		if ctx.Err() != nil {
+			<-sem
+			vmResults[i] = HypervVMResult{VMID: vm.ID, Name: vm.Name, Status: "failed", Error: "cancelled"}
+			continue
+		}
+		wg.Add(1)
+		go func(i int, vm HypervVM) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			vmResults[i] = a.backupVM(ctx, t, sess, inv, vm, func(done float64, msg map[string]any) {
+				progress.report(i, vm.Name, done, msg)
+			}, safeLog)
+		}(i, vm)
+	}
+	wg.Wait()
+	results = append(results, vmResults...)
+
+	var dataAdded, totalBytes, files float64
 	failed := 0
 	for _, r := range results {
 		if r.Status != "success" {
 			failed++
+			continue
 		}
+		result.SnapshotID = r.SnapshotID
+		dataAdded += r.DataAdded
+		totalBytes += r.TotalBytes
+		files++
 	}
 	result.Stats = map[string]any{
 		"dataAdded":           dataAdded,
@@ -348,14 +492,66 @@ func (a *agent) backupVMs(ctx context.Context, t *Task, result *TaskResult, appe
 	return nil
 }
 
+// vmProgress folds the progress of VMs backed up side by side into one figure
+// for the run: the mean of each VM's share done.
+type vmProgress struct {
+	a      *agent
+	taskID string
+	mu     sync.Mutex
+	done   []float64
+	last   time.Time
+}
+
+func newVMProgress(a *agent, taskID string, count int) *vmProgress {
+	return &vmProgress{a: a, taskID: taskID, done: make([]float64, count)}
+}
+
+func (p *vmProgress) report(i int, name string, done float64, msg map[string]any) {
+	p.mu.Lock()
+	p.done[i] = done
+	if time.Since(p.last) < time.Second {
+		p.mu.Unlock()
+		return
+	}
+	p.last = time.Now()
+	sum, finished := 0.0, 0
+	for _, d := range p.done {
+		sum += d
+		if d >= 1 {
+			finished++
+		}
+	}
+	count := len(p.done)
+	p.mu.Unlock()
+	p.a.postProgress(p.taskID, map[string]any{
+		"percentDone": sum / float64(count),
+		"bytesDone":   msg["bytes_done"],
+		"totalBytes":  msg["total_bytes"],
+		"filesDone":   msg["files_done"],
+		"totalFiles":  msg["total_files"],
+		"currentVm":   name,
+		"vmsDone":     finished,
+		"vmCount":     count,
+	})
+}
+
 // backupVM takes the checkpoint, backs up the VM's files and removes the
 // checkpoint again, whatever happened in between.
-func (a *agent) backupVM(ctx context.Context, t *Task, inv *HypervInventory, vm HypervVM, index, count int, appendLog func(string)) HypervVMResult {
+func (a *agent) backupVM(ctx context.Context, t *Task, sess *hvSession, inv *HypervInventory, vm HypervVM, report func(float64, map[string]any), appendLog func(string)) HypervVMResult {
 	started := time.Now()
 	res := HypervVMResult{VMID: vm.ID, Name: vm.Name, Status: "failed"}
-	conn := t.Hyperv.Connection
 	logf := func(format string, args ...any) {
 		appendLog(fmt.Sprintf("[%s] ", vm.Name) + fmt.Sprintf(format, args...))
+	}
+	defer report(1, nil)
+	conn, err := sess.conn(ctx, vm.Node)
+	if err != nil {
+		res.Error = "connecting to node " + vm.Node + ": " + err.Error()
+		logf("%s", res.Error)
+		return res
+	}
+	if vm.Node != "" {
+		logf("on node %s", vm.Node)
 	}
 
 	// Checkpoints a crashed run left behind would grow the chain forever.
@@ -403,24 +599,10 @@ func (a *agent) backupVM(ctx context.Context, t *Task, inv *HypervInventory, vm 
 	}
 	args := hypervBackupArgs(t, inv.ComputerName, vm, paths, conn.Mode == "local")
 
-	var lastProgress time.Time
 	code, err := a.runner.run(ctx, t, args, func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
-			if time.Since(lastProgress) > time.Second {
-				lastProgress = time.Now()
-				vmDone := jsonNum(msg, "percent_done")
-				a.postProgress(t.TaskID, map[string]any{
-					"percentDone": (float64(index) + vmDone) / float64(count),
-					"bytesDone":   msg["bytes_done"],
-					"totalBytes":  msg["total_bytes"],
-					"filesDone":   msg["files_done"],
-					"totalFiles":  msg["total_files"],
-					"currentVm":   vm.Name,
-					"vmIndex":     index + 1,
-					"vmCount":     count,
-				})
-			}
+			report(jsonNum(msg, "percent_done"), msg)
 		case "summary":
 			res.SnapshotID, _ = msg["snapshot_id"].(string)
 			res.DataAdded = jsonNum(msg, "data_added")
@@ -533,11 +715,26 @@ func (a *agent) restoreVM(ctx context.Context, t *Task, appendLog func(string)) 
 	if spec.TargetPath == "" {
 		return nil, errors.New("no destination folder on the host")
 	}
-	done, err := a.hyperv.Connect(ctx, conn)
+	sess, err := a.newSession(ctx, conn)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to the Hyper-V host: %w", err)
 	}
-	defer done()
+	defer sess.close()
+	// A cluster restores onto one node (the chosen one, or the first that is up).
+	if conn.Mode == "cluster" {
+		node := spec.Node
+		if node == "" {
+			nodes, err := a.hyperv.ClusterNodes(ctx, conn)
+			if err != nil || len(nodes) == 0 {
+				return nil, fmt.Errorf("listing the cluster nodes: %v", err)
+			}
+			node = nodes[0]
+		}
+		if conn, err = sess.conn(ctx, node); err != nil {
+			return nil, fmt.Errorf("connecting to node %s: %w", node, err)
+		}
+		appendLog("restoring onto cluster node " + node)
+	}
 
 	// A known name is checked before anything is restored (the manifest
 	// supplies the default name, checked once it is read).
@@ -659,6 +856,7 @@ func (a *agent) restoreVM(ctx context.Context, t *Task, appendLog func(string)) 
 		Start:          spec.Start,
 		ConnectNetwork: spec.ConnectNetwork,
 		KeepMac:        spec.ReplaceOriginal,
+		ClusterRole:    t.Hyperv.Connection.Mode == "cluster",
 	})
 	if err != nil {
 		return out, fmt.Errorf("registering the VM: %w", err)

@@ -161,6 +161,7 @@ export class JobsService {
           ? [...new Set((config.excludeVmIds ?? []).map((v) => v.toLowerCase()))]
           : [],
         checkpointMode: config.checkpointMode ?? 'Production',
+        parallelVms: Math.min(4, Math.max(1, config.parallelVms ?? 1)),
       },
     };
   }

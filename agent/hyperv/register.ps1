@@ -2,7 +2,7 @@
 #
 # args: manifest {vm, set}, name, vmPath, disks[] {controllerType,
 #       controllerNumber, controllerLocation, chain[] (restored paths, base
-#       first)}, start, connectNetwork, keepMac
+#       first)}, start, connectNetwork, keepMac, clusterRole
 #
 # Each restored disk chain is merged into its base disk first, so the VM starts
 # without checkpoints. The VM is created anew (new id) from the manifest rather
@@ -85,6 +85,16 @@ $data = Invoke-OnHost {
             Set-VMKeyProtector -VM $vm -NewLocalKeyProtector
             Enable-VMTPM -VM $vm
             $warnings += 'The VM had a virtual TPM. The restored VM has a new one, so BitLocker inside the guest will ask for its recovery key.'
+        }
+
+        # On a cluster the VM becomes a clustered role (highly available) when its
+        # files are on cluster storage; otherwise it stays a node-local VM.
+        if ($a.clusterRole) {
+            if (([string]$a.vmPath) -like '*\ClusterStorage\*') {
+                Add-ClusterVirtualMachineRole -VMName $name | Out-Null
+            } else {
+                $warnings += 'The VM is not on cluster storage (C:\ClusterStorage), so it was not made highly available.'
+            }
         }
 
         if ($a.start) { Start-VM -VM $vm }

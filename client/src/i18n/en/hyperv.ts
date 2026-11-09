@@ -10,6 +10,7 @@ export const hyperv = {
     viaAgent: 'via',
     modeLocal: 'agent on the host',
     modeRemote: 'remote',
+    modeCluster: 'cluster',
   },
   editor: {
     titleNew: 'Add Hyper-V host',
@@ -19,6 +20,10 @@ export const hyperv = {
     mode: 'Connection',
     modeLocal: 'Agent runs on the Hyper-V host',
     modeRemote: 'Agent reaches the host remotely',
+    modeCluster: 'Failover cluster',
+    modeHelpCluster:
+      'A Windows agent reaches the cluster with the credential: it lists the nodes, backs up each VM through the node that owns it (over WinRM and the administrative shares) and keeps a VM\'s snapshots together under the cluster name when it moves between nodes.',
+    clusterName: 'Cluster name',
     modeHelpLocal:
       'The Windows agent on the host takes the checkpoints and reads the disks directly. Recommended.',
     modeHelpRemote:
@@ -77,6 +82,8 @@ export const hyperv = {
     actionVm: 'As a virtual machine',
     actionDisks: 'Only the virtual disks',
     targetHost: 'Onto host',
+    node: 'Cluster node',
+    nodeHelp: 'Node that registers the VM (default: the first node that is up). On cluster storage (C:\\ClusterStorage) the VM becomes a clustered role.',
     targetPath: 'Folder on the host',
     targetPathHelp: 'The VM gets a sub-folder here, e.g. D:\\Hyper-V\\Restore\\<name>.',
     targetPathRequired: 'A folder on the host is required',
@@ -112,6 +119,8 @@ export const hyperv = {
     checkpointProductionOnly: 'Production only (fail instead)',
     checkpointHelp:
       'A production checkpoint quiesces the guest through its VSS, so databases are consistent. Each VM becomes a snapshot of its own; retention applies per VM.',
+    parallel: 'VMs at a time',
+    parallelHelp: 'Backs up up to this many VMs side by side. More is faster on fast storage, but each running backup holds a checkpoint and reads its disks at full speed.',
     rowSource: (host: string, vms: string) => `${host} · ${vms}`,
     rowAllVms: 'all VMs',
   },

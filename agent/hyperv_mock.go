@@ -10,7 +10,9 @@ package main
 //                              or a failure with ProductionOnly)
 //   failCheckpoint=true      → Checkpoint-VM fails
 // A remote connection works like a local one (paths are local files), but
-// needs an address and credentials, as the real thing does.
+// needs an address and credentials, as the real thing does. As a cluster the
+// host has two nodes, NODE1 and NODE2, that own the VMs (field "node"); a
+// connection addressed at a node sees only that node's VMs.
 
 import (
 	"context"
@@ -80,13 +82,14 @@ func (m *mockHyperv) seed() (*mockState, error) {
 		{"web01", "Running", 2, false, 1, "DMZ", "20"},
 		{"legacy-app", "Off", 1, true, 2, "LAN", ""},
 	}
-	for _, sp := range specs {
+	for i, sp := range specs {
 		id := newGUID()
 		vmDir := filepath.Join(m.dir, "vms", sp.name)
 		vm := &mockVM{HypervVM: HypervVM{
 			ID: id, Name: sp.name, State: sp.state, Generation: sp.gen, Version: "10.0",
 			ProcessorCount: 2, MemoryStartupBytes: 2 << 30, CheckpointType: "Production",
 			BackupIntegration: sp.vss, ConfigurationLocation: vmDir, StaleCheckpoints: []string{},
+			Node: mockNodes[i%len(mockNodes)],
 		}}
 		for i := 0; i < sp.disks; i++ {
 			p := filepath.Join(vmDir, "Virtual Hard Disks", fmt.Sprintf("%s-disk%d.vhdx", sp.name, i))
@@ -121,6 +124,24 @@ func (m *mockHyperv) Connect(_ context.Context, conn HypervConnection) (func(), 
 	return func() {}, nil
 }
 
+var mockNodes = []string{"NODE1", "NODE2"}
+
+func (m *mockHyperv) ClusterNodes(_ context.Context, conn HypervConnection) ([]string, error) {
+	if conn.Mode != "cluster" || conn.Address == "" || conn.Username == "" || conn.Password == "" {
+		return nil, errors.New("a cluster needs its name and credentials")
+	}
+	return append([]string(nil), mockNodes...), nil
+}
+
+func isMockNode(address string) bool {
+	for _, n := range mockNodes {
+		if strings.EqualFold(n, address) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *mockHyperv) Inventory(_ context.Context, conn HypervConnection) (*HypervInventory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -132,8 +153,13 @@ func (m *mockHyperv) Inventory(_ context.Context, conn HypervConnection) (*Hyper
 	if conn.Mode == "remote" {
 		inv.ComputerName = strings.ToUpper(strings.SplitN(conn.Address, ".", 2)[0])
 	}
+	nodeOnly := conn.Mode == "remote" && isMockNode(conn.Address)
 	for _, vm := range s.VMs {
+		if nodeOnly && !strings.EqualFold(vm.Node, conn.Address) {
+			continue
+		}
 		v := vm.HypervVM
+		v.Node = ""
 		v.StaleCheckpoints = []string{}
 		for _, c := range vm.Checkpoints {
 			if strings.HasPrefix(c, checkpointPrefix) {
@@ -219,7 +245,7 @@ func (m *mockHyperv) RemoveCheckpoints(_ context.Context, _ HypervConnection, vm
 	return m.save(s)
 }
 
-func (m *mockHyperv) RegisterVM(_ context.Context, _ HypervConnection, req registerRequest) (*registeredVM, error) {
+func (m *mockHyperv) RegisterVM(_ context.Context, conn HypervConnection, req registerRequest) (*registeredVM, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, err := m.load()
@@ -238,6 +264,9 @@ func (m *mockHyperv) RegisterVM(_ context.Context, _ HypervConnection, req regis
 		CheckpointType: src.CheckpointType, BackupIntegration: src.BackupIntegration,
 		ConfigurationLocation: req.VMPath, StaleCheckpoints: []string{},
 	}}
+	if isMockNode(conn.Address) {
+		vm.Node = strings.ToUpper(conn.Address)
+	}
 	for _, d := range req.Disks {
 		if len(d.Chain) == 0 {
 			return nil, errors.New("a disk without files")

@@ -760,6 +760,7 @@ echo "Amber agent installed and started."
           vmIds: config.vmIds,
           excludeVmIds: config.excludeVmIds ?? [],
           checkpointMode: config.checkpointMode ?? 'Production',
+          parallelVms: config.parallelVms ?? 1,
         };
       }
 

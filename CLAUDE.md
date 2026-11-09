@@ -213,7 +213,8 @@ bundles a pinned one.
 `server/src/hyperv/` (module, controller `/api/hyperv`, `hyperv.contract.ts` =
 the task payload shared with `agent/hyperv.go`) and migration `025_hyperv`:
 `hyperv_hosts` (mode `local` = agent on the host, `remote` = proxy agent with a
-`hyperv_credential` secret), `backup_jobs.source_kind` (`files` | `hyperv`) +
+`hyperv_credential` secret, `cluster` = like remote but addressed at the
+cluster name; the agent's `hvSession` reaches each VM through its owner node), `backup_jobs.source_kind` (`files` | `hyperv`) +
 `hyperv_host_id` + `hyperv_config`, restore mode `hyperv`
 (`destination.hyperv`). A Hyper-V job keeps `location = 'agent'` with the
 host's agent, so the existing run/claim paths apply; `AgentsService` turns it

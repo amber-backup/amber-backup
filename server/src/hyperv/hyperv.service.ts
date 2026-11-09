@@ -163,7 +163,7 @@ export class HypervService {
     await this.assertAgent(dto.agentId);
     if (dto.mode === 'local') await this.assertNoLocalHost(dto.agentId);
     const secretId =
-      dto.mode === 'remote'
+      dto.mode !== 'local'
         ? await this.secrets.create(
             'hyperv_credential',
             JSON.stringify({ username: dto.username!, password: dto.password! }),
@@ -176,7 +176,7 @@ export class HypervService {
         slug: await uniqueSlug(this.db, 'hyperv_hosts', dto.name),
         mode: dto.mode,
         agent_id: dto.agentId,
-        address: dto.mode === 'remote' ? dto.address! : null,
+        address: dto.mode !== 'local' ? dto.address! : null,
         credential_secret_id: secretId,
         // The first inventory is fetched on the agent's next poll.
         inventory_requested_at: new Date(),
@@ -203,8 +203,8 @@ export class HypervService {
     const remoteChange =
       dto.address !== undefined || dto.username !== undefined || dto.password !== undefined;
     if (remoteChange) {
-      if (host.mode !== 'remote') {
-        throw new BadRequestException('Only a remote host has an address and credentials');
+      if (host.mode === 'local') {
+        throw new BadRequestException('Only a remote host or cluster has an address and credentials');
       }
       if (dto.address !== undefined) patch.address = dto.address;
       if (dto.username !== undefined || dto.password !== undefined) {
@@ -308,7 +308,7 @@ export class HypervService {
     if (host.mode === 'local') return { mode: 'local' };
     const cred = await this.credential(host.credential_secret_id!);
     return {
-      mode: 'remote',
+      mode: host.mode,
       address: host.address!,
       username: cred.username,
       password: cred.password,

@@ -18,14 +18,18 @@ import (
 // AMBER_TEST_RESTIC must name (skipped otherwise):
 //
 //	AMBER_TEST_RESTIC=$(command -v restic) go test -run HypervE2E ./...
-func TestHypervE2E(t *testing.T) {
+//
+// e2eHarness wires an agent with the simulated host, a real restic and a fake
+// server that records the task results; run executes a task and returns its result.
+func e2eHarness(t *testing.T) (mock *mockHyperv, tmp string, run func(*Task) TaskResult) {
+	t.Helper()
 	restic := os.Getenv("AMBER_TEST_RESTIC")
 	if restic == "" {
 		t.Skip("AMBER_TEST_RESTIC not set")
 	}
-	tmp := t.TempDir()
+	tmp = t.TempDir()
 	t.Setenv("INSTALL_DIR", filepath.Join(tmp, "install"))
-	mock := &mockHyperv{dir: filepath.Join(tmp, "host")}
+	mock = &mockHyperv{dir: filepath.Join(tmp, "host")}
 
 	results := map[string]TaskResult{}
 	var mu sync.Mutex
@@ -45,20 +49,17 @@ func TestHypervE2E(t *testing.T) {
 			mu.Unlock()
 		}
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	a := &agent{
 		baseURL: srv.URL, http: srv.Client(), hyperv: mock,
 		runner: &resticRunner{binary: restic, cacheDir: filepath.Join(tmp, "cache"), stopGrace: defaultStopGrace},
 	}
-	repo := func(t *Task) *Task {
-		t.Repository = filepath.Join(tmp, "repo")
-		t.Password = "secret"
-		return t
-	}
-	run := func(task *Task) TaskResult {
+	run = func(task *Task) TaskResult {
 		t.Helper()
-		a.runTask(repo(task))
+		task.Repository = filepath.Join(tmp, "repo")
+		task.Password = "secret"
+		a.runTask(task)
 		mu.Lock()
 		defer mu.Unlock()
 		res, ok := results[task.TaskID]
@@ -67,6 +68,11 @@ func TestHypervE2E(t *testing.T) {
 		}
 		return res
 	}
+	return mock, tmp, run
+}
+
+func TestHypervE2E(t *testing.T) {
+	mock, tmp, run := e2eHarness(t)
 	local := HypervConnection{Mode: "local"}
 
 	// Inventory: the three seeded VMs.
@@ -240,4 +246,60 @@ func hasStaging(entries []os.DirEntry) bool {
 		}
 	}
 	return false
+}
+
+// A failover cluster: VMs spread over two nodes, backed up in parallel through
+// their owner nodes under the cluster's name, and restored onto a chosen node.
+func TestHypervClusterE2E(t *testing.T) {
+	mock, tmp, run := e2eHarness(t)
+	cluster := HypervConnection{Mode: "cluster", Address: "hvclu.corp.local", Username: `CORP\backup`, Password: "pw"}
+
+	inv := run(&Task{Type: "hyperv-inventory", TaskID: "hvinv-cluster", Hyperv: &HypervTask{Connection: cluster}})
+	if inv.Status != "success" || inv.HypervInventory.ComputerName != "HVCLU" || len(inv.HypervInventory.VMs) != 3 {
+		t.Fatalf("cluster inventory = %+v (%s)", inv.HypervInventory, inv.Error)
+	}
+	nodes := map[string]string{}
+	for _, vm := range inv.HypervInventory.VMs {
+		nodes[vm.Name] = vm.Node
+	}
+	if nodes["dc01"] != "NODE1" || nodes["web01"] != "NODE2" {
+		t.Fatalf("owner nodes = %v", nodes)
+	}
+
+	res := run(&Task{Type: "hyperv-backup", TaskID: "33333333-0000-0000-0000-000000000001",
+		Hyperv: &HypervTask{Connection: cluster, AllVMs: true, ParallelVMs: 3}})
+	if res.Status != "success" {
+		t.Fatalf("cluster backup failed: %s\n%s", res.Error, res.Log)
+	}
+	vmResults := decodeVMResults(t, res.Stats)
+	if countSuccess(vmResults) != 3 {
+		t.Fatalf("vm results = %+v", vmResults)
+	}
+	assertNoCheckpoints(t, mock)
+	if !strings.Contains(res.Log, "on node NODE2") {
+		t.Fatalf("VMs not reached through their nodes:\n%s", res.Log)
+	}
+
+	var dc HypervVM
+	for _, vm := range inv.HypervInventory.VMs {
+		if vm.Name == "dc01" {
+			dc = vm
+		}
+	}
+	var snap string
+	for _, r := range vmResults {
+		if r.Name == "dc01" {
+			snap = r.SnapshotID
+		}
+	}
+	target := filepath.Join(tmp, "csv")
+	os.MkdirAll(target, 0o755)
+	res = run(&Task{Type: "hyperv-restore", TaskID: "44444444-0000-0000-0000-000000000001", SnapshotID: snap,
+		Hyperv: &HypervTask{Connection: cluster, Restore: &HypervRestoreSpec{VMID: dc.ID, Action: "vm", Node: "NODE2", NewName: "dc01-copy", TargetPath: target}}})
+	if res.Status != "success" {
+		t.Fatalf("cluster restore failed: %s\n%s", res.Error, res.Log)
+	}
+	if vm := findMockVM(t, mock, "dc01-copy"); vm.Node != "NODE2" {
+		t.Fatalf("restored onto %q, want NODE2", vm.Node)
+	}
 }

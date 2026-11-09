@@ -85,6 +85,7 @@ describe('AgentsService (Hyper-V dispatch)', () => {
           vmIds: ['aaaaaaaa-0000-0000-0000-000000000001'],
           excludeVmIds: [],
           checkpointMode: 'Production',
+          parallelVms: 1,
         },
       }),
     );

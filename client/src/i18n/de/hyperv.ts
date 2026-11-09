@@ -12,6 +12,7 @@ export const hyperv: HypervMessages = {
     viaAgent: 'über',
     modeLocal: 'Agent auf dem Host',
     modeRemote: 'remote',
+    modeCluster: 'Cluster',
   },
   editor: {
     titleNew: 'Hyper-V-Host hinzufügen',
@@ -21,6 +22,10 @@ export const hyperv: HypervMessages = {
     mode: 'Verbindung',
     modeLocal: 'Agent läuft auf dem Hyper-V-Host',
     modeRemote: 'Agent erreicht den Host remote',
+    modeCluster: 'Failover-Cluster',
+    modeHelpCluster:
+      'Ein Windows-Agent erreicht den Cluster mit den Zugangsdaten: Er ermittelt die Knoten, sichert jede VM über den Knoten, dem sie gehört (per WinRM und administrativen Freigaben), und hält die Snapshots einer VM unter dem Clusternamen zusammen, auch wenn sie zwischen Knoten wandert.',
+    clusterName: 'Clustername',
     modeHelpLocal:
       'Der Windows-Agent auf dem Host erstellt die Checkpoints und liest die Disks direkt. Empfohlen.',
     modeHelpRemote:
@@ -81,6 +86,8 @@ export const hyperv: HypervMessages = {
     actionVm: 'Als virtuelle Maschine',
     actionDisks: 'Nur die virtuellen Disks',
     targetHost: 'Auf Host',
+    node: 'Cluster-Knoten',
+    nodeHelp: 'Knoten, der die VM registriert (Standard: der erste aktive Knoten). Auf Cluster-Speicher (C:\\ClusterStorage) wird die VM zu einer Clusterrolle.',
     targetPath: 'Ordner auf dem Host',
     targetPathHelp: 'Die VM bekommt hier einen Unterordner, z. B. D:\\Hyper-V\\Restore\\<Name>.',
     targetPathRequired: 'Ein Ordner auf dem Host ist erforderlich',
@@ -116,6 +123,8 @@ export const hyperv: HypervMessages = {
     checkpointProductionOnly: 'Nur Production (sonst fehlschlagen)',
     checkpointHelp:
       'Ein Production-Checkpoint legt den Gast über sein VSS still, damit Datenbanken konsistent sind. Jede VM wird ein eigener Snapshot; die Aufbewahrung gilt pro VM.',
+    parallel: 'VMs gleichzeitig',
+    parallelHelp: 'Sichert bis zu so viele VMs nebeneinander. Das ist auf schnellem Speicher schneller, aber jedes laufende Backup hält einen Checkpoint und liest seine Disks mit voller Geschwindigkeit.',
     rowSource: (host: string, vms: string) => `${host} · ${vms}`,
     rowAllVms: 'alle VMs',
   },

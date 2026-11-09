@@ -136,7 +136,7 @@ func truncate(s string, n int) string {
 }
 
 func (p *powershellHyperv) Connect(ctx context.Context, conn HypervConnection) (func(), error) {
-	if conn.Mode != "remote" {
+	if conn.Mode == "local" {
 		return func() {}, nil
 	}
 	if err := p.call(ctx, "connect", conn, nil, nil); err != nil {
@@ -147,6 +147,16 @@ func (p *powershellHyperv) Connect(ctx context.Context, conn HypervConnection) (
 		defer cancel()
 		p.call(cctx, "disconnect", conn, nil, nil)
 	}, nil
+}
+
+func (p *powershellHyperv) ClusterNodes(ctx context.Context, conn HypervConnection) ([]string, error) {
+	var nodes []string
+	c := conn
+	c.Mode = "remote" // the cluster name answers like any host
+	if err := p.call(ctx, "cluster-nodes", c, nil, &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }
 
 func (p *powershellHyperv) Inventory(ctx context.Context, conn HypervConnection) (*HypervInventory, error) {

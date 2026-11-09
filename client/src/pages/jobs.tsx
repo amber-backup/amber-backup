@@ -448,6 +448,7 @@ export function JobEditor({
     () => new Set((hvConfig?.excludeVmIds ?? []).map((v) => v.toLowerCase())),
   );
   const [hvMode, setHvMode] = useState<'Production' | 'ProductionOnly'>(hvConfig?.checkpointMode ?? 'Production');
+  const [hvParallel, setHvParallel] = useState<number>(hvConfig?.parallelVms ?? 1);
   const [hvDetail, setHvDetail] = useState<HypervHostDetail | null>(null);
   useEffect(() => {
     if (!isHyperv || !hvHostId) return;
@@ -609,6 +610,7 @@ export function JobEditor({
           vmIds: hvAll ? [] : [...hvVmIds],
           excludeVmIds: hvAll ? [...hvExclude] : [],
           checkpointMode: hvMode,
+          parallelVms: hvParallel,
         },
       };
     }
@@ -775,6 +777,13 @@ export function JobEditor({
                 <select value={hvMode} onChange={(e) => setHvMode(e.target.value as 'Production' | 'ProductionOnly')}>
                   <option value="Production">{hv.checkpointProduction}</option>
                   <option value="ProductionOnly">{hv.checkpointProductionOnly}</option>
+                </select>
+              </Field>
+              <Field label={hv.parallel} help={hv.parallelHelp}>
+                <select value={hvParallel} onChange={(e) => setHvParallel(Number(e.target.value))}>
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
                 </select>
               </Field>
             </>

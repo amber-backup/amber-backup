@@ -3,6 +3,10 @@ import { Kysely, sql } from 'kysely';
 /**
  * Hyper-V: hosts whose virtual machines Amber backs up.
  *
+ * A failover cluster is a host of mode 'cluster': its address is the cluster
+ * name, and the agent reaches each VM through its current owner node with the
+ * stored credentials (like a remote host).
+ *
  * A host is reached through a Windows agent: in `local` mode the agent runs on
  * the Hyper-V host itself; in `remote` mode a proxy agent drives the host over
  * PowerShell remoting with stored credentials (secret type
@@ -29,7 +33,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .addColumn('name', 'text', (c) => c.notNull())
     .addColumn('slug', 'text', (c) => c.notNull().unique())
     .addColumn('mode', 'text', (c) =>
-      c.notNull().defaultTo('local').check(sql`mode in ('local','remote')`),
+      c.notNull().defaultTo('local').check(sql`mode in ('local','remote','cluster')`),
     )
     // The agent that runs on the host (local) or proxies it (remote).
     .addColumn('agent_id', 'uuid', (c) =>

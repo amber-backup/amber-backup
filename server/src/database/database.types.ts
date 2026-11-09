@@ -301,8 +301,11 @@ export type AgentUpdate = Updateable<AgentsTable>;
 
 // --- hyperv_hosts -----------------------------------------------------------
 
-/** local: the agent runs on the Hyper-V host; remote: a proxy agent drives it. */
-export type HypervHostMode = 'local' | 'remote';
+/**
+ * local: the agent runs on the Hyper-V host; remote: a proxy agent drives it;
+ * cluster: a failover cluster, each VM reached through its owner node.
+ */
+export type HypervHostMode = 'local' | 'remote' | 'cluster';
 
 /** One virtual disk of a VM, as the agent's inventory reports it. */
 export interface HypervDisk {
@@ -338,6 +341,8 @@ export interface HypervVm {
   /** Checkpoints Amber left behind (amber-*), e.g. after a crash. */
   staleCheckpoints: string[];
   notes?: string;
+  /** Cluster hosts: the node that currently owns the VM. */
+  node?: string;
 }
 
 /** What an agent reports about a Hyper-V host. */
@@ -480,6 +485,8 @@ export interface HypervJobConfig {
   vmIds: string[];
   excludeVmIds?: string[];
   checkpointMode?: HypervCheckpointMode;
+  /** How many VMs are backed up at the same time (1–4, default 1). */
+  parallelVms?: number;
 }
 
 export interface BackupJobsTable {
@@ -635,6 +642,8 @@ export interface HypervRestoreSpec {
   start?: boolean;
   /** Keep the network adapters connected to their switches (off by default to avoid duplicate addresses). */
   connectNetwork?: boolean;
+  /** Cluster hosts: the node to register the VM on (default: the first node). */
+  node?: string;
 }
 
 export interface RestoreDestination {

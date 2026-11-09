@@ -123,6 +123,12 @@ Under **Hyper-V**, add a host and pick the Windows agent that reaches it:
   checkpoints and reads the disks itself.
 - **Remote**: another Windows agent drives the host over PowerShell remoting (WinRM) with a
   stored, encrypted credential and reads the disks through the host's administrative shares.
+- **Failover cluster**: like remote, addressed by the cluster name. The agent lists the nodes
+  that are up and reaches every VM through the node that currently owns it; snapshots carry the
+  cluster name as host, so a VM's history stays together when it migrates. A VM restored onto
+  cluster storage (`C:\ClusterStorage`) becomes a clustered role.
+
+A job can back up up to four VMs side by side (*VMs at a time*).
 
 The host page lists the VMs (state, disks, whether the guest can be quiesced, which jobs protect
 them and how their last backup went). Select VMs and *Back up*, or create a job with the source

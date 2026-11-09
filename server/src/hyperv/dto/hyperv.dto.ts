@@ -11,6 +11,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -38,30 +39,31 @@ export class CreateHypervHostDto {
   name!: string;
 
   @ApiProperty({
-    enum: ['local', 'remote'],
-    description: 'local: the agent runs on the Hyper-V host; remote: the agent proxies it',
+    enum: ['local', 'remote', 'cluster'],
+    description:
+      'local: the agent runs on the Hyper-V host; remote: the agent proxies it; cluster: a failover cluster reached through its nodes',
   })
-  @IsIn(['local', 'remote'])
-  mode!: 'local' | 'remote';
+  @IsIn(['local', 'remote', 'cluster'])
+  mode!: 'local' | 'remote' | 'cluster';
 
   @ApiProperty({ description: 'Windows agent on the host (local) or the proxy agent (remote)' })
   @IsUUID()
   agentId!: string;
 
-  @ApiPropertyOptional({ description: 'remote: DNS name or address of the host' })
-  @ValidateIf((o) => o.mode === 'remote')
+  @ApiPropertyOptional({ description: 'remote: DNS name or address of the host; cluster: the cluster name' })
+  @ValidateIf((o) => o.mode !== 'local')
   @IsString()
   @Matches(HOST_ADDRESS_RE, { message: 'address must be a host name or IP address' })
   address?: string;
 
   @ApiPropertyOptional({ description: 'remote: DOMAIN\\user or user@domain' })
-  @ValidateIf((o) => o.mode === 'remote')
+  @ValidateIf((o) => o.mode !== 'local')
   @IsString()
   @Matches(HOST_USERNAME_RE, { message: 'username contains invalid characters' })
   username?: string;
 
   @ApiPropertyOptional({ description: 'remote: password (stored encrypted)' })
-  @ValidateIf((o) => o.mode === 'remote')
+  @ValidateIf((o) => o.mode !== 'local')
   @IsString()
   @MinLength(1)
   @MaxLength(1024)
@@ -136,6 +138,7 @@ export class HypervVmDto {
   staleCheckpoints!: string[];
 
   @IsOptional() @IsString() @MaxLength(4096) notes?: string;
+  @IsOptional() @IsString() @Matches(HOST_ADDRESS_RE) node?: string;
 }
 
 export class HypervInventoryDto {
@@ -174,6 +177,13 @@ export class HypervJobConfigDto {
   @IsOptional()
   @IsIn(['Production', 'ProductionOnly'])
   checkpointMode?: 'Production' | 'ProductionOnly';
+
+  @ApiPropertyOptional({ description: 'VMs backed up at the same time', minimum: 1, maximum: 4, default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(4)
+  parallelVms?: number;
 }
 
 export class HypervRestoreSpecDto {
@@ -211,4 +221,10 @@ export class HypervRestoreSpecDto {
   @IsOptional()
   @IsBoolean()
   connectNetwork?: boolean;
+
+  @ApiPropertyOptional({ description: 'Cluster hosts: node to register the VM on' })
+  @IsOptional()
+  @IsString()
+  @Matches(HOST_ADDRESS_RE, { message: 'node must be a host name' })
+  node?: string;
 }

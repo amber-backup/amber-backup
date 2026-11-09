@@ -347,6 +347,7 @@ export interface HypervJobConfig {
   vmIds: string[];
   excludeVmIds?: string[];
   checkpointMode?: 'Production' | 'ProductionOnly';
+  parallelVms?: number;
 }
 
 export interface HypervDisk {
@@ -372,6 +373,8 @@ export interface HypervVm {
   disks: HypervDisk[];
   staleCheckpoints: string[];
   notes?: string;
+  /** Cluster hosts: the node that owns the VM. */
+  node?: string;
 }
 
 export interface HypervInventory {
@@ -384,7 +387,7 @@ export interface HypervHost {
   id: string;
   name: string;
   slug: string;
-  mode: 'local' | 'remote';
+  mode: 'local' | 'remote' | 'cluster';
   agent_id: string;
   agent_name: string | null;
   agent_status: string | null;

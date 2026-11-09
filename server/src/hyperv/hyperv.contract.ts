@@ -31,6 +31,7 @@ export interface HypervTaskPayload {
   vmIds?: string[];
   excludeVmIds?: string[];
   checkpointMode?: HypervCheckpointMode;
+  parallelVms?: number;
   // hyperv-restore
   restore?: HypervRestoreSpec & {
     /** Folder on the host that receives the VM's files. */
