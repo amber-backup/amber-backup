@@ -663,7 +663,11 @@ func writeManifest(t *Task, inv *HypervInventory, vm HypervVM, set *vmBackupSet)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", func() {}, err
 	}
-	cleanup := func() { os.RemoveAll(filepath.Dir(dir)) }
+	// Only this VM's folder: VMs backed up in parallel share the task folder.
+	cleanup := func() {
+		os.RemoveAll(dir)
+		os.Remove(filepath.Dir(dir)) // the task folder, once it is empty
+	}
 	m := vmManifest{
 		Format:       manifestFormat,
 		ComputerName: inv.ComputerName,

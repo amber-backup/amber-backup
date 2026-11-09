@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -111,5 +112,33 @@ func TestMockConnectNeedsRemoteCredentials(t *testing.T) {
 	m := &mockHyperv{dir: t.TempDir()}
 	if _, err := m.Connect(nil, HypervConnection{Mode: "remote", Address: "hv"}); err == nil {
 		t.Fatal("remote connection without credentials accepted")
+	}
+}
+
+// VMs backed up in parallel each clean up their manifest; one finishing must
+// not remove another's, which restic may not have read yet.
+func TestManifestCleanupKeepsOtherVMs(t *testing.T) {
+	t.Setenv("INSTALL_DIR", t.TempDir())
+	task := &Task{TaskID: "55555555-0000-0000-0000-000000000001"}
+	inv := &HypervInventory{ComputerName: "HV"}
+	set := &vmBackupSet{}
+	a, cleanA, err := writeManifest(task, inv, HypervVM{ID: "aaaaaaaa-0000-0000-0000-000000000001"}, set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, cleanB, err := writeManifest(task, inv, HypervVM{ID: "bbbbbbbb-0000-0000-0000-000000000002"}, set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanA()
+	if _, err := os.Stat(a); !os.IsNotExist(err) {
+		t.Fatalf("own manifest left behind: %v", err)
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Fatalf("another VM's manifest was removed: %v", err)
+	}
+	cleanB()
+	if _, err := os.Stat(b); !os.IsNotExist(err) {
+		t.Fatal("second manifest left behind")
 	}
 }
