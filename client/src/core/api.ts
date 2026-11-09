@@ -301,6 +301,11 @@ export interface Agent {
   last_ip: string | null;
 }
 
+/** Whether an agent runs on Windows, judged by the OS it reports. */
+export function isWindowsAgent(agent?: Pick<Agent, 'os'> | null): boolean {
+  return !!agent?.os && /^windows/i.test(agent.os);
+}
+
 export interface Snapshot {
   id: string;
   short_id: string;

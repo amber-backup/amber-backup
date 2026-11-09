@@ -45,16 +45,18 @@ type Retention struct {
 }
 
 type ResticOptions struct {
-	Tags              []string   `json:"tags,omitempty"`
-	Exclude           []string   `json:"exclude,omitempty"`
-	IExclude          []string   `json:"iexclude,omitempty"`
-	ExcludeFile       []string   `json:"excludeFile,omitempty"`
-	OneFileSystem     bool       `json:"oneFileSystem,omitempty"`
-	ExcludeCaches     bool       `json:"excludeCaches,omitempty"`
-	ExcludeLargerThan string     `json:"excludeLargerThan,omitempty"`
-	Compression       string     `json:"compression,omitempty"`
-	ReadConcurrency   int        `json:"readConcurrency,omitempty"`
-	Retention         *Retention `json:"retention,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
+	Exclude           []string `json:"exclude,omitempty"`
+	IExclude          []string `json:"iexclude,omitempty"`
+	ExcludeFile       []string `json:"excludeFile,omitempty"`
+	OneFileSystem     bool     `json:"oneFileSystem,omitempty"`
+	ExcludeCaches     bool     `json:"excludeCaches,omitempty"`
+	ExcludeLargerThan string   `json:"excludeLargerThan,omitempty"`
+	Compression       string   `json:"compression,omitempty"`
+	ReadConcurrency   int      `json:"readConcurrency,omitempty"`
+	// Back up from a VSS snapshot (Windows agents only; ignored elsewhere).
+	UseFsSnapshot bool       `json:"useFsSnapshot,omitempty"`
+	Retention     *Retention `json:"retention,omitempty"`
 	// Custom scripts run by path (no shell). PreScript gates the backup; the
 	// post scripts run on success/failure and are best-effort.
 	PreScript         string `json:"preScript,omitempty"`
@@ -103,6 +105,8 @@ type PollResponse struct {
 	// Latest agent version the server has bundled; triggers a self-update when
 	// newer than the running agent. Empty when the server can't determine it.
 	LatestAgentVersion string `json:"latestAgentVersion,omitempty"`
+	// restic version the server bundles; an agent-managed restic follows it.
+	LatestResticVersion string `json:"latestResticVersion,omitempty"`
 }
 
 // TaskState mirrors the server's GET /agents/me/tasks/:id/state response,

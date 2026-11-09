@@ -79,6 +79,60 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       expect(result.installCommand).toMatch(/^docker run /);
       expect(result.installCommand).toContain(`AMBER_TOKEN=${result.token}`);
     });
+
+    it('emits a PowerShell one-liner for the windows method, quoting every value', async () => {
+      const { db } = createDbMock({ insertInto: chain({ execute: [] }) });
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      const result = await service.createEnrollmentToken('admin-1', {
+        deployMethod: 'windows',
+        intendedAgentName: "hv'01; calc",
+      });
+
+      expect(result.installCommand).toBe(
+        `$env:AMBER_URL='https://backup.example.com'; $env:AMBER_TOKEN='${result.token}'; ` +
+          `$env:AMBER_NAME='hv''01; calc'; ` +
+          `irm 'https://backup.example.com/api/agents/install.ps1' | iex`,
+      );
+    });
+  });
+
+  describe('installPowerShellScript', () => {
+    it('fills in the server URL as the default', () => {
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      const script = service.installPowerShellScript();
+
+      expect(script).toContain(
+        "$AmberUrl = if ($env:AMBER_URL) { $env:AMBER_URL } else { 'https://backup.example.com' }",
+      );
+      expect(script).toContain('/api/agents/restic/$target');
+      expect(script).toContain('SHA256SUMS');
+    });
+
+    it('does not inject a URL that could break out of the literal', () => {
+      process.env.PUBLIC_BASE_URL = "https://evil.example.com/'; Remove-Item C:\\ -Recurse; '";
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      const script = service.installPowerShellScript();
+
+      expect(script).not.toContain('evil.example.com');
+      expect(script).toContain("$AmberUrl = if ($env:AMBER_URL) { $env:AMBER_URL } else { '' }");
+    });
+  });
+
+  describe('installScript', () => {
+    it('falls back to the bundled restic when the host has none', () => {
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      const script = service.installScript();
+
+      expect(script).toContain('"$AMBER_URL/api/agents/restic/linux-$ARCH"');
+      expect(script).toContain('mv "$INSTALL_DIR/restic.new" "$INSTALL_DIR/restic"');
+    });
   });
 
   describe('binary', () => {
@@ -100,7 +154,34 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       expect(() => service.binary('linux-amd64/../../etc/passwd')).toThrow(
         NotFoundException,
       );
-      expect(() => service.binary('windows-amd64')).toThrow(NotFoundException);
+      expect(() => service.binary('darwin-amd64')).toThrow(NotFoundException);
+      expect(() => service.resticBinary('../version')).toThrow(NotFoundException);
+    });
+
+    it('serves Windows binaries and the bundled restic as .exe files', () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'agent-bin-'));
+      writeFileSync(path.join(dir, 'amber-agent-windows-amd64.exe'), 'MZ');
+      writeFileSync(path.join(dir, 'restic-windows-arm64.exe'), 'MZ');
+      writeFileSync(path.join(dir, 'restic-linux-amd64'), 'ELF');
+      process.env.AGENT_BINARY_DIR = dir;
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      expect(service.binary('windows-amd64').getHeaders().disposition).toContain('amber-agent.exe');
+      expect(service.resticBinary('windows-arm64').getHeaders().disposition).toContain('restic.exe');
+      expect(service.resticBinary('linux-amd64')).toBeInstanceOf(StreamableFile);
+      expect(() => service.resticBinary('windows-amd64')).toThrow(NotFoundException);
+    });
+
+    it('serves the bundle checksums, 404 when none are bundled', () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'agent-bin-'));
+      process.env.AGENT_BINARY_DIR = dir;
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+      expect(() => service.checksums()).toThrow(NotFoundException);
+
+      writeFileSync(path.join(dir, 'SHA256SUMS'), 'abc  restic-windows-amd64.exe\n');
+      expect(service.checksums()).toBe('abc  restic-windows-amd64.exe\n');
     });
 
     it('404s when the binary is not bundled on this server', () => {
@@ -129,6 +210,16 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
 
       expect(service.latestAgentVersion()).toBeNull();
+    });
+
+    it('reads the bundled restic version (drives managed restic updates)', () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'agent-ver-'));
+      writeFileSync(path.join(dir, 'restic-version'), '0.19.1\n');
+      process.env.AGENT_BINARY_DIR = dir;
+      const { db } = createDbMock({});
+      const service = new AgentsService(db, crypto, targets, notifications, repositories, pruneRunner, checkRunner, retries);
+
+      expect(service.latestResticVersion()).toBe('0.19.1');
     });
   });
 

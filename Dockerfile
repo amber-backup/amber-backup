@@ -38,18 +38,20 @@ COPY server/package.json ./server/
 COPY client/package.json ./client/
 RUN npm ci --omit=dev --workspace @amber/server
 
-# --- Stage 4: build agent binaries (both arches, served to hosts) ---
+# --- Stage 4: build agent binaries (every target, served to hosts) ---
 # Cross-compiles on the build host's native arch so a single image can serve
-# every agent architecture, independent of the image's own platform.
+# every agent platform, independent of the image's own platform.
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS agent-build
 WORKDIR /agent
-COPY agent/go.mod ./
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
 COPY agent/VERSION ./
 COPY agent/*.go ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-      go build -ldflags="-s -w" -o /out/amber-agent-linux-amd64 . \
- && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-      go build -ldflags="-s -w" -o /out/amber-agent-linux-arm64 . \
+RUN for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do \
+      os="${t%/*}"; arch="${t#*/}"; ext=""; [ "$os" = windows ] && ext=".exe"; \
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+        go build -ldflags="-s -w" -o "/out/amber-agent-$os-$arch$ext" . || exit 1; \
+    done \
  && cp VERSION /out/version
 
 # --- Stage 5: build restic from source ---
@@ -76,10 +78,23 @@ RUN go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 \
       go.opentelemetry.io/otel/sdk@v1.45.0 \
   && go mod tidy \
   && go mod verify
-# Populated by buildx (amd64 / arm64) so the bundled restic matches the target.
-ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
-      go build -trimpath -ldflags="-s -w" -o /out/restic ./cmd/restic
+# Every agent platform: the image's own restic is picked from these by
+# TARGETARCH, and agent hosts download theirs via GET /api/agents/restic/<target>
+# (Windows agents always run this bundled build).
+RUN for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do \
+      os="${t%/*}"; arch="${t#*/}"; ext=""; [ "$os" = windows ] && ext=".exe"; \
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+        go build -trimpath -ldflags="-s -w" -o "/out/restic-$os-$arch$ext" ./cmd/restic || exit 1; \
+    done \
+ && echo "${RESTIC_VERSION}" > /out/restic-version
+
+# --- Stage 5b: agent bundle + checksums ---
+# What the server serves to agent hosts, with the SHA256SUMS install.ps1 checks.
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS agent-bundle
+WORKDIR /bundle
+COPY --from=agent-build /out/ ./
+COPY --from=restic-build /out/ ./
+RUN sha256sum amber-agent-* restic-* > SHA256SUMS
 
 # --- Stage 6: runtime ---
 FROM ${NODE_IMAGE} AS runtime
@@ -89,7 +104,9 @@ FROM ${NODE_IMAGE} AS runtime
 # vulnerable dependency tree) is removed.
 RUN apk add --no-cache ca-certificates tar openssh-client \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-COPY --from=restic-build /out/restic /usr/local/bin/restic
+# Populated by buildx (amd64 / arm64) so the server's restic matches the image.
+ARG TARGETARCH
+COPY --from=restic-build /out/restic-linux-${TARGETARCH} /usr/local/bin/restic
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -104,8 +121,10 @@ COPY --from=server-build /build/server/dist ./dist
 COPY --from=server-build /build/server/package.json ./package.json
 # Client assets served by the server
 COPY --from=client-build /build/client/dist ./client
-# Precompiled agent binaries served via GET /api/agents/binary/linux-<arch>
-COPY --from=agent-build /out/ ./agent-bin/
+# Precompiled agent binaries and restic builds served to agent hosts via
+# GET /api/agents/binary/<os>-<arch>, /api/agents/restic/<os>-<arch> and
+# /api/agents/SHA256SUMS.
+COPY --from=agent-bundle /bundle/ ./agent-bin/
 # ambb CLI install scripts served via GET /api/cli/install.{sh,ps1}; the
 # binaries themselves are downloaded from GitHub Releases by the scripts.
 COPY cli/install.sh cli/install.ps1 ./cli-install/

@@ -340,6 +340,11 @@ export interface ResticOptions {
   excludeLargerThan?: string;
   compression?: 'auto' | 'max' | 'off';
   readConcurrency?: number;
+  /**
+   * Back up from a VSS snapshot (`--use-fs-snapshot`). Only Windows agents
+   * honour it; the server and other agents ignore it.
+   */
+  useFsSnapshot?: boolean;
   retention?: {
     keepLast?: number;
     keepHourly?: number;

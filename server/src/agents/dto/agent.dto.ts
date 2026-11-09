@@ -36,12 +36,13 @@ export class CreateEnrollmentTokenDto {
   expiresInMinutes?: number;
 
   @ApiPropertyOptional({
-    enum: ['binary', 'docker', 'docker-compose'],
+    enum: ['binary', 'docker', 'docker-compose', 'windows'],
     default: 'binary',
+    description: 'windows: PowerShell installer that registers a Windows service',
   })
   @IsOptional()
-  @IsIn(['binary', 'docker', 'docker-compose'])
-  deployMethod?: 'binary' | 'docker' | 'docker-compose';
+  @IsIn(['binary', 'docker', 'docker-compose', 'windows'])
+  deployMethod?: 'binary' | 'docker' | 'docker-compose' | 'windows';
 }
 
 export class SetGlobalEnrollmentDto {

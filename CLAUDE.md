@@ -188,7 +188,24 @@ and never touches `/api`. Icons in `public/pwa-*.png` are generated from
 
 Single small module in `agent/`: `main.go` (enroll + poll loop), `restic.go`
 (restic execution), `types.go` (task/result shapes mirroring the server's
-`AgentTask`). Binary agents use the host's system restic; the Docker agent
+`AgentTask`), `update.go` (self-update + managed restic update).
+OS-specific code lives in `platform_unix.go` / `platform_windows.go` (build
+tags): install dir, OS detection, how restic is cancelled (SIGINT vs. a console
+CTRL_BREAK to its own process group), script execution (`.ps1` via
+powershell.exe), binary swap + restart (execve vs. rename-aside + exit for the
+service's recovery actions), and the Windows service (`x/sys/windows/svc`).
+Portable helpers that only Windows uses sit in `platform_common.go` so they are
+tested on Linux.
+
+The server image bundles agent binaries **and** restic builds for linux/windows
+× amd64/arm64 (`agent-bin/`, plus `SHA256SUMS`, `version`, `restic-version`),
+served at `GET /api/agents/binary|restic/<os>-<arch>` and `/api/agents/SHA256SUMS`.
+Windows agents install via `GET /api/agents/install.ps1`
+(`server/src/agents/install-windows.ts`, a `String.raw` literal — no backticks
+or dollar-brace in it) into `%ProgramData%\AmberAgent` and always use the
+bundled restic. Linux binary agents use the host's restic, or the bundled one
+when the host has none. A restic in the install dir is "managed": the agent
+replaces it when the poll's `latestResticVersion` differs. The Docker agent
 bundles a pinned one.
 
 ### CLI (Go)

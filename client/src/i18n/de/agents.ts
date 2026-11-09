@@ -5,8 +5,12 @@ export const agents: AgentsMessages = {
     binary: 'Binary (systemd)',
     docker: 'Docker',
     dockerCompose: 'Docker Compose',
+    windows: 'Windows (PowerShell, Dienst)',
   },
   intro: {
+    powershell: 'In einer PowerShell mit Administratorrechten (Als Administrator ausführen) auf dem Ziel-Host ausführen. Installiert den Agent mit dem mitgelieferten restic als Windows-Dienst:',
+    powershellValid: (minutes: number) =>
+      `In einer PowerShell mit Administratorrechten (Als Administrator ausführen) auf dem Ziel-Host ausführen, gültig für ${minutes} Min. Installiert den Agent mit dem mitgelieferten restic als Windows-Dienst:`,
     compose: 'Als docker-compose.yml auf dem Zielserver speichern und anschließend "docker compose up -d" ausführen:',
     run: 'Auf dem Zielserver ausführen:',
     composeValid: (minutes: number) =>

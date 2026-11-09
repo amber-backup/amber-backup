@@ -93,8 +93,20 @@ docker run -d --restart unless-stopped \
   devpatf/amber-backup-agent:latest
 ```
 
+```powershell
+# Windows (elevated PowerShell; installs the AmberAgent service)
+$env:AMBER_URL='https://backup.example.com'; $env:AMBER_TOKEN='<token>'; $env:AMBER_NAME='<name>'; irm 'https://backup.example.com/api/agents/install.ps1' | iex
+```
+
 The agent enrolls, then polls for backup, restore and integrity check tasks and runs restic locally.
-Binary agents use the host's system restic; the Docker agent bundles a pinned one.
+Linux binary agents use the host's restic when it has one and otherwise install the server's bundled
+build next to the agent. Windows agents always run the bundled restic from `%ProgramData%\AmberAgent`
+(checked against the server's `SHA256SUMS`). An agent-managed restic follows the server's version on
+its own, like the agent itself. The Docker agent bundles a pinned restic.
+
+On Windows, jobs can back up from a VSS snapshot (job option *Use a VSS snapshot*), so open and
+locked files are read consistently. A restore to the original location restores each drive
+(`/C/…` in the snapshot) to its own root.
 
 Build the agent locally:
 

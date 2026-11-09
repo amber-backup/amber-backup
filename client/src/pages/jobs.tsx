@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
+  isWindowsAgent,
   type Job,
   type Target,
   type Agent,
@@ -389,6 +390,9 @@ function JobEditor({
   const [where, setWhere] = useState<string>(job?.location === 'agent' ? job.agent_id ?? '' : 'local');
   const [paths, setPaths] = useState<string>((job?.paths ?? []).join('\n'));
   const [excludes, setExcludes] = useState<string>((opts.exclude ?? []).join('\n'));
+  // VSS (`--use-fs-snapshot`) exists only for Windows agents.
+  const [useFsSnapshot, setUseFsSnapshot] = useState<boolean>(!!opts.useFsSnapshot);
+  const onWindows = isWindowsAgent(agents.find((a) => a.id === where));
 
   // Repository: a connection (target) plus the repo-specific fields
   // (bucket/prefix/path), or the local filesystem (LOCAL_REPO ⇒ target_id null).
@@ -500,6 +504,7 @@ function JobEditor({
       exclude: excludes.split('\n').map((s) => s.trim()).filter(Boolean),
     };
     if (Object.keys(retention).length) resticOptions.retention = retention;
+    if (onWindows && useFsSnapshot) resticOptions.useFsSnapshot = true;
     if (preScript.trim()) resticOptions.preScript = preScript.trim();
     if (postSuccessScript.trim()) resticOptions.postSuccessScript = postSuccessScript.trim();
     if (postFailureScript.trim()) resticOptions.postFailureScript = postFailureScript.trim();
@@ -632,11 +637,23 @@ function JobEditor({
             </select>
           </Field>
           <Field label={m.source.paths} help={m.source.pathsHelp}>
-            <textarea placeholder={'/home\n/etc\n/var/www'} value={paths} onChange={(e) => setPaths(e.target.value)} />
+            <textarea
+              placeholder={onWindows ? 'C:\\Users\nD:\\Data' : '/home\n/etc\n/var/www'}
+              value={paths}
+              onChange={(e) => setPaths(e.target.value)}
+            />
           </Field>
           <Field label={m.source.excludes} help={m.source.excludesHelp}>
             <textarea placeholder={'*.tmp\n/var/cache'} value={excludes} onChange={(e) => setExcludes(e.target.value)} />
           </Field>
+          {onWindows && (
+            <Field label="" help={m.source.vssHelp}>
+              <label className="checkbox">
+                <input type="checkbox" checked={useFsSnapshot} onChange={(e) => setUseFsSnapshot(e.target.checked)} />
+                {m.source.vss}
+              </label>
+            </Field>
+          )}
         </Section>
 
         <Section title={m.repository.title} sub={m.repository.sub}>

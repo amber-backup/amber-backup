@@ -16,8 +16,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +37,12 @@ type agent struct {
 	http    *http.Client
 	state   State
 	runner  *resticRunner
+
+	// ctx ends when the agent is stopped (Windows service stop); running tasks
+	// derive their context from it. shuttingDown tells such a stop apart from
+	// a cancel on the server when a task reports why it ended.
+	ctx          context.Context
+	shuttingDown atomic.Bool
 
 	// Task execution is decoupled from the poll loop so long-running backups
 	// don't stall the heartbeat (which would make the server mark us offline).
@@ -58,6 +64,21 @@ func main() {
 		}
 	}
 
+	platformInit()
+	// Started by the Windows Service Control Manager: it drives runAgent and
+	// stops it through the context.
+	if runAsService(runAgent) {
+		return
+	}
+	runAgent(context.Background())
+}
+
+// shutdownWait bounds how long a stop waits for running tasks to wind down.
+const shutdownWait = 35 * time.Second
+
+// runAgent enrolls if needed and polls for tasks until ctx ends. Then running
+// tasks are cancelled (restic releases its lock) and reported as interrupted.
+func runAgent(ctx context.Context) {
 	baseURL := strings.TrimRight(getenv("AMBER_URL", ""), "/")
 	token := getenv("AMBER_TOKEN", "")
 	if baseURL == "" {
@@ -68,6 +89,7 @@ func main() {
 		baseURL:  baseURL,
 		http:     &http.Client{Timeout: 60 * time.Second},
 		runner:   newResticRunner(),
+		ctx:      ctx,
 		tasks:    make(chan Task, 64),
 		inflight: make(map[string]bool),
 	}
@@ -81,10 +103,22 @@ func main() {
 		}
 	}
 
-	log.Printf("Amber agent %s started (agent %s)", agentVersion, a.state.AgentID)
+	log.Printf("Amber agent %s started (agent %s, %s)", agentVersion, a.state.AgentID, platformTarget())
 	go a.worker()
 	a.pollLoop()
+
+	// Stopped: ctx is done, which cancels the running task's context too.
+	a.shuttingDown.Store(true)
+	log.Printf("agent stopping")
+	deadline := time.Now().Add(shutdownWait)
+	for atomic.LoadInt32(&a.active) > 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
 }
+
+// installDir holds the agent's state, configuration and (if the agent manages
+// it) restic.
+func installDir() string { return getenv("INSTALL_DIR", defaultInstallDir()) }
 
 // --- State persistence ------------------------------------------------------
 
@@ -92,8 +126,7 @@ func statePath() string {
 	if p := os.Getenv("AMBER_STATE"); p != "" {
 		return p
 	}
-	dir := getenv("INSTALL_DIR", "/opt/amber-agent")
-	return filepath.Join(dir, "state.json")
+	return filepath.Join(installDir(), "state.json")
 }
 
 func (a *agent) loadState() error {
@@ -153,28 +186,43 @@ func (a *agent) enroll(token string) error {
 
 // --- Poll loop --------------------------------------------------------------
 
+// context is the agent's lifetime context (background when unset, e.g. in tests).
+func (a *agent) context() context.Context {
+	if a.ctx == nil {
+		return context.Background()
+	}
+	return a.ctx
+}
+
+// pollLoop polls until the agent's context ends.
 func (a *agent) pollLoop() {
 	interval := 30 * time.Second
-	for {
-		tasks, next, latest, err := a.poll()
+	ctx := a.context()
+	for ctx.Err() == nil {
+		resp, resticVer, err := a.poll()
 		if err != nil {
 			log.Printf("poll error: %v", err)
 		} else {
-			if next > 0 {
-				interval = time.Duration(next) * time.Second
+			if resp.PollIntervalSeconds > 0 {
+				interval = time.Duration(resp.PollIntervalSeconds) * time.Second
 			}
 			// Hand claimed tasks to the worker without blocking, so polling
 			// continues as a heartbeat while a backup runs.
-			for i := range tasks {
-				a.enqueue(tasks[i])
+			for i := range resp.Tasks {
+				a.enqueue(resp.Tasks[i])
 			}
-			// Only self-update while idle: maybeSelfUpdate re-execs the process,
-			// which would abort an in-flight backup/restore.
+			// Only update while idle: maybeSelfUpdate restarts the process,
+			// which would abort an in-flight backup/restore, and restic must
+			// not be running while its binary is replaced.
 			if atomic.LoadInt32(&a.active) == 0 {
-				a.maybeSelfUpdate(latest) // re-execs on success and never returns
+				a.maybeUpdateRestic(resp.LatestResticVersion, resticVer)
+				a.maybeSelfUpdate(resp.LatestAgentVersion) // restarts on success and never returns
 			}
 		}
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+		case <-time.After(interval):
+		}
 	}
 }
 
@@ -207,17 +255,24 @@ func (a *agent) worker() {
 	}
 }
 
-func (a *agent) poll() ([]Task, int, string, error) {
+// poll sends the heartbeat and claims tasks; it also returns the restic
+// version it reported.
+func (a *agent) poll() (PollResponse, string, error) {
 	req := PollRequest{
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
-		Capabilities:  []string{"check", "stats"},
+		Capabilities:  a.capabilities(),
 	}
 	var resp PollResponse
 	if err := a.post("/api/agents/me/poll", a.state.AgentKey, req, &resp); err != nil {
-		return nil, 0, "", err
+		return PollResponse{}, req.ResticVersion, err
 	}
-	return resp.Tasks, resp.PollIntervalSeconds, resp.LatestAgentVersion, nil
+	return resp, req.ResticVersion, nil
+}
+
+// capabilities lists the task types beyond backup/restore this agent runs.
+func (a *agent) capabilities() []string {
+	return []string{"check", "stats"}
 }
 
 // --- Task execution ---------------------------------------------------------
@@ -229,7 +284,7 @@ var cancelPollInterval = 5 * time.Second
 func (a *agent) runTask(t *Task) {
 	// Every run task gets its own context, cancelled when the operator cancels
 	// the task on the server. A stats task has no run row to cancel.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(a.context())
 	defer cancel()
 	if t.Type != "stats" {
 		w := &cancelWatch{agent: a, taskID: t.TaskID, cancel: cancel}
@@ -436,9 +491,80 @@ func (a *agent) runRestore(ctx context.Context, t *Task) {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 	result := TaskResult{Status: "success"}
-	var lastProgress time.Time
 
-	code, err := a.runner.run(ctx, t, restoreArgs(t), func(msg map[string]any) {
+	steps, err := a.restoreSteps(ctx, t, appendLog)
+	if err == nil {
+		var totals map[string]any
+		for _, step := range steps {
+			stats, serr := a.restoreOnce(ctx, t, step, appendLog)
+			if serr != nil {
+				err = serr
+				break
+			}
+			totals = addRestoreStats(totals, stats)
+		}
+		result.Stats = totals
+	}
+
+	if ctx.Err() != nil {
+		a.cancelTask(t, logBuf.String())
+		return
+	}
+	if err != nil {
+		a.failTask(t, err.Error(), logBuf.String())
+		return
+	}
+	result.Log = logBuf.String()
+	a.postResult(t.TaskID, result)
+	log.Printf("restore task %s complete", t.TaskID)
+}
+
+// restoreSteps plans the restic restores a task needs: one, or on Windows for
+// the original location one per drive (see planDriveRestores).
+func (a *agent) restoreSteps(ctx context.Context, t *Task, appendLog func(string)) ([][]string, error) {
+	if runtime.GOOS != "windows" || !isOriginalLocation(t.TargetPath) {
+		return [][]string{restoreArgs(t)}, nil
+	}
+	includes := restoreIncludes(t)
+	var topLevel []string
+	if len(includes) == 0 {
+		var err error
+		if topLevel, err = a.snapshotTopLevel(ctx, t); err != nil {
+			return nil, err
+		}
+	}
+	plan := planDriveRestores(t.SnapshotID, includes, topLevel)
+	if len(plan) == 0 {
+		return nil, fmt.Errorf("nothing in the snapshot belongs to a drive, so it has no original location on this host; restore to a path instead")
+	}
+	steps := make([][]string, 0, len(plan))
+	for _, p := range plan {
+		appendLog(fmt.Sprintf("restoring drive %s: to %s", p.Drive, p.Target))
+		steps = append(steps, restoreArgsFor(p.Snapshot, p.Target, p.Includes, t.RestoreOptions))
+	}
+	return steps, nil
+}
+
+// snapshotTopLevel lists the snapshot's top-level directories (on Windows: one
+// per drive, e.g. /C).
+func (a *agent) snapshotTopLevel(ctx context.Context, t *Task) ([]string, error) {
+	var top []string
+	code, err := a.runner.run(ctx, t, []string{"ls", "--json", "--", t.SnapshotID, "/"}, func(msg map[string]any) {
+		if p, _ := msg["path"].(string); p != "" && strings.Count(p, "/") == 1 {
+			top = append(top, p)
+		}
+	}, nil)
+	if err != nil || code != 0 {
+		return nil, fmt.Errorf("listing snapshot %s exited %d: %v", t.SnapshotID, code, err)
+	}
+	return top, nil
+}
+
+// restoreOnce runs one restic restore, forwarding its progress.
+func (a *agent) restoreOnce(ctx context.Context, t *Task, args []string, appendLog func(string)) (map[string]any, error) {
+	var stats map[string]any
+	var lastProgress time.Time
+	code, err := a.runner.run(ctx, t, args, func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			if time.Since(lastProgress) > time.Second {
@@ -446,21 +572,13 @@ func (a *agent) runRestore(ctx context.Context, t *Task) {
 				a.postProgress(t.TaskID, restoreProgress(msg))
 			}
 		case "summary":
-			result.Stats = restoreSummaryToStats(msg)
+			stats = restoreSummaryToStats(msg)
 		}
 	}, appendLog)
-
-	if ctx.Err() != nil {
-		a.cancelTask(t, logBuf.String())
-		return
-	}
 	if err != nil || code != 0 {
-		a.failTask(t, fmt.Sprintf("restore exited %d: %v", code, err), logBuf.String())
-		return
+		return nil, fmt.Errorf("restore exited %d: %v", code, err)
 	}
-	result.Log = logBuf.String()
-	a.postResult(t.TaskID, result)
-	log.Printf("restore task %s complete", t.TaskID)
+	return stats, nil
 }
 
 // runCheck verifies the repository. Damage found by restic is reported as a
@@ -525,8 +643,13 @@ func (a *agent) failTask(t *Task, msg, logStr string) {
 	a.postResult(t.TaskID, TaskResult{Status: "failed", Error: msg, Log: logStr})
 }
 
-// cancelTask reports a task stopped because it was cancelled on the server.
+// cancelTask reports a task stopped because it was cancelled on the server —
+// or, when the agent itself is being stopped, as failed: nobody cancelled it.
 func (a *agent) cancelTask(t *Task, logStr string) {
+	if a.shuttingDown.Load() {
+		a.failTask(t, "The agent was stopped while this task ran.", logStr)
+		return
+	}
 	log.Printf("%s task %s cancelled", t.Type, t.TaskID)
 	a.postResult(t.TaskID, TaskResult{Status: "cancelled", Log: logStr})
 }
@@ -595,24 +718,14 @@ func getenv(key, def string) string {
 	return def
 }
 
-func detectOS() string {
-	if data, err := os.ReadFile("/etc/os-release"); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "PRETTY_NAME=") {
-				return strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), `"`)
-			}
-		}
-	}
-	return "linux"
-}
-
-// runScript executes a job script by path, directly (no shell, no arguments),
-// with a timeout, returning its combined output. The AMBER_* context is appended
-// to the agent's own environment.
+// runScript executes a job script by path, directly (no shell, no arguments;
+// PowerShell scripts via powershell.exe on Windows), with a timeout, returning
+// its combined output. The AMBER_* context is appended to the agent's own
+// environment.
 func runScript(path string, env []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path)
+	cmd := scriptCommand(ctx, path)
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err

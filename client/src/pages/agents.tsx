@@ -43,12 +43,14 @@ function MethodSelect({ value, onChange }: { value: string; onChange: (v: string
       <option value="binary">{t.binary}</option>
       <option value="docker">{t.docker}</option>
       <option value="docker-compose">{t.dockerCompose}</option>
+      <option value="windows">{t.windows}</option>
     </select>
   );
 }
 
 /** Instruction above the install command; with `validMinutes`, notes how long a one-time token lasts. */
 function intro(t: AgentsMessages['intro'], method: string, validMinutes?: number): string {
+  if (method === 'windows') return validMinutes != null ? t.powershellValid(validMinutes) : t.powershell;
   const compose = method === 'docker-compose';
   if (validMinutes != null) return compose ? t.composeValid(validMinutes) : t.runValid(validMinutes);
   return compose ? t.compose : t.run;
@@ -322,9 +324,11 @@ function GlobalRollout({ global, onClose }: { global: GlobalEnroll; onClose: () 
   const [method, setMethod] = useState('binary');
 
   const ready = !!name.trim();
+  // The Windows command carries the name in a PowerShell single-quoted literal.
+  const shownName = name.trim() || '<agent-name>';
   const shownCommand = (global.commands![method] ?? '').replaceAll(
     global.namePlaceholder,
-    name.trim() || '<agent-name>',
+    method === 'windows' ? shownName.replaceAll("'", "''") : shownName,
   );
 
   const copy = async (): Promise<void> => {

@@ -8,7 +8,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'crypto';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream, existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
 import { sql } from 'kysely';
@@ -38,6 +38,7 @@ import {
 import { RequestAgent } from '../common/auth/request-user';
 import { uniqueSlug } from '../common/slug';
 import { SETTINGS_KEYS } from '../settings/settings.service';
+import { AMBER_URL_MARKER, amberUrlLine, INSTALL_PS1 } from './install-windows';
 import {
   CreateEnrollmentTokenDto,
   EnrollDto,
@@ -48,6 +49,29 @@ import {
 
 /** Placeholder swapped for the operator-chosen agent name in rollout commands. */
 const NAME_PLACEHOLDER = '__AGENT_NAME__';
+
+/** os-arch targets the image bundles agent and restic binaries for. */
+export const AGENT_TARGETS = [
+  'linux-amd64',
+  'linux-arm64',
+  'windows-amd64',
+  'windows-arm64',
+] as const;
+
+export type DeployMethod = 'binary' | 'docker' | 'docker-compose' | 'windows';
+
+/** Bundle file name of a binary for a target (Windows binaries end in .exe). */
+function bundleFile(prefix: 'amber-agent' | 'restic', target: string): string {
+  return `${prefix}-${target}${target.startsWith('windows-') ? '.exe' : ''}`;
+}
+
+/** A URL that is safe to inject into the PowerShell single-quoted literal. */
+const SAFE_URL_RE = /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~/-]*)?$/;
+
+/** Quotes a value as a PowerShell single-quoted string literal. */
+function psQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
 
 /**
  * Task types an agent announces in its poll beyond the original backup and
@@ -148,7 +172,7 @@ export class AgentsService {
   }
 
   private installCommand(
-    method: 'binary' | 'docker' | 'docker-compose',
+    method: DeployMethod,
     baseUrl: string,
     token: string,
     name?: string,
@@ -156,6 +180,14 @@ export class AgentsService {
     const image = 'devpatf/amber-backup-agent:latest';
     // The agent reports AMBER_NAME as its own name on enrollment.
     const nameVal = name ?? '';
+    if (method === 'windows') {
+      // Pasted into an elevated PowerShell; every value is a quoted literal.
+      return (
+        `$env:AMBER_URL=${psQuote(baseUrl)}; $env:AMBER_TOKEN=${psQuote(token)}; ` +
+        `$env:AMBER_NAME=${psQuote(nameVal)}; ` +
+        `irm ${psQuote(`${baseUrl}/api/agents/install.ps1`)} | iex`
+      );
+    }
     if (method === 'docker') {
       return (
         `docker run -d --restart unless-stopped ` +
@@ -266,6 +298,7 @@ export class AgentsService {
       binary: this.installCommand('binary', baseUrl, g.token, NAME_PLACEHOLDER),
       docker: this.installCommand('docker', baseUrl, g.token, NAME_PLACEHOLDER),
       'docker-compose': this.installCommand('docker-compose', baseUrl, g.token, NAME_PLACEHOLDER),
+      windows: this.installCommand('windows', baseUrl, g.token, NAME_PLACEHOLDER),
     };
     return { enabled: true, token: g.token, commands, namePlaceholder: NAME_PLACEHOLDER };
   }
@@ -292,12 +325,17 @@ INSTALL_DIR="\${INSTALL_DIR:-/opt/amber-agent}"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 
-# Binary agents run the host's restic (the Docker image bundles its own). Abort
-# early if it is missing so we don't install an agent that can't back anything up.
-RESTIC_BIN="\${RESTIC_BINARY:-restic}"
-if ! command -v "$RESTIC_BIN" >/dev/null 2>&1; then
-  echo "Error: restic not found (\\"$RESTIC_BIN\\"). Install restic first (https://restic.net/#installation) or set RESTIC_BINARY to its full path, then re-run this installer." >&2
-  exit 1
+# Binary agents run the host's restic when it has one (or RESTIC_BINARY names
+# one). Otherwise the server's bundled restic is installed next to the agent,
+# which then keeps it at the server's version.
+BUNDLE_RESTIC=0
+if [ -n "\${RESTIC_BINARY:-}" ]; then
+  if ! command -v "$RESTIC_BINARY" >/dev/null 2>&1; then
+    echo "Error: RESTIC_BINARY not found (\\"$RESTIC_BINARY\\")." >&2
+    exit 1
+  fi
+elif [ -x "$INSTALL_DIR/restic" ] || ! command -v restic >/dev/null 2>&1; then
+  BUNDLE_RESTIC=1
 fi
 
 # A token is only needed for the first enrollment; a re-run of an already
@@ -316,6 +354,15 @@ if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/ambe
   exit 1
 fi
 chmod +x "$INSTALL_DIR/amber-agent.new"
+if [ "$BUNDLE_RESTIC" = 1 ]; then
+  echo "Installing the bundled restic into $INSTALL_DIR"
+  if ! curl -fsSL "$AMBER_URL/api/agents/restic/linux-$ARCH" -o "$INSTALL_DIR/restic.new"; then
+    echo "Failed to download restic for linux-$ARCH from $AMBER_URL" >&2
+    exit 1
+  fi
+  chmod +x "$INSTALL_DIR/restic.new"
+  mv "$INSTALL_DIR/restic.new" "$INSTALL_DIR/restic"
+fi
 
 # The enrollment token is a credential. Keep it out of the world-readable unit
 # file (0644) in a root-only environment file so an unprivileged local user
@@ -326,6 +373,7 @@ AMBER_URL=$AMBER_URL
 AMBER_TOKEN=$AMBER_TOKEN
 AMBER_NAME=$AMBER_NAME
 INSTALL_DIR=$INSTALL_DIR
+RESTIC_BINARY=\${RESTIC_BINARY:-}
 EOF
 chmod 600 "$INSTALL_DIR/agent.env"
 
@@ -355,23 +403,83 @@ echo "Amber agent installed and started."
 `;
   }
 
+  /**
+   * The Windows installer with this server's URL as its default. A URL that
+   * could break out of the PowerShell literal is not injected (the operator
+   * then passes AMBER_URL, which the rollout command always does).
+   */
+  installPowerShellScript(): string {
+    const baseUrl = loadConfig().publicBaseUrl.replace(/\/+$/, '');
+    if (!SAFE_URL_RE.test(baseUrl)) return INSTALL_PS1;
+    return INSTALL_PS1.split('\n')
+      .map((line) =>
+        line.trim() === AMBER_URL_MARKER
+          ? line.slice(0, line.length - line.trimStart().length) + amberUrlLine(baseUrl)
+          : line,
+      )
+      .join('\n');
+  }
+
   /** Streams the compiled agent binary for the given os-arch target. */
   binary(target: string): StreamableFile {
-    const allowed = ['linux-amd64', 'linux-arm64'];
-    if (!allowed.includes(target)) {
+    return this.bundled('amber-agent', target, 'Agent binary');
+  }
+
+  /** Streams the bundled restic for the given os-arch target. */
+  resticBinary(target: string): StreamableFile {
+    return this.bundled('restic', target, 'restic');
+  }
+
+  /** SHA-256 checksums of the bundled binaries (`sha256sum` format). */
+  checksums(): string {
+    const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'SHA256SUMS');
+    if (!existsSync(file)) {
+      throw new NotFoundException('No checksums are bundled on this server');
+    }
+    return readFileSync(file, 'utf8');
+  }
+
+  private bundled(
+    prefix: 'amber-agent' | 'restic',
+    target: string,
+    label: string,
+  ): StreamableFile {
+    if (!(AGENT_TARGETS as readonly string[]).includes(target)) {
       throw new NotFoundException(`Unsupported agent target: ${target}`);
     }
-    const dir = path.resolve(loadConfig().agentBinaryDir);
-    const file = path.join(dir, `amber-agent-${target}`);
+    const name = bundleFile(prefix, target);
+    const file = path.join(path.resolve(loadConfig().agentBinaryDir), name);
     if (!existsSync(file)) {
       throw new NotFoundException(
-        `Agent binary for ${target} is not available on this server`,
+        `${label} for ${target} is not available on this server`,
       );
     }
+    const download = `${prefix}${target.startsWith('windows-') ? '.exe' : ''}`;
     return new StreamableFile(createReadStream(file), {
       type: 'application/octet-stream',
-      disposition: 'attachment; filename="amber-agent"',
+      disposition: `attachment; filename="${download}"`,
     });
+  }
+
+  private cachedResticVersion: string | null | undefined;
+
+  /**
+   * Version of the bundled restic, read from `<agentBinaryDir>/restic-version`
+   * (written at image build time). Agents that manage their own restic follow
+   * it; null (e.g. local dev) advertises nothing.
+   */
+  latestResticVersion(): string | null {
+    if (this.cachedResticVersion === undefined) {
+      try {
+        const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'restic-version');
+        this.cachedResticVersion = existsSync(file)
+          ? readFileSync(file, 'utf8').trim() || null
+          : null;
+      } catch {
+        this.cachedResticVersion = null;
+      }
+    }
+    return this.cachedResticVersion;
   }
 
   private cachedAgentVersion: string | null | undefined;
@@ -526,6 +634,7 @@ echo "Amber agent installed and started."
     tasks: AgentTask[];
     pollIntervalSeconds: number;
     latestAgentVersion?: string;
+    latestResticVersion?: string;
   }> {
     const row = await this.db
       .updateTable('agents')
@@ -558,6 +667,7 @@ echo "Amber agent installed and started."
       tasks,
       pollIntervalSeconds: row?.poll_interval_seconds ?? 30,
       latestAgentVersion: this.latestAgentVersion() ?? undefined,
+      latestResticVersion: this.latestResticVersion() ?? undefined,
     };
   }
 

@@ -3,8 +3,12 @@ export const agents = {
     binary: 'Binary (systemd)',
     docker: 'Docker',
     dockerCompose: 'Docker Compose',
+    windows: 'Windows (PowerShell, service)',
   },
   intro: {
+    powershell: 'Run in an elevated PowerShell (Run as administrator) on the target host. It installs the agent with the bundled restic as a Windows service:',
+    powershellValid: (minutes: number) =>
+      `Run in an elevated PowerShell (Run as administrator) on the target host, valid for ${minutes} min. It installs the agent with the bundled restic as a Windows service:`,
     compose: 'Save as docker-compose.yml on the target server, then run "docker compose up -d":',
     run: 'Run on the target server:',
     composeValid: (minutes: number) =>
