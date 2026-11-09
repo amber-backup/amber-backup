@@ -68,8 +68,14 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Windows ]; then GOOS=linux go vet ./...; else GOOS=windows go vet ./...; fi
+      # The Hyper-V end-to-end test drives the simulated host with a real restic.
+      - name: Install restic
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq restic
       - run: go test -race ./...
         if: runner.os == 'Linux'
+        env:
+          AMBER_TEST_RESTIC: /usr/bin/restic
       - run: go test ./...
         if: runner.os == 'Windows'
       - name: Cross-compile every bundled target

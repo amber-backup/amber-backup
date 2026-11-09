@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { isValidAllowlistEntry } from '../../common/ip-allowlist';
+import { HypervInventoryDto } from '../../hyperv/dto/hyperv.dto';
 import {
   ArrayMaxSize,
   IsArray,
@@ -256,6 +257,15 @@ export class TaskResultDto {
   @IsString()
   @MaxLength(20_000)
   repoStatsError?: string;
+
+  @ApiPropertyOptional({
+    type: HypervInventoryDto,
+    description: 'For a hyperv-inventory task: the VMs of the host',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HypervInventoryDto)
+  hypervInventory?: HypervInventoryDto;
 
   @ApiPropertyOptional({
     description: 'For a check: restic reported integrity errors (status is then failed)',

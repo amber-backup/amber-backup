@@ -47,6 +47,7 @@ COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/VERSION ./
 COPY agent/*.go ./
+COPY agent/hyperv ./hyperv
 RUN for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do \
       os="${t%/*}"; arch="${t#*/}"; ext=""; [ "$os" = windows ] && ext=".exe"; \
       CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
@@ -94,7 +95,7 @@ FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS agent-bundle
 WORKDIR /bundle
 COPY --from=agent-build /out/ ./
 COPY --from=restic-build /out/ ./
-RUN sha256sum amber-agent-* restic-* > SHA256SUMS
+RUN sha256sum amber-agent-* restic-linux-* restic-windows-* > SHA256SUMS
 
 # --- Stage 6: runtime ---
 FROM ${NODE_IMAGE} AS runtime

@@ -13,6 +13,7 @@ import { SecretsService } from '../crypto/secrets.service';
 import { RequestUser } from '../common/auth/request-user';
 import {
   BackupJobRow,
+  HypervJobConfig,
   IntegrityCheckConfig,
   JobRun,
   RunTrigger,
@@ -132,6 +133,38 @@ export class JobsService {
     return out;
   }
 
+  /** Validates a Hyper-V job's host and VM selection; the job runs on the host's agent. */
+  private async resolveHypervSource(
+    hostId: string | undefined,
+    config: HypervJobConfig | undefined,
+  ): Promise<{ hostId: string; agentId: string; config: HypervJobConfig }> {
+    if (!hostId || !config) {
+      throw new BadRequestException('A Hyper-V job needs a host and a VM selection');
+    }
+    const host = await this.db
+      .selectFrom('hyperv_hosts')
+      .select(['id', 'agent_id'])
+      .where('id', '=', hostId)
+      .executeTakeFirst();
+    if (!host) throw new BadRequestException('Unknown Hyper-V host');
+    const vmIds = [...new Set(config.vmIds.map((v) => v.toLowerCase()))];
+    if (!config.allVms && vmIds.length === 0) {
+      throw new BadRequestException('Select at least one VM, or all VMs of the host');
+    }
+    return {
+      hostId: host.id,
+      agentId: host.agent_id,
+      config: {
+        allVms: config.allVms,
+        vmIds: config.allVms ? [] : vmIds,
+        excludeVmIds: config.allVms
+          ? [...new Set((config.excludeVmIds ?? []).map((v) => v.toLowerCase()))]
+          : [],
+        checkpointMode: config.checkpointMode ?? 'Production',
+      },
+    };
+  }
+
   nextRun(expr: string): Date | null {
     try {
       return parser
@@ -240,6 +273,17 @@ export class JobsService {
       dto.repoCredentials ?? {},
     );
 
+    // A Hyper-V job reads the VMs of one host, on that host's agent.
+    const hyperv =
+      dto.sourceKind === 'hyperv'
+        ? await this.resolveHypervSource(dto.hypervHostId, dto.hypervConfig)
+        : null;
+    if (hyperv) {
+      dto.location = 'agent';
+      dto.agentId = hyperv.agentId;
+      dto.paths = [];
+    }
+
     if (dto.location === 'agent') {
       if (!dto.agentId) {
         throw new BadRequestException('agentId is required for agent jobs');
@@ -296,6 +340,9 @@ export class JobsService {
           location: dto.location,
           agent_id: dto.location === 'agent' ? dto.agentId! : null,
           paths: JSON.stringify(dto.paths),
+          source_kind: hyperv ? 'hyperv' : 'files',
+          hyperv_host_id: hyperv?.hostId ?? null,
+          hyperv_config: hyperv ? JSON.stringify(hyperv.config) : null,
           repository_id: repo.id,
           cron_expr: dto.cronExpr,
           restic_options: JSON.stringify(dto.resticOptions ?? {}),
@@ -338,6 +385,8 @@ export class JobsService {
       dto.location !== undefined ||
       dto.agentId !== undefined ||
       dto.paths !== undefined ||
+      dto.hypervHostId !== undefined ||
+      dto.hypervConfig !== undefined ||
       dto.resticOptions !== undefined;
     if (touchesHost && !user.isAdmin) {
       throw new ForbiddenException(
@@ -346,6 +395,22 @@ export class JobsService {
     }
     if (dto.cronExpr) this.validateCron(dto.cronExpr);
     const job = await this.getRow(id);
+
+    // A Hyper-V job stays one: it always runs on its host's agent and has no
+    // paths. A file job can't take Hyper-V settings.
+    const isHyperv = job.source_kind === 'hyperv';
+    if (isHyperv) {
+      if (dto.location === 'local') {
+        throw new BadRequestException('A Hyper-V job runs on its host\'s agent');
+      }
+      if (dto.paths !== undefined && dto.paths.length > 0) {
+        throw new BadRequestException('A Hyper-V job backs up VMs, not paths');
+      }
+      dto.agentId = undefined;
+      dto.paths = undefined;
+    } else if (dto.hypervHostId !== undefined || dto.hypervConfig !== undefined) {
+      throw new BadRequestException('Hyper-V settings only apply to Hyper-V jobs');
+    }
 
     // Guard against a local repo on an agent job, considering the effective
     // values after this update (either field may be changing here).
@@ -375,6 +440,16 @@ export class JobsService {
     if (dto.agentId !== undefined) jobPatch.agent_id = dto.agentId;
     if (dto.location === 'local') jobPatch.agent_id = null;
     if (dto.paths !== undefined) jobPatch.paths = JSON.stringify(dto.paths);
+    if (isHyperv && (dto.hypervHostId !== undefined || dto.hypervConfig !== undefined)) {
+      const current = job.hyperv_config as HypervJobConfig | null;
+      const hyperv = await this.resolveHypervSource(
+        dto.hypervHostId ?? job.hyperv_host_id ?? undefined,
+        dto.hypervConfig ?? (typeof current === 'string' ? JSON.parse(current) : current) ?? undefined,
+      );
+      jobPatch.hyperv_host_id = hyperv.hostId;
+      jobPatch.hyperv_config = JSON.stringify(hyperv.config);
+      jobPatch.agent_id = hyperv.agentId;
+    }
     if (dto.cronExpr !== undefined) jobPatch.cron_expr = dto.cronExpr;
     if (dto.resticOptions !== undefined)
       jobPatch.restic_options = JSON.stringify(dto.resticOptions);

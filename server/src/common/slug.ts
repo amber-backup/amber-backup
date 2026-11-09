@@ -6,6 +6,7 @@ export type SlugTable =
   | 'targets'
   | 'repositories'
   | 'agents'
+  | 'hyperv_hosts'
   | 'backup_jobs'
   | 'notification_channels'
   | 'reports';

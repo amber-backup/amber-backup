@@ -13,8 +13,11 @@ import {
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ResticOptions, JobNotifyConfig } from '../../database/database.types';
+import { HypervJobConfigDto } from '../../hyperv/dto/hyperv.dto';
 
 export class CreateJobDto {
   @ApiProperty()
@@ -22,20 +25,44 @@ export class CreateJobDto {
   @MinLength(1)
   name!: string;
 
-  @ApiProperty({ enum: ['local', 'agent'], description: 'Where the data lives' })
+  @ApiPropertyOptional({
+    enum: ['files', 'hyperv'],
+    default: 'files',
+    description: 'files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent)',
+  })
+  @IsOptional()
+  @IsIn(['files', 'hyperv'])
+  sourceKind?: 'files' | 'hyperv';
+
+  @ApiProperty({
+    enum: ['local', 'agent'],
+    description: 'Where the data lives (a Hyper-V job always runs on its host\'s agent)',
+  })
   @IsIn(['local', 'agent'])
   location!: 'local' | 'agent';
 
-  @ApiPropertyOptional({ description: 'Required when location = agent' })
-  @ValidateIf((o) => o.location === 'agent')
+  @ApiPropertyOptional({ description: 'Required when location = agent (not for Hyper-V jobs)' })
+  @ValidateIf((o) => o.location === 'agent' && o.sourceKind !== 'hyperv')
   @IsUUID()
   agentId?: string;
 
-  @ApiProperty({ type: [String], example: ['/home', '/etc'] })
+  @ApiProperty({ type: [String], example: ['/home', '/etc'], description: 'Not used by Hyper-V jobs' })
+  @ValidateIf((o) => o.sourceKind !== 'hyperv')
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
   paths!: string[];
+
+  @ApiPropertyOptional({ description: 'Hyper-V jobs: the host whose VMs are backed up' })
+  @ValidateIf((o) => o.sourceKind === 'hyperv')
+  @IsUUID()
+  hypervHostId?: string;
+
+  @ApiPropertyOptional({ type: HypervJobConfigDto, description: 'Hyper-V jobs: VM selection' })
+  @ValidateIf((o) => o.sourceKind === 'hyperv')
+  @ValidateNested()
+  @Type(() => HypervJobConfigDto)
+  hypervConfig?: HypervJobConfigDto;
 
   @ApiPropertyOptional({
     description: 'Shared connection the repository lives on; omit for a local repo',
@@ -166,6 +193,17 @@ export class UpdateJobDto {
   @IsArray()
   @IsString({ each: true })
   paths?: string[];
+
+  @ApiPropertyOptional({ description: 'Hyper-V jobs: move to another host' })
+  @IsOptional()
+  @IsUUID()
+  hypervHostId?: string;
+
+  @ApiPropertyOptional({ type: HypervJobConfigDto, description: 'Hyper-V jobs: VM selection' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HypervJobConfigDto)
+  hypervConfig?: HypervJobConfigDto;
 
   @ApiPropertyOptional({ description: 'Connection id, or null for a local repo' })
   @IsOptional()

@@ -49,11 +49,12 @@ export type RunStatus =
   | 'success'
   | 'failed'
   | 'cancelled';
-export type RestoreMode = 'original' | 'alternate_path' | 'download';
+export type RestoreMode = 'original' | 'alternate_path' | 'download' | 'hyperv';
 export type SecretType =
   | 'repo_password'
   | 'backend_credential'
-  | 'notification_credential';
+  | 'notification_credential'
+  | 'hyperv_credential';
 export type TaskType = 'backup' | 'restore' | 'snapshots' | 'ls' | 'check';
 /**
  * How much of a repository an integrity check verifies: 'quick' checks the
@@ -298,6 +299,79 @@ export type Agent = Selectable<AgentsTable>;
 export type NewAgent = Insertable<AgentsTable>;
 export type AgentUpdate = Updateable<AgentsTable>;
 
+// --- hyperv_hosts -----------------------------------------------------------
+
+/** local: the agent runs on the Hyper-V host; remote: a proxy agent drives it. */
+export type HypervHostMode = 'local' | 'remote';
+
+/** One virtual disk of a VM, as the agent's inventory reports it. */
+export interface HypervDisk {
+  /** Path on the Hyper-V host (the VM's current disk, maybe a checkpoint .avhdx). */
+  path: string;
+  controllerType: string;
+  controllerNumber: number;
+  controllerLocation: number;
+  /** Bytes the disk file occupies on the host. */
+  fileSizeBytes: number;
+  /** Maximum size of the virtual disk. */
+  sizeBytes: number;
+}
+
+/** A virtual machine in a host's inventory. */
+export interface HypervVm {
+  /** Hyper-V's VM id (GUID) — stable across renames, what jobs reference. */
+  id: string;
+  name: string;
+  /** Running, Off, Saved, Paused, … */
+  state: string;
+  generation: number;
+  version: string;
+  processorCount: number;
+  memoryStartupBytes: number;
+  /** Production, ProductionOnly or Standard (the VM's checkpoint setting). */
+  checkpointType: string;
+  /** Whether the guest's backup integration service (VSS) is available, which a production checkpoint needs. */
+  backupIntegration: boolean;
+  /** Folder of the VM's configuration files. */
+  configurationLocation: string;
+  disks: HypervDisk[];
+  /** Checkpoints Amber left behind (amber-*), e.g. after a crash. */
+  staleCheckpoints: string[];
+  notes?: string;
+}
+
+/** What an agent reports about a Hyper-V host. */
+export interface HypervInventory {
+  computerName: string;
+  /** Windows edition and build of the host. */
+  os: string;
+  vms: HypervVm[];
+}
+
+export interface HypervHostsTable {
+  id: Generated<string>;
+  name: string;
+  slug: string;
+  mode: ColumnType<HypervHostMode, HypervHostMode | undefined, HypervHostMode>;
+  agent_id: string;
+  address: string | null;
+  credential_secret_id: string | null;
+  inventory: JSONColumnType<HypervInventory | null, string | null, string | null>;
+  inventory_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  inventory_error: string | null;
+  inventory_requested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  owner_id: string;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+export type HypervHost = Selectable<HypervHostsTable>;
+
+/** Credentials of a remote Hyper-V host (stored as a hyperv_credential secret). */
+export interface HypervCredential {
+  username: string;
+  password: string;
+}
+
 // --- enrollment_tokens ------------------------------------------------------
 
 export interface EnrollmentTokensTable {
@@ -388,11 +462,35 @@ export interface JobNotifyConfig {
   onFailure?: boolean;
 }
 
+/** What a backup job reads: host paths, or the VMs of a Hyper-V host. */
+export type SourceKind = 'files' | 'hyperv';
+
+/**
+ * Production: application-consistent checkpoint (guest VSS), falling back to a
+ * crash-consistent standard checkpoint when the guest can't do one.
+ * ProductionOnly: fail the VM instead of falling back.
+ */
+export type HypervCheckpointMode = 'Production' | 'ProductionOnly';
+
+/** Which VMs a Hyper-V job backs up, and how (`backup_jobs.hyperv_config`). */
+export interface HypervJobConfig {
+  /** Every VM of the host, including VMs created later (minus excludeVmIds). */
+  allVms: boolean;
+  /** VM ids (GUIDs) to back up when allVms is false. */
+  vmIds: string[];
+  excludeVmIds?: string[];
+  checkpointMode?: HypervCheckpointMode;
+}
+
 export interface BackupJobsTable {
   id: Generated<string>;
   name: string;
   /** Name-derived, unique, kebab-case identifier; maintained by the app. */
   slug: string;
+  source_kind: ColumnType<SourceKind, SourceKind | undefined, SourceKind>;
+  /** For source_kind = hyperv: the host and its VM selection. */
+  hyperv_host_id: string | null;
+  hyperv_config: JSONColumnType<HypervJobConfig | null, string | null | undefined, string | null>;
   /** Where the data lives (embedded, formerly the sources table). */
   location: SourceLocation;
   agent_id: string | null;
@@ -519,9 +617,31 @@ export interface RestoreOptions {
   exclude?: string[];
 }
 
+/**
+ * vm: restore the VM's files and register it as a new VM (new id, optionally
+ * a new name) or, with replaceOriginal, in place of the original VM.
+ * disks: only restore the virtual disk files into `path`.
+ */
+export interface HypervRestoreSpec {
+  hostId: string;
+  /** Id of the backed-up VM (from the snapshot's vm:<id> tag). */
+  vmId: string;
+  action: 'vm' | 'disks';
+  /** Name of the restored VM (default: original name + " (restored)"). */
+  newName?: string;
+  /** Replace the original VM (same id); it is stopped and removed first. */
+  replaceOriginal?: boolean;
+  /** Start the VM after registering it. */
+  start?: boolean;
+  /** Keep the network adapters connected to their switches (off by default to avoid duplicate addresses). */
+  connectNetwork?: boolean;
+}
+
 export interface RestoreDestination {
-  /** For alternate_path / original: filesystem path. */
+  /** For alternate_path / original: filesystem path. hyperv: folder on the host for the VM's files. */
   path?: string;
+  /** For hyperv mode. */
+  hyperv?: HypervRestoreSpec;
   /** When restoring onto an agent host. */
   agentId?: string;
   /** For download mode: server-side artifact reference. */
@@ -703,6 +823,7 @@ export interface Database {
   repositories: RepositoriesTable;
   repository_stats_history: RepositoryStatsHistoryTable;
   agents: AgentsTable;
+  hyperv_hosts: HypervHostsTable;
   enrollment_tokens: EnrollmentTokensTable;
   app_settings: AppSettingsTable;
   backup_jobs: BackupJobsTable;

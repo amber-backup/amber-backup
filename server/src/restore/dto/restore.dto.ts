@@ -10,6 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { RestoreOptions } from '../../database/database.types';
+import { HypervRestoreSpecDto } from '../../hyperv/dto/hyperv.dto';
 
 export class RestoreDestinationDto {
   @ApiPropertyOptional({ description: 'Filesystem path for original/alternate restore' })
@@ -21,6 +22,15 @@ export class RestoreDestinationDto {
   @IsOptional()
   @IsUUID()
   agentId?: string;
+
+  @ApiPropertyOptional({
+    type: HypervRestoreSpecDto,
+    description: 'hyperv mode: which VM, onto which host, and how',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HypervRestoreSpecDto)
+  hyperv?: HypervRestoreSpecDto;
 }
 
 export class CreateRestoreDto {
@@ -38,9 +48,12 @@ export class CreateRestoreDto {
   @IsString({ each: true })
   includedPaths?: string[];
 
-  @ApiProperty({ enum: ['original', 'alternate_path', 'download'] })
-  @IsIn(['original', 'alternate_path', 'download'])
-  mode!: 'original' | 'alternate_path' | 'download';
+  @ApiProperty({
+    enum: ['original', 'alternate_path', 'download', 'hyperv'],
+    description: 'hyperv: register a backed-up VM (or restore its disks) on a Hyper-V host',
+  })
+  @IsIn(['original', 'alternate_path', 'download', 'hyperv'])
+  mode!: 'original' | 'alternate_path' | 'download' | 'hyperv';
 
   @ApiPropertyOptional({
     description: 'Destination: { path } or { agentId, path } for original/alternate',

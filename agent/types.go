@@ -97,6 +97,8 @@ type Task struct {
 	// check: "quick", "rotating" or "full"; CheckSubset is "part/parts" for rotating.
 	CheckLevel  string `json:"checkLevel,omitempty"`
 	CheckSubset string `json:"checkSubset,omitempty"`
+	// hyperv-inventory, hyperv-backup, hyperv-restore
+	Hyperv *HypervTask `json:"hyperv,omitempty"`
 }
 
 type PollResponse struct {
@@ -132,8 +134,10 @@ type TaskResult struct {
 	// read failed. Mirrors the server's RepoStatsDto.
 	RepoStats      *RepoStats `json:"repoStats,omitempty"`
 	RepoStatsError string     `json:"repoStatsError,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Log            string     `json:"log,omitempty"`
+	// For a hyperv-inventory task: the host's VMs.
+	HypervInventory *HypervInventory `json:"hypervInventory,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	Log             string           `json:"log,omitempty"`
 }
 
 // RepoStats mirrors the server's RepoStatsDto.

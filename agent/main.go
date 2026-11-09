@@ -37,6 +37,8 @@ type agent struct {
 	http    *http.Client
 	state   State
 	runner  *resticRunner
+	// hyperv drives Hyper-V hosts; nil when this agent can't (not Windows, no mock).
+	hyperv hypervBackend
 
 	// ctx ends when the agent is stopped (Windows service stop); running tasks
 	// derive their context from it. shuttingDown tells such a stop apart from
@@ -89,6 +91,7 @@ func runAgent(ctx context.Context) {
 		baseURL:  baseURL,
 		http:     &http.Client{Timeout: 60 * time.Second},
 		runner:   newResticRunner(),
+		hyperv:   newHypervBackend(),
 		ctx:      ctx,
 		tasks:    make(chan Task, 64),
 		inflight: make(map[string]bool),
@@ -272,7 +275,11 @@ func (a *agent) poll() (PollResponse, string, error) {
 
 // capabilities lists the task types beyond backup/restore this agent runs.
 func (a *agent) capabilities() []string {
-	return []string{"check", "stats"}
+	caps := []string{"check", "stats"}
+	if a.hyperv != nil {
+		caps = append(caps, "hyperv")
+	}
+	return caps
 }
 
 // --- Task execution ---------------------------------------------------------
@@ -286,7 +293,7 @@ func (a *agent) runTask(t *Task) {
 	// the task on the server. A stats task has no run row to cancel.
 	ctx, cancel := context.WithCancel(a.context())
 	defer cancel()
-	if t.Type != "stats" {
+	if t.Type != "stats" && t.Type != "hyperv-inventory" {
 		w := &cancelWatch{agent: a, taskID: t.TaskID, cancel: cancel}
 		// A task cancelled while it waited behind another one never starts.
 		if w.check(ctx) {
@@ -306,6 +313,12 @@ func (a *agent) runTask(t *Task) {
 		a.runCheck(ctx, t)
 	case "stats":
 		a.runStats(ctx, t)
+	case "hyperv-inventory":
+		a.runHypervInventory(ctx, t)
+	case "hyperv-backup":
+		a.runHypervBackup(ctx, t)
+	case "hyperv-restore":
+		a.runHypervRestore(ctx, t)
 	default:
 		log.Printf("unknown task type: %s", t.Type)
 	}
@@ -357,10 +370,55 @@ func (w *cancelWatch) check(ctx context.Context) bool {
 }
 
 func (a *agent) runBackup(ctx context.Context, t *Task) {
+	a.runBackupFlow(ctx, t, a.backupFiles, retentionForgetArgs)
+}
+
+// backupBody runs the backup proper and fills the result's snapshot and stats;
+// an error fails the run.
+type backupBody func(ctx context.Context, t *Task, result *TaskResult, appendLog func(string)) error
+
+// backupFiles backs up the task's paths with one restic run.
+func (a *agent) backupFiles(ctx context.Context, t *Task, result *TaskResult, appendLog func(string)) error {
+	var lastProgress time.Time
+	code, err := a.runner.run(ctx, t, backupArgs(t), func(msg map[string]any) {
+		switch msg["message_type"] {
+		case "status":
+			if time.Since(lastProgress) > time.Second {
+				lastProgress = time.Now()
+				// Forward live progress (percentage + bytes/files done vs total).
+				a.postProgress(t.TaskID, map[string]any{
+					"percentDone": msg["percent_done"],
+					"bytesDone":   msg["bytes_done"],
+					"totalBytes":  msg["total_bytes"],
+					"filesDone":   msg["files_done"],
+					"totalFiles":  msg["total_files"],
+				})
+			}
+		case "summary":
+			result.SnapshotID, _ = msg["snapshot_id"].(string)
+			result.Stats = summaryToStats(msg)
+		}
+	}, appendLog)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Exit 3: some files could not be read; the snapshot exists anyway.
+	if err != nil || (code != 0 && code != 3) {
+		return fmt.Errorf("backup exited %d: %v", code, err)
+	}
+	return nil
+}
+
+// retentionForgetArgs is the forget of a file backup's retention.
+func retentionForgetArgs(ret *Retention) []string { return forgetArgs(ret) }
+
+// runBackupFlow is what every backup shares around its body: the pre-script
+// gate, repository init, retention (forget + prune), the repository figures
+// and the post scripts.
+func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, forget func(*Retention) []string) {
 	var logBuf strings.Builder
 	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
 	result := TaskResult{Status: "success"}
-	var lastProgress time.Time
 
 	// handleFailure runs the on-failure script (best-effort) and reports the run
 	// as failed — or as cancelled once the operator stopped it. The script runs
@@ -382,7 +440,12 @@ func (a *agent) runBackup(ctx context.Context, t *Task) {
 			a.cancelTask(t, logBuf.String())
 			return
 		}
-		a.failTask(t, msg, logBuf.String())
+		// A partly failed Hyper-V backup still made snapshots; keep its stats.
+		a.postResult(t.TaskID, TaskResult{
+			Status: "failed", Error: msg, Log: logBuf.String(),
+			SnapshotID: result.SnapshotID, Stats: result.Stats,
+		})
+		log.Printf("task %s failed: %s", t.TaskID, msg)
 	}
 
 	// Pre-backup script gates the run: a non-zero exit aborts the backup.
@@ -403,26 +466,7 @@ func (a *agent) runBackup(ctx context.Context, t *Task) {
 		return
 	}
 
-	code, err := a.runner.run(ctx, t, backupArgs(t), func(msg map[string]any) {
-		switch msg["message_type"] {
-		case "status":
-			if time.Since(lastProgress) > time.Second {
-				lastProgress = time.Now()
-				// Forward live progress (percentage + bytes/files done vs total).
-				a.postProgress(t.TaskID, map[string]any{
-					"percentDone": msg["percent_done"],
-					"bytesDone":   msg["bytes_done"],
-					"totalBytes":  msg["total_bytes"],
-					"filesDone":   msg["files_done"],
-					"totalFiles":  msg["total_files"],
-				})
-			}
-		case "summary":
-			result.SnapshotID, _ = msg["snapshot_id"].(string)
-			result.Stats = summaryToStats(msg)
-		}
-	}, appendLog)
-
+	err := body(ctx, t, &result, appendLog)
 	if ctx.Err() != nil {
 		if result.SnapshotID != "" {
 			appendLog("backup finished before the cancel took effect: snapshot " + result.SnapshotID)
@@ -430,15 +474,15 @@ func (a *agent) runBackup(ctx context.Context, t *Task) {
 		handleFailure("")
 		return
 	}
-	if err != nil || (code != 0 && code != 3) {
-		handleFailure(fmt.Sprintf("backup exited %d: %v", code, err))
+	if err != nil {
+		handleFailure(err.Error())
 		return
 	}
 
 	// Retention as part of the run (§7). Only the forget happens inside the
 	// backup; the prune it may ask for is reported as an activity of its own.
 	if t.Options != nil && hasRetention(t.Options.Retention) {
-		fcode, ferr := a.runner.run(ctx, t, forgetArgs(t.Options.Retention), nil, appendLog)
+		fcode, ferr := a.runner.run(ctx, t, forget(t.Options.Retention), nil, appendLog)
 		if ferr != nil || fcode != 0 {
 			appendLog(fmt.Sprintf("forget failed: code=%d err=%v", fcode, ferr))
 		} else if t.Options.Retention.Prune {
@@ -467,7 +511,7 @@ func (a *agent) runBackup(ctx context.Context, t *Task) {
 
 	result.Log = logBuf.String()
 	a.postResult(t.TaskID, result)
-	log.Printf("backup task %s complete (snapshot %s)", t.TaskID, result.SnapshotID)
+	log.Printf("%s task %s complete (snapshot %s)", t.Type, t.TaskID, result.SnapshotID)
 }
 
 // runPrune reclaims unreferenced storage after a backup's forget. It is timed
