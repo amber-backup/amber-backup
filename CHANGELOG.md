@@ -1,3 +1,10 @@
+## [1.41.2](https://github.com/amber-backup/amber-backup/compare/v1.41.1...v1.41.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* resolve the critical and high findings of the robustness, UI and UX review ([68a4735](https://github.com/amber-backup/amber-backup/commit/68a4735b59f0315cbf286749b32f6a842d6df1ae))
+
 ## [1.41.1](https://github.com/amber-backup/amber-backup/compare/v1.41.0...v1.41.1) (2026-11-14)
 
 
