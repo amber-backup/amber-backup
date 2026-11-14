@@ -12,6 +12,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { RunsModule } from './runs/runs.module';
 import { RestoreModule } from './restore/restore.module';
 import { AgentsModule } from './agents/agents.module';
+import { HypervModule } from './hyperv/hyperv.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
@@ -38,6 +39,7 @@ import { StaticModule } from './static.module';
     RunsModule,
     RestoreModule,
     AgentsModule,
+    HypervModule,
     NotificationsModule,
     ReportsModule,
     SettingsModule,

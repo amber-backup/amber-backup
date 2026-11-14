@@ -11,9 +11,11 @@ FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY VERSION ./
 COPY *.go ./
+COPY hyperv ./hyperv
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /amber-agent .
 
 # --- Build restic from source ---

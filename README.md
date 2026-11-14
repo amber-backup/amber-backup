@@ -93,8 +93,20 @@ docker run -d --restart unless-stopped \
   devpatf/amber-backup-agent:latest
 ```
 
+```powershell
+# Windows (elevated PowerShell; installs the AmberAgent service)
+$env:AMBER_URL='https://backup.example.com'; $env:AMBER_TOKEN='<token>'; $env:AMBER_NAME='<name>'; irm 'https://backup.example.com/api/agents/install.ps1' | iex
+```
+
 The agent enrolls, then polls for backup, restore and integrity check tasks and runs restic locally.
-Binary agents use the host's system restic; the Docker agent bundles a pinned one.
+Linux binary agents use the host's restic when it has one and otherwise install the server's bundled
+build next to the agent. Windows agents always run the bundled restic from `%ProgramData%\AmberAgent`
+(checked against the server's `SHA256SUMS`). An agent-managed restic follows the server's version on
+its own, like the agent itself. The Docker agent bundles a pinned restic.
+
+On Windows, jobs can back up from a VSS snapshot (job option *Use a VSS snapshot*), so open and
+locked files are read consistently. A restore to the original location restores each drive
+(`/C/…` in the snapshot) to its own root.
 
 Build the agent locally:
 
@@ -102,6 +114,39 @@ Build the agent locally:
 cd agent && go build -o bin/amber-agent .      # binary
 docker build -t amber-agent ./agent            # image
 ```
+
+## Hyper-V
+
+Under **Hyper-V**, add a host and pick the Windows agent that reaches it:
+
+- **Agent on the host** (recommended): the agent installed on the Hyper-V host takes the
+  checkpoints and reads the disks itself.
+- **Remote**: another Windows agent drives the host over PowerShell remoting (WinRM) with a
+  stored, encrypted credential and reads the disks through the host's administrative shares.
+- **Failover cluster**: like remote, addressed by the cluster name. The agent lists the nodes
+  that are up and reaches every VM through the node that currently owns it; snapshots carry the
+  cluster name as host, so a VM's history stays together when it migrates. A VM restored onto
+  cluster storage (`C:\ClusterStorage`) becomes a clustered role.
+
+A job can back up up to four VMs side by side (*VMs at a time*).
+
+The host page lists the VMs (state, disks, whether the guest can be quiesced, which jobs protect
+them and how their last backup went). Select VMs and *Back up*, or create a job with the source
+*Hyper-V virtual machines* (chosen VMs, or all VMs including future ones minus exclusions).
+
+Each VM is backed up from a **production checkpoint** (application-consistent through the guest's
+VSS; with *Production* the job falls back to a crash-consistent standard checkpoint for guests
+that can't, with *Production only* it fails them). The read-only disk chain, the configuration
+files and a manifest become one restic snapshot per VM (tags `amber-hyperv`, `vm:<id>`), and the
+checkpoint is merged away again. Retention applies per VM.
+
+*Restore* rebuilds the VM from its manifest on any Hyper-V host — as a new VM (network adapters
+disconnected unless you choose otherwise), in place of the original (jobs then follow the new VM),
+or only its virtual disks. A VM with a virtual TPM gets new TPM keys.
+
+For development without Hyper-V, `AMBER_HYPERV_MOCK=<dir>` makes an agent simulate a host with
+three VMs whose disks are real files, so backups and restores run through restic end to end
+(`agent/hyperv_e2e_test.go` does exactly that).
 
 ## Configuration
 

@@ -36,6 +36,7 @@ export const ICONS: Record<string, string> = {
   menu: I('<path d="M3 12h18M3 6h18M3 18h18"/>'),
   upgrade: I('<circle cx="12" cy="12" r="10"/><path d="M16 12l-4-4-4 4M12 16V8"/>', 14),
   globe: I('<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'),
+  vm: I('<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h4v4H7z"/>'),
   send: I('<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>', 16),
 };
 

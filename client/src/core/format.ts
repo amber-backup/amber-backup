@@ -71,6 +71,7 @@ export function restoreModeLabel(mode: string): string {
     original: t.modeOriginal,
     alternate_path: t.modeAlternate,
     download: t.modeDownload,
+    hyperv: t.modeHyperv,
   };
   return labels[mode] ?? mode;
 }

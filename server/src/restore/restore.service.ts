@@ -46,6 +46,30 @@ export class RestoreService {
     // if the job is later edited or deleted.
     const job = await this.jobs.getRow(dto.jobId);
 
+    // A VM restore runs on the agent that drives the target Hyper-V host —
+    // which may be another host than the one backed up (moving a VM).
+    if (dto.mode === 'hyperv') {
+      const spec = dto.destination?.hyperv;
+      if (job.source_kind !== 'hyperv' || !spec) {
+        throw new BadRequestException(
+          'A Hyper-V restore needs a Hyper-V job and destination.hyperv',
+        );
+      }
+      if (spec.action === 'disks' && !dto.destination?.path) {
+        throw new BadRequestException('Restoring disks needs a destination path');
+      }
+      const host = await this.db
+        .selectFrom('hyperv_hosts')
+        .select('agent_id')
+        .where('id', '=', spec.hostId)
+        .executeTakeFirst();
+      if (!host) throw new BadRequestException('Unknown Hyper-V host');
+      dto.destination = { ...dto.destination, agentId: host.agent_id };
+      dto.includedPaths = undefined;
+    } else if (dto.destination?.hyperv) {
+      throw new BadRequestException('destination.hyperv only applies to the hyperv mode');
+    }
+
     const run = await this.db
       .insertInto('restore_runs')
       .values({

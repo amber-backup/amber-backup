@@ -18,6 +18,7 @@ export const common = {
   nav: {
     overview: 'Overview',
     agents: 'Agents',
+    hyperv: 'Hyper-V',
     targets: 'Targets',
     jobs: 'Jobs',
     snapshots: 'Snapshots',

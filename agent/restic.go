@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ func substituteCredentialPaths(args []string, paths map[string]string) []string 
 }
 
 // defaultStopGrace is how long restic may take to wind down after a cancel
-// (SIGINT: it removes its repository lock) before it is killed.
+// (SIGINT / CTRL_BREAK: it removes its repository lock) before it is killed.
 const defaultStopGrace = 30 * time.Second
 
 // resticRunner executes restic on the agent host, mirroring the server executor.
@@ -49,13 +50,37 @@ type resticRunner struct {
 func newResticRunner() *resticRunner {
 	bin := os.Getenv("RESTIC_BINARY")
 	if bin == "" {
-		bin = "restic"
+		bin = defaultResticBinary()
 	}
 	cache := os.Getenv("RESTIC_CACHE_DIR")
 	if cache == "" {
-		cache = filepath.Join(os.TempDir(), "amber-restic-cache")
+		cache = defaultCacheDir()
 	}
 	return &resticRunner{binary: bin, cacheDir: cache, stopGrace: defaultStopGrace}
+}
+
+// defaultResticBinary prefers the restic the agent manages in its install
+// directory (the server's bundled build, see managedResticPath) and otherwise
+// uses the host's restic from PATH.
+func defaultResticBinary() string {
+	if p := managedResticPath(); fileExists(p) {
+		return p
+	}
+	return "restic"
+}
+
+// defaultCacheDir keeps restic's cache in the install directory on Windows
+// (the service's temp directory is the system's) and in the temp dir elsewhere.
+func defaultCacheDir() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(installDir(), "cache")
+	}
+	return filepath.Join(os.TempDir(), "amber-restic-cache")
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 // prepareEnv builds the process environment and writes credential files. It
@@ -87,11 +112,12 @@ func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, map[string
 }
 
 // run executes restic with the given args, streaming JSON stdout lines to onLine.
-// Cancelling ctx interrupts restic (SIGINT, so it releases its repository lock)
+// Cancelling ctx interrupts restic (SIGINT, CTRL_BREAK on Windows, so it
+// releases its repository lock)
 // and kills it if it hasn't exited after stopGrace; callers tell a cancel apart
 // from a failure by ctx.Err().
 func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine func(map[string]any), onLog func(string)) (int, error) {
-	workDir, err := os.MkdirTemp("", "amber-restic-")
+	workDir, err := os.MkdirTemp(tempBaseDir(), "amber-restic-")
 	if err != nil {
 		return -1, err
 	}
@@ -108,7 +134,7 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 	fullArgs := append(append([]string{}, extraArgs...), args...)
 	cmd := exec.CommandContext(ctx, r.binary, fullArgs...)
 	cmd.Env = env
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	prepareResticCmd(cmd)
 	cmd.WaitDelay = r.stopGrace
 	// Output goes through in-process pipes rather than StdoutPipe: exec then
 	// copies it itself, so Wait returns only once all output (e.g. restic's
@@ -221,6 +247,11 @@ func backupArgs(t *Task) []string {
 		if o.ReadConcurrency > 0 {
 			args = append(args, "--read-concurrency", strconv.Itoa(o.ReadConcurrency))
 		}
+		// Read from a VSS snapshot so open/locked files are backed up
+		// consistently. Only Windows has it; elsewhere the option is ignored.
+		if o.UseFsSnapshot && supportsFsSnapshot() {
+			args = append(args, "--use-fs-snapshot")
+		}
 	}
 	// `--` terminates option parsing: a source path beginning with `-` is then
 	// treated as a path, never as a restic flag (e.g. --password-command=…).
@@ -254,13 +285,22 @@ func forgetArgs(ret *Retention) []string {
 }
 
 func restoreArgs(t *Task) []string {
-	args := []string{"restore", "--json", "--target", t.TargetPath}
-	includes := t.IncludedPaths
-	o := t.RestoreOptions
+	return restoreArgsFor(t.SnapshotID, t.TargetPath, restoreIncludes(t), t.RestoreOptions)
+}
+
+// restoreIncludes are the paths a restore is limited to (none = everything).
+func restoreIncludes(t *Task) []string {
+	if len(t.IncludedPaths) == 0 && t.RestoreOptions != nil {
+		return t.RestoreOptions.Include
+	}
+	return t.IncludedPaths
+}
+
+// restoreArgsFor builds `restic restore` for one snapshot (or snapshot:subfolder)
+// into target.
+func restoreArgsFor(snapshot, target string, includes []string, o *RestoreOptions) []string {
+	args := []string{"restore", "--json", "--target", target}
 	if o != nil {
-		if len(includes) == 0 {
-			includes = o.Include
-		}
 		for _, e := range o.Exclude {
 			args = append(args, "--exclude", e)
 		}
@@ -282,7 +322,7 @@ func restoreArgs(t *Task) []string {
 	}
 	// `--` terminates option parsing so a snapshot id beginning with `-` cannot
 	// be interpreted as a restic flag.
-	args = append(args, "--", t.SnapshotID)
+	args = append(args, "--", snapshot)
 	return args
 }
 
@@ -350,6 +390,22 @@ func restoreSummaryToStats(msg map[string]any) map[string]any {
 		"filesDone":           files,
 		"totalFiles":          files,
 	}
+}
+
+// addRestoreStats sums the stats of the restores one task ran (one per drive
+// on Windows); nil stands for none yet.
+func addRestoreStats(total, next map[string]any) map[string]any {
+	if next == nil {
+		return total
+	}
+	if total == nil {
+		return next
+	}
+	sum := map[string]any{"percentDone": 1}
+	for _, k := range []string{"totalFilesProcessed", "totalBytesProcessed", "bytesDone", "totalBytes", "filesDone", "totalFiles"} {
+		sum[k] = jsonNum(total, k) + jsonNum(next, k)
+	}
+	return sum
 }
 
 // isDamagedCheckOutput tells a check that found errors apart from one that

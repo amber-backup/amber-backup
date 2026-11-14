@@ -60,6 +60,7 @@ export const snapshots = {
     modeOriginal: 'Original',
     modeAlternate: 'Alt. path',
     modeDownload: 'Download',
+    modeHyperv: 'Hyper-V VM',
     download: 'Download',
   },
 };

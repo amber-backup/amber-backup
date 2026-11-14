@@ -75,6 +75,8 @@ export const jobs = {
       pathsHelp: 'One path per line',
       excludes: 'Excludes',
       excludesHelp: 'One glob or path per line',
+      vss: 'Use a VSS snapshot (Windows)',
+      vssHelp: 'Backs up from a Volume Shadow Copy, so open and locked files (databases, Outlook PSTs) are read consistently. The agent service runs as SYSTEM, which VSS requires.',
     },
     repository: {
       title: 'Repository',

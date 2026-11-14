@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { isValidAllowlistEntry } from '../../common/ip-allowlist';
+import { HypervInventoryDto } from '../../hyperv/dto/hyperv.dto';
 import {
   ArrayMaxSize,
   IsArray,
@@ -36,12 +37,13 @@ export class CreateEnrollmentTokenDto {
   expiresInMinutes?: number;
 
   @ApiPropertyOptional({
-    enum: ['binary', 'docker', 'docker-compose'],
+    enum: ['binary', 'docker', 'docker-compose', 'windows'],
     default: 'binary',
+    description: 'windows: PowerShell installer that registers a Windows service',
   })
   @IsOptional()
-  @IsIn(['binary', 'docker', 'docker-compose'])
-  deployMethod?: 'binary' | 'docker' | 'docker-compose';
+  @IsIn(['binary', 'docker', 'docker-compose', 'windows'])
+  deployMethod?: 'binary' | 'docker' | 'docker-compose' | 'windows';
 }
 
 export class SetGlobalEnrollmentDto {
@@ -255,6 +257,15 @@ export class TaskResultDto {
   @IsString()
   @MaxLength(20_000)
   repoStatsError?: string;
+
+  @ApiPropertyOptional({
+    type: HypervInventoryDto,
+    description: 'For a hyperv-inventory task: the VMs of the host',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HypervInventoryDto)
+  hypervInventory?: HypervInventoryDto;
 
   @ApiPropertyOptional({
     description: 'For a check: restic reported integrity errors (status is then failed)',

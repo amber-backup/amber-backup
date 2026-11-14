@@ -18,7 +18,7 @@ func TestMaybeSelfUpdateSkipsOverHTTP(t *testing.T) {
 	defer srv.Close()
 
 	a := &agent{baseURL: srv.URL, http: srv.Client()} // srv.URL is http://
-	a.maybeSelfUpdate("999.0.0")                       // far newer than the built-in version
+	a.maybeSelfUpdate("999.0.0")                      // far newer than the built-in version
 
 	if got := atomic.LoadInt32(&hits); got != 0 {
 		t.Fatalf("expected no download over HTTP, but server was hit %d time(s)", got)

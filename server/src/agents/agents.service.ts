@@ -5,10 +5,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   StreamableFile,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'crypto';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream, existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { Interval } from '@nestjs/schedule';
 import { sql } from 'kysely';
@@ -31,6 +32,7 @@ import {
   CheckInfo,
   GlobalEnrollmentValue,
   IntegrityLevel,
+  HypervJobConfig,
   ResticOptions,
   RestoreOptions,
   RestoreDestination,
@@ -38,6 +40,13 @@ import {
 import { RequestAgent } from '../common/auth/request-user';
 import { uniqueSlug } from '../common/slug';
 import { SETTINGS_KEYS } from '../settings/settings.service';
+import { AMBER_URL_MARKER, amberUrlLine, INSTALL_PS1 } from './install-windows';
+import { HypervService } from '../hyperv/hyperv.service';
+import {
+  AGENT_CAPABILITY_HYPERV,
+  HYPERV_INVENTORY_TASK_PREFIX,
+  HypervTaskPayload,
+} from '../hyperv/hyperv.contract';
 import {
   CreateEnrollmentTokenDto,
   EnrollDto,
@@ -48,6 +57,29 @@ import {
 
 /** Placeholder swapped for the operator-chosen agent name in rollout commands. */
 const NAME_PLACEHOLDER = '__AGENT_NAME__';
+
+/** os-arch targets the image bundles agent and restic binaries for. */
+export const AGENT_TARGETS = [
+  'linux-amd64',
+  'linux-arm64',
+  'windows-amd64',
+  'windows-arm64',
+] as const;
+
+export type RolloutMethod = 'binary' | 'docker' | 'docker-compose' | 'windows';
+
+/** Bundle file name of a binary for a target (Windows binaries end in .exe). */
+function bundleFile(prefix: 'amber-agent' | 'restic', target: string): string {
+  return `${prefix}-${target}${target.startsWith('windows-') ? '.exe' : ''}`;
+}
+
+/** A URL that is safe to inject into the PowerShell single-quoted literal. */
+const SAFE_URL_RE = /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~/-]*)?$/;
+
+/** Quotes a value as a PowerShell single-quoted string literal. */
+function psQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
 
 /**
  * Task types an agent announces in its poll beyond the original backup and
@@ -68,7 +100,14 @@ const STATS_TASK_PREFIX = 'stats-';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AgentTask {
-  type: 'backup' | 'restore' | 'check' | 'stats';
+  type:
+    | 'backup'
+    | 'restore'
+    | 'check'
+    | 'stats'
+    | 'hyperv-inventory'
+    | 'hyperv-backup'
+    | 'hyperv-restore';
   taskId: string;
   repository: string;
   password: string;
@@ -89,7 +128,13 @@ export interface AgentTask {
   checkLevel?: IntegrityLevel;
   /** For a rotating check: the part to read, as `part/parts` (`--read-data-subset`). */
   checkSubset?: string;
+  // hyperv-inventory, hyperv-backup, hyperv-restore
+  hyperv?: HypervTaskPayload;
 }
+
+/** Why a Hyper-V task can't go to an agent that does not announce Hyper-V. */
+const HYPERV_UNSUPPORTED =
+  'The agent cannot run Hyper-V tasks: it is too old, or Hyper-V (its PowerShell module) is not installed on its host.';
 
 export type PublicAgent = Omit<Agent, 'agent_key_hash' | 'server_privkey'>;
 
@@ -106,6 +151,8 @@ export class AgentsService {
     private readonly pruneRunner: PruneRunnerService,
     private readonly checkRunner: CheckRunnerService,
     private readonly retries: RunRetryService,
+    // Optional so unit tests that predate Hyper-V can build the service without it.
+    @Optional() private readonly hyperv?: HypervService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -148,7 +195,7 @@ export class AgentsService {
   }
 
   private installCommand(
-    method: 'binary' | 'docker' | 'docker-compose',
+    method: RolloutMethod,
     baseUrl: string,
     token: string,
     name?: string,
@@ -156,6 +203,14 @@ export class AgentsService {
     const image = 'devpatf/amber-backup-agent:latest';
     // The agent reports AMBER_NAME as its own name on enrollment.
     const nameVal = name ?? '';
+    if (method === 'windows') {
+      // Pasted into an elevated PowerShell; every value is a quoted literal.
+      return (
+        `$env:AMBER_URL=${psQuote(baseUrl)}; $env:AMBER_TOKEN=${psQuote(token)}; ` +
+        `$env:AMBER_NAME=${psQuote(nameVal)}; ` +
+        `irm ${psQuote(`${baseUrl}/api/agents/install.ps1`)} | iex`
+      );
+    }
     if (method === 'docker') {
       return (
         `docker run -d --restart unless-stopped ` +
@@ -266,6 +321,7 @@ export class AgentsService {
       binary: this.installCommand('binary', baseUrl, g.token, NAME_PLACEHOLDER),
       docker: this.installCommand('docker', baseUrl, g.token, NAME_PLACEHOLDER),
       'docker-compose': this.installCommand('docker-compose', baseUrl, g.token, NAME_PLACEHOLDER),
+      windows: this.installCommand('windows', baseUrl, g.token, NAME_PLACEHOLDER),
     };
     return { enabled: true, token: g.token, commands, namePlaceholder: NAME_PLACEHOLDER };
   }
@@ -292,12 +348,17 @@ INSTALL_DIR="\${INSTALL_DIR:-/opt/amber-agent}"
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 
-# Binary agents run the host's restic (the Docker image bundles its own). Abort
-# early if it is missing so we don't install an agent that can't back anything up.
-RESTIC_BIN="\${RESTIC_BINARY:-restic}"
-if ! command -v "$RESTIC_BIN" >/dev/null 2>&1; then
-  echo "Error: restic not found (\\"$RESTIC_BIN\\"). Install restic first (https://restic.net/#installation) or set RESTIC_BINARY to its full path, then re-run this installer." >&2
-  exit 1
+# Binary agents run the host's restic when it has one (or RESTIC_BINARY names
+# one). Otherwise the server's bundled restic is installed next to the agent,
+# which then keeps it at the server's version.
+BUNDLE_RESTIC=0
+if [ -n "\${RESTIC_BINARY:-}" ]; then
+  if ! command -v "$RESTIC_BINARY" >/dev/null 2>&1; then
+    echo "Error: RESTIC_BINARY not found (\\"$RESTIC_BINARY\\")." >&2
+    exit 1
+  fi
+elif [ -x "$INSTALL_DIR/restic" ] || ! command -v restic >/dev/null 2>&1; then
+  BUNDLE_RESTIC=1
 fi
 
 # A token is only needed for the first enrollment; a re-run of an already
@@ -316,6 +377,15 @@ if ! curl -fsSL "$AMBER_URL/api/agents/binary/linux-$ARCH" -o "$INSTALL_DIR/ambe
   exit 1
 fi
 chmod +x "$INSTALL_DIR/amber-agent.new"
+if [ "$BUNDLE_RESTIC" = 1 ]; then
+  echo "Installing the bundled restic into $INSTALL_DIR"
+  if ! curl -fsSL "$AMBER_URL/api/agents/restic/linux-$ARCH" -o "$INSTALL_DIR/restic.new"; then
+    echo "Failed to download restic for linux-$ARCH from $AMBER_URL" >&2
+    exit 1
+  fi
+  chmod +x "$INSTALL_DIR/restic.new"
+  mv "$INSTALL_DIR/restic.new" "$INSTALL_DIR/restic"
+fi
 
 # The enrollment token is a credential. Keep it out of the world-readable unit
 # file (0644) in a root-only environment file so an unprivileged local user
@@ -326,6 +396,7 @@ AMBER_URL=$AMBER_URL
 AMBER_TOKEN=$AMBER_TOKEN
 AMBER_NAME=$AMBER_NAME
 INSTALL_DIR=$INSTALL_DIR
+RESTIC_BINARY=\${RESTIC_BINARY:-}
 EOF
 chmod 600 "$INSTALL_DIR/agent.env"
 
@@ -355,23 +426,83 @@ echo "Amber agent installed and started."
 `;
   }
 
+  /**
+   * The Windows installer with this server's URL as its default. A URL that
+   * could break out of the PowerShell literal is not injected (the operator
+   * then passes AMBER_URL, which the rollout command always does).
+   */
+  installPowerShellScript(): string {
+    const baseUrl = loadConfig().publicBaseUrl.replace(/\/+$/, '');
+    if (!SAFE_URL_RE.test(baseUrl)) return INSTALL_PS1;
+    return INSTALL_PS1.split('\n')
+      .map((line) =>
+        line.trim() === AMBER_URL_MARKER
+          ? line.slice(0, line.length - line.trimStart().length) + amberUrlLine(baseUrl)
+          : line,
+      )
+      .join('\n');
+  }
+
   /** Streams the compiled agent binary for the given os-arch target. */
   binary(target: string): StreamableFile {
-    const allowed = ['linux-amd64', 'linux-arm64'];
-    if (!allowed.includes(target)) {
+    return this.bundled('amber-agent', target, 'Agent binary');
+  }
+
+  /** Streams the bundled restic for the given os-arch target. */
+  resticBinary(target: string): StreamableFile {
+    return this.bundled('restic', target, 'restic');
+  }
+
+  /** SHA-256 checksums of the bundled binaries (`sha256sum` format). */
+  checksums(): string {
+    const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'SHA256SUMS');
+    if (!existsSync(file)) {
+      throw new NotFoundException('No checksums are bundled on this server');
+    }
+    return readFileSync(file, 'utf8');
+  }
+
+  private bundled(
+    prefix: 'amber-agent' | 'restic',
+    target: string,
+    label: string,
+  ): StreamableFile {
+    if (!(AGENT_TARGETS as readonly string[]).includes(target)) {
       throw new NotFoundException(`Unsupported agent target: ${target}`);
     }
-    const dir = path.resolve(loadConfig().agentBinaryDir);
-    const file = path.join(dir, `amber-agent-${target}`);
+    const name = bundleFile(prefix, target);
+    const file = path.join(path.resolve(loadConfig().agentBinaryDir), name);
     if (!existsSync(file)) {
       throw new NotFoundException(
-        `Agent binary for ${target} is not available on this server`,
+        `${label} for ${target} is not available on this server`,
       );
     }
+    const download = `${prefix}${target.startsWith('windows-') ? '.exe' : ''}`;
     return new StreamableFile(createReadStream(file), {
       type: 'application/octet-stream',
-      disposition: 'attachment; filename="amber-agent"',
+      disposition: `attachment; filename="${download}"`,
     });
+  }
+
+  private cachedResticVersion: string | null | undefined;
+
+  /**
+   * Version of the bundled restic, read from `<agentBinaryDir>/restic-version`
+   * (written at image build time). Agents that manage their own restic follow
+   * it; null (e.g. local dev) advertises nothing.
+   */
+  latestResticVersion(): string | null {
+    if (this.cachedResticVersion === undefined) {
+      try {
+        const file = path.join(path.resolve(loadConfig().agentBinaryDir), 'restic-version');
+        this.cachedResticVersion = existsSync(file)
+          ? readFileSync(file, 'utf8').trim() || null
+          : null;
+      } catch {
+        this.cachedResticVersion = null;
+      }
+    }
+    return this.cachedResticVersion;
   }
 
   private cachedAgentVersion: string | null | undefined;
@@ -526,6 +657,7 @@ echo "Amber agent installed and started."
     tasks: AgentTask[];
     pollIntervalSeconds: number;
     latestAgentVersion?: string;
+    latestResticVersion?: string;
   }> {
     const row = await this.db
       .updateTable('agents')
@@ -541,9 +673,14 @@ echo "Amber agent installed and started."
       .returning('poll_interval_seconds')
       .executeTakeFirst();
 
+    const hypervCapable =
+      !!this.hyperv && (dto.capabilities?.includes(AGENT_CAPABILITY_HYPERV) ?? false);
     const tasks: AgentTask[] = [];
-    tasks.push(...(await this.claimBackupTasks(agent.id)));
-    tasks.push(...(await this.claimRestoreTasks(agent.id)));
+    tasks.push(...(await this.claimBackupTasks(agent.id, hypervCapable)));
+    tasks.push(...(await this.claimRestoreTasks(agent.id, hypervCapable)));
+    if (hypervCapable) {
+      tasks.push(...(await this.hyperv!.claimInventoryTasks(agent.id)));
+    }
     if (dto.capabilities?.includes(AGENT_CAPABILITY_CHECK)) {
       tasks.push(...(await this.claimCheckTasks(agent.id)));
     }
@@ -558,10 +695,14 @@ echo "Amber agent installed and started."
       tasks,
       pollIntervalSeconds: row?.poll_interval_seconds ?? 30,
       latestAgentVersion: this.latestAgentVersion() ?? undefined,
+      latestResticVersion: this.latestResticVersion() ?? undefined,
     };
   }
 
-  private async claimBackupTasks(agentId: string): Promise<AgentTask[]> {
+  private async claimBackupTasks(
+    agentId: string,
+    hypervCapable = false,
+  ): Promise<AgentTask[]> {
     const runs = await this.db
       .selectFrom('job_runs')
       .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
@@ -576,6 +717,9 @@ echo "Amber agent installed and started."
         'repositories.credential_secret_id',
         'backup_jobs.restic_options',
         'backup_jobs.paths',
+        'backup_jobs.source_kind',
+        'backup_jobs.hyperv_host_id',
+        'backup_jobs.hyperv_config',
       ])
       .where('backup_jobs.agent_id', '=', agentId)
       .where('job_runs.kind', '=', 'backup')
@@ -601,6 +745,25 @@ echo "Amber agent installed and started."
         .executeTakeFirst();
       if (!claimed) continue;
 
+      let hyperv: HypervTaskPayload | undefined;
+      if (run.source_kind === 'hyperv') {
+        if (!hypervCapable || !run.hyperv_host_id) {
+          await this.failClaimedRun('job_runs', run.run_id, HYPERV_UNSUPPORTED);
+          void this.retries.finalize(run.run_id);
+          continue;
+        }
+        const config = parseJsonColumn<HypervJobConfig>(run.hyperv_config)!;
+        const host = await this.hyperv!.getRow(run.hyperv_host_id);
+        hyperv = {
+          connection: await this.hyperv!.connection(host),
+          allVms: config.allVms,
+          vmIds: config.vmIds,
+          excludeVmIds: config.excludeVmIds ?? [],
+          checkpointMode: config.checkpointMode ?? 'Production',
+          parallelVms: config.parallelVms ?? 1,
+        };
+      }
+
       const resolved = await this.targets.resolveForJob({
         target_id: run.target_id,
         repo_config: run.repo_config,
@@ -608,7 +771,8 @@ echo "Amber agent installed and started."
         credential_secret_id: run.credential_secret_id,
       });
       tasks.push({
-        type: 'backup',
+        type: hyperv ? 'hyperv-backup' : 'backup',
+        hyperv,
         taskId: run.run_id,
         jobId: run.job_id,
         jobName: run.job_name,
@@ -719,7 +883,24 @@ echo "Amber agent installed and started."
     return tasks;
   }
 
-  private async claimRestoreTasks(agentId: string): Promise<AgentTask[]> {
+  /** Marks a run this poll claimed as failed before it ever reached the agent. */
+  private async failClaimedRun(
+    table: 'job_runs' | 'restore_runs',
+    id: string,
+    error: string,
+  ): Promise<void> {
+    await this.db
+      .updateTable(table)
+      .set({ status: 'failed', finished_at: new Date(), error })
+      .where('id', '=', id)
+      .where('status', '=', 'running')
+      .execute();
+  }
+
+  private async claimRestoreTasks(
+    agentId: string,
+    hypervCapable = false,
+  ): Promise<AgentTask[]> {
     const runs = await this.db
       .selectFrom('restore_runs')
       .selectAll()
@@ -751,8 +932,23 @@ echo "Amber agent installed and started."
           : run.included_paths
         : null;
 
+      let hyperv: HypervTaskPayload | undefined;
+      if (run.mode === 'hyperv') {
+        const spec = destination.hyperv;
+        if (!hypervCapable || !spec) {
+          await this.failClaimedRun('restore_runs', run.id, HYPERV_UNSUPPORTED);
+          continue;
+        }
+        const host = await this.hyperv!.getRow(spec.hostId);
+        hyperv = {
+          connection: await this.hyperv!.connection(host),
+          restore: { ...spec, targetPath: destination.path ?? '' },
+        };
+      }
+
       tasks.push({
-        type: 'restore',
+        type: hyperv ? 'hyperv-restore' : 'restore',
+        hyperv,
         taskId: run.id,
         repository: resolved.repository,
         password: resolved.password,
@@ -915,6 +1111,20 @@ echo "Amber agent installed and started."
       .where('id', '=', taskId)
       .where('status', '=', 'running')
       .execute();
+
+    // A VM restored in place of its original has a new id; jobs follow it.
+    const info = dto.stats?.hypervRestore as
+      | { sourceVmId?: string; vmId?: string; replacedOriginal?: boolean }
+      | undefined;
+    if (
+      dto.status === 'success' &&
+      this.hyperv &&
+      info?.replacedOriginal &&
+      typeof info.sourceVmId === 'string' &&
+      typeof info.vmId === 'string'
+    ) {
+      await this.hyperv.followReplacedVm(info.sourceVmId, info.vmId);
+    }
   }
 
   async submitResult(
@@ -930,6 +1140,15 @@ echo "Amber agent installed and started."
         agentId,
         taskId.slice(STATS_TASK_PREFIX.length),
         dto,
+      );
+      return { ok: true };
+    }
+    if (taskId.startsWith(HYPERV_INVENTORY_TASK_PREFIX)) {
+      if (!this.hyperv) throw new NotFoundException('Task not found for this agent');
+      await this.hyperv.recordInventory(
+        agentId,
+        taskId.slice(HYPERV_INVENTORY_TASK_PREFIX.length),
+        { status: dto.status, inventory: dto.hypervInventory, error: dto.error },
       );
       return { ok: true };
     }
@@ -1059,6 +1278,12 @@ echo "Amber agent installed and started."
       typeof row.value === 'string' ? JSON.parse(row.value) : (row.value as { seconds?: number });
     return typeof v.seconds === 'number' ? v.seconds : 120;
   }
+}
+
+/** Reads a jsonb column that may come back as text. */
+function parseJsonColumn<T>(v: unknown): T | null {
+  if (v == null) return null;
+  return (typeof v === 'string' ? JSON.parse(v) : v) as T;
 }
 
 /** Trims entries and drops blanks and duplicates, keeping the first occurrence's order. */

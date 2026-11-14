@@ -77,6 +77,8 @@ export const jobs: JobsMessages = {
       pathsHelp: 'Ein Pfad pro Zeile',
       excludes: 'Ausschlüsse',
       excludesHelp: 'Ein Glob-Muster oder Pfad pro Zeile',
+      vss: 'VSS-Snapshot verwenden (Windows)',
+      vssHelp: 'Sichert aus einer Volumeschattenkopie, damit geöffnete und gesperrte Dateien (Datenbanken, Outlook-PSTs) konsistent gelesen werden. Der Agent-Dienst läuft als SYSTEM, was VSS voraussetzt.',
     },
     repository: {
       title: 'Repository',

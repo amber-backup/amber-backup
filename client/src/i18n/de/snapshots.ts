@@ -63,6 +63,7 @@ export const snapshots: SnapshotsMessages = {
     modeOriginal: 'Ursprünglich',
     modeAlternate: 'Alt. Pfad',
     modeDownload: 'Download',
+    modeHyperv: 'Hyper-V-VM',
     download: 'Herunterladen',
   },
 };

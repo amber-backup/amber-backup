@@ -42,10 +42,37 @@ export class AgentsController {
   }
 
   @Public()
+  @Get('install.ps1')
+  @Header('content-type', 'text/plain; charset=utf-8')
+  @ApiOperation({ summary: 'Windows agent install script (PowerShell, referenced by enroll cmd)' })
+  installPowerShellScript(): string {
+    return this.agents.installPowerShellScript();
+  }
+
+  @Public()
   @Get('binary/:target')
-  @ApiOperation({ summary: 'Download the compiled agent binary (linux-amd64/arm64)' })
+  @ApiOperation({
+    summary: 'Download the compiled agent binary (linux-amd64/arm64, windows-amd64/arm64)',
+  })
   binary(@Param('target') target: string): StreamableFile {
     return this.agents.binary(target);
+  }
+
+  @Public()
+  @Get('restic/:target')
+  @ApiOperation({
+    summary: 'Download the bundled restic for an agent host (linux-amd64/arm64, windows-amd64/arm64)',
+  })
+  resticBinary(@Param('target') target: string): StreamableFile {
+    return this.agents.resticBinary(target);
+  }
+
+  @Public()
+  @Get('SHA256SUMS')
+  @Header('content-type', 'text/plain; charset=utf-8')
+  @ApiOperation({ summary: 'SHA-256 checksums of the bundled agent and restic binaries' })
+  checksums(): string {
+    return this.agents.checksums();
   }
 
   @RequireAdmin()
