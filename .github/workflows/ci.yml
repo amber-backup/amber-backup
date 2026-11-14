@@ -1,13 +1,19 @@
 name: CI
 
-# Tests every push and pull request: server (types + jest), client (types +
-# build), agent (Linux and native Windows), PowerShell script syntax, and the
-# app/agent images (built, not pushed).
+# The test suite: server (types + jest), client (types + build), agent (Linux
+# and native Windows), CLI, PowerShell script syntax, and the app/agent images
+# (built, not pushed). It does not run on pushes or pull requests: the release
+# workflows (docker-publish.yml, cli-release.yml) call it on a version tag and
+# only publish when it passes. Start it manually (Actions → CI → Run workflow)
+# to test a branch.
 on:
-  push:
-    branches: ['**']
-    tags-ignore: ['v*.*.*']
-  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref (tag/branch/SHA) to test; defaults to the triggering ref'
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
 
 permissions:
@@ -16,16 +22,14 @@ permissions:
 env:
   ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   server-client:
     name: Server + client
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '26.12.1'
@@ -56,6 +60,8 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: agent/go.mod
@@ -93,6 +99,8 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/go.mod
@@ -105,6 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '26.12.1'
@@ -146,6 +156,8 @@ jobs:
             dockerfile: ./agent/Dockerfile
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: docker/setup-buildx-action@v3
       # amd64 only: arm64 is the same Dockerfile under QEMU and doubles the
       # build time; the release workflow builds both.

@@ -9,6 +9,8 @@ name: Publish Docker images
 # Actions → "Publish Docker images" → Run workflow → pick the branch. The tags
 # come from the branch the run is started on, so pick the branch there rather
 # than passing it as `ref`.
+#
+# Nothing is pushed unless the full test suite (ci.yml) passes on that ref.
 on:
   push:
     tags:
@@ -25,7 +27,16 @@ env:
   ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
 
 jobs:
+  tests:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event.inputs.ref || github.ref }}
+
   publish:
+    needs: tests
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

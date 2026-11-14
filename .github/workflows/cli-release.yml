@@ -2,7 +2,8 @@ name: Release CLI
 
 # Cross-compiles the ambb CLI and attaches the binaries to a GitHub Release.
 # Triggered by the version tags semantic-release creates (v1.2.3), or manually
-# for an existing tag.
+# for an existing tag. Nothing is released unless the full test suite
+# (ci.yml) passes on that tag.
 on:
   push:
     tags:
@@ -24,7 +25,17 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  tests:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      # The env context is not available here, so TAG is spelled out.
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
+
   release:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
