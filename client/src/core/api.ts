@@ -137,10 +137,15 @@ export interface Job {
   location: 'local' | 'agent';
   agent_id: string | null;
   paths: string[];
-  /** files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent). */
-  source_kind?: 'files' | 'hyperv';
+  /**
+   * files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent);
+   * proxmox: guests of a Proxmox VE cluster (runs on the node agents).
+   */
+  source_kind?: 'files' | 'hyperv' | 'proxmox';
   hyperv_host_id?: string | null;
   hyperv_config?: HypervJobConfig | null;
+  proxmox_cluster_id?: string | null;
+  proxmox_config?: ProxmoxJobConfig | null;
   /** Shared connection the repository lives on; null ⇒ local filesystem repo. */
   target_id: string | null;
   /** Repository-specific fields (bucket, prefix, path). */
@@ -424,3 +429,258 @@ export interface HypervVmSnapshot {
   jobName: string;
   snapshot: { id: string; short_id: string; time: string; hostname: string; tags?: string[] };
 }
+
+// --- Proxmox VE -----------------------------------------------------------------
+// Mirrors server/src/proxmox/proxmox.contract.ts (dates arrive as ISO strings).
+
+export type ProxmoxGuestType = 'qemu' | 'lxc';
+export type ProxmoxMethod = 'vzdump' | 'block' | 'files';
+export type ProxmoxMethodChoice = 'auto' | 'vzdump';
+export type ProxmoxVzdumpMode = 'snapshot' | 'suspend' | 'stop';
+
+export interface ProxmoxAgentInfo {
+  clusterId: string;
+  clusterName: string | null;
+  node: string;
+  pveVersion: string;
+}
+
+export interface ProxmoxGuestDisk {
+  key: string;
+  volid: string;
+  storage: string;
+  sizeBytes: number;
+  format?: string;
+  backup: boolean;
+}
+
+export interface ProxmoxGuest {
+  vmid: number;
+  type: ProxmoxGuestType;
+  name: string;
+  node: string;
+  status: string;
+  template: boolean;
+  lock?: string;
+  haState?: string;
+  pool?: string;
+  tags: string[];
+  guestAgent?: boolean;
+  unprivileged?: boolean;
+  cores?: number;
+  memoryBytes?: number;
+  disks: ProxmoxGuestDisk[];
+  autoMethod: ProxmoxMethod;
+  autoMethodReason?: string;
+  staleSnapshots: string[];
+}
+
+export interface ProxmoxStorage {
+  id: string;
+  type: string;
+  shared: boolean;
+  content: string[];
+  nodes: string[];
+  snapshots: boolean;
+  availBytes?: number;
+  totalBytes?: number;
+}
+
+export interface ProxmoxInventory {
+  clusterName: string | null;
+  pveVersion: string;
+  readBy: string;
+  nodes: { name: string; online: boolean }[];
+  storages: ProxmoxStorage[];
+  guests: ProxmoxGuest[];
+}
+
+export interface ProxmoxJobConfig {
+  allGuests: boolean;
+  vmids: number[];
+  pools?: string[];
+  pveTags?: string[];
+  excludeVmids?: number[];
+  types?: ProxmoxGuestType[];
+  includeTemplates?: boolean;
+  vmMethod?: ProxmoxMethodChoice;
+  ctMethod?: ProxmoxMethodChoice;
+  vzdumpMode?: ProxmoxVzdumpMode;
+  requireConsistent?: boolean;
+  parallelPerNode?: number;
+  maxParallel?: number;
+}
+
+export interface ProxmoxGuestResult {
+  vmid: number;
+  type: ProxmoxGuestType;
+  name: string;
+  node: string;
+  status: 'success' | 'failed' | 'moved' | 'skipped';
+  movedTo?: string;
+  method?: ProxmoxMethod;
+  consistency?: 'application' | 'crash' | 'offline';
+  cbt?: 'incremental' | 'full';
+  cbtReason?: string;
+  snapshotId?: string;
+  dataAdded?: number;
+  bytesRead?: number;
+  totalBytes?: number;
+  durationSeconds?: number;
+  error?: string;
+  warnings?: string[];
+}
+
+export interface ProxmoxRunSummary {
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+  dataAdded: number;
+  bytesRead: number;
+}
+
+/** Full-guest restore, or a file restore into a container (`files` snapshots). */
+export interface ProxmoxRestoreSpec {
+  clusterId: string;
+  vmid: number;
+  guestType: ProxmoxGuestType;
+  action: 'guest' | 'files' | 'vm-files';
+  targetNode: string;
+  newVmid?: number;
+  replaceOriginal?: boolean;
+  storage?: string;
+  unique?: boolean;
+  name?: string;
+  start?: boolean;
+  bwlimitKiB?: number;
+  /** guest, block snapshots: start from the backup, move the disks while running. */
+  liveRestore?: boolean;
+  overlayStorage?: string;
+  targetVmid?: number;
+  /** vm-files: absolute folder on the target node. */
+  targetPath?: string;
+}
+
+export interface ProxmoxCluster {
+  id: string;
+  name: string;
+  slug: string;
+  pve_cluster_id: string;
+  cluster_name: string | null;
+  primary_agent_id: string;
+  agent_name: string | null;
+  agent_status: string | null;
+  inventory_at: string | null;
+  inventory_error: string | null;
+  inventory_requested_at: string | null;
+  guest_count: number | null;
+  node_count: number | null;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProxmoxNodeView {
+  name: string;
+  online: boolean;
+  agentId: string | null;
+  agentName: string | null;
+  agentStatus: string | null;
+}
+
+export interface ProxmoxGuestProtection {
+  vmid: number;
+  jobs: { id: string; name: string; enabled: boolean }[];
+  lastBackup: (ProxmoxGuestResult & { jobId: string; finishedAt: string | null }) | null;
+}
+
+export interface ProxmoxClusterDetail extends ProxmoxCluster {
+  inventory: ProxmoxInventory | null;
+  nodes: ProxmoxNodeView[];
+  protection: ProxmoxGuestProtection[];
+}
+
+export interface ProxmoxCandidate {
+  agentId: string;
+  agentName: string;
+  agentStatus: string;
+  info: ProxmoxAgentInfo;
+  registeredClusterId: string | null;
+}
+
+export interface ProxmoxGuestIssue {
+  clusterId: string;
+  clusterName: string;
+  vmid: number;
+  name: string;
+  type: ProxmoxGuestType;
+  error?: string;
+  finishedAt?: string | null;
+}
+
+export interface ProxmoxSummary {
+  clusters: number;
+  guests: number;
+  unprotected: ProxmoxGuestIssue[];
+  failed: ProxmoxGuestIssue[];
+  nodesWithoutAgent: { clusterId: string; clusterName: string; node: string }[];
+}
+
+export interface ProxmoxRunItem {
+  id: string;
+  vmid: number;
+  guestType: ProxmoxGuestType;
+  name: string;
+  node: string;
+  agentId: string | null;
+  status: 'queued' | 'running' | 'success' | 'failed' | 'skipped' | 'cancelled';
+  method: ProxmoxMethod | null;
+  result: ProxmoxGuestResult | null;
+  progress: Record<string, unknown> | null;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ProxmoxGuestSnapshot {
+  jobId: string;
+  jobName: string;
+  snapshot: { id: string; short_id: string; time: string; hostname: string; tags?: string[]; paths?: string[] };
+}
+
+/**
+ * The method a Proxmox snapshot was made with. There is no method tag (it
+ * would split the retention groups): a vzdump snapshot holds one stdin file
+ * named vzdump-<type>-<vmid>.vma|tar, block (VM) and files (CT) snapshots hold
+ * the guest's mount directory; the pve-type tag tells those two apart.
+ */
+export function proxmoxSnapshotMethod(
+  snapshot: { tags?: string[]; paths?: string[] } | undefined,
+): ProxmoxMethod | null {
+  if (!snapshot) return null;
+  const paths = snapshot.paths ?? [];
+  if (paths.some((p) => /(^|\/)vzdump-(qemu|lxc)-\d+\.(vma|tar)$/.test(p))) return 'vzdump';
+  const type = (snapshot.tags ?? []).find((x) => x.startsWith('pve-type:'))?.slice('pve-type:'.length);
+  if (type === 'qemu') return 'block';
+  if (type === 'lxc') return 'files';
+  return null;
+}
+
+/** Calls of the /proxmox API. */
+export const proxmoxApi = {
+  clusters: () => api.get<ProxmoxCluster[]>('/proxmox/clusters'),
+  cluster: (idOrSlug: string) => api.get<ProxmoxClusterDetail>(`/proxmox/clusters/${idOrSlug}`),
+  create: (body: { name: string; primaryAgentId: string }) =>
+    api.post<ProxmoxClusterDetail>('/proxmox/clusters', body),
+  update: (idOrSlug: string, body: { name?: string; primaryAgentId?: string }) =>
+    api.patch<ProxmoxClusterDetail>(`/proxmox/clusters/${idOrSlug}`, body),
+  remove: (idOrSlug: string) => api.del(`/proxmox/clusters/${idOrSlug}`),
+  refresh: (idOrSlug: string) => api.post<{ requestedAt: string }>(`/proxmox/clusters/${idOrSlug}/refresh`),
+  candidates: () => api.get<ProxmoxCandidate[]>('/proxmox/candidates'),
+  summary: () => api.get<ProxmoxSummary>('/proxmox/summary'),
+  guestSnapshots: (idOrSlug: string, vmid: number) =>
+    api.get<ProxmoxGuestSnapshot[]>(`/proxmox/clusters/${idOrSlug}/guests/${vmid}/snapshots`),
+  runItems: (runId: string) => api.get<ProxmoxRunItem[]>(`/proxmox/runs/${runId}/items`),
+};

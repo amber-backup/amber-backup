@@ -64,6 +64,7 @@ export const snapshots: SnapshotsMessages = {
     modeAlternate: 'Alt. Pfad',
     modeDownload: 'Download',
     modeHyperv: 'Hyper-V-VM',
+    modeProxmox: 'Proxmox VE',
     download: 'Herunterladen',
   },
 };

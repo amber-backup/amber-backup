@@ -19,6 +19,7 @@ export const common: CommonMessages = {
     overview: 'Übersicht',
     agents: 'Agents',
     hyperv: 'Hyper-V',
+    proxmox: 'Proxmox VE',
     targets: 'Ziele',
     jobs: 'Jobs',
     snapshots: 'Snapshots',

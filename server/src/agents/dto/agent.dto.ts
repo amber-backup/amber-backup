@@ -3,6 +3,11 @@ import { Type } from 'class-transformer';
 import { isValidAllowlistEntry } from '../../common/ip-allowlist';
 import { HypervInventoryDto } from '../../hyperv/dto/hyperv.dto';
 import {
+  ProxmoxAgentInfoDto,
+  ProxmoxGuestResultDto,
+  ProxmoxInventoryDto,
+} from '../../proxmox/dto/proxmox.dto';
+import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
@@ -163,6 +168,15 @@ export class PollDto {
   @IsString({ each: true })
   @MaxLength(32, { each: true })
   capabilities?: string[];
+
+  @ApiPropertyOptional({
+    type: ProxmoxAgentInfoDto,
+    description: 'Agents on a Proxmox VE node: the cluster and node they run on',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProxmoxAgentInfoDto)
+  proxmox?: ProxmoxAgentInfoDto;
 }
 
 export class TaskProgressDto {
@@ -266,6 +280,24 @@ export class TaskResultDto {
   @ValidateNested()
   @Type(() => HypervInventoryDto)
   hypervInventory?: HypervInventoryDto;
+
+  @ApiPropertyOptional({
+    type: ProxmoxInventoryDto,
+    description: 'For a proxmox-inventory task: nodes, storages and guests of the cluster',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProxmoxInventoryDto)
+  proxmoxInventory?: ProxmoxInventoryDto;
+
+  @ApiPropertyOptional({
+    type: ProxmoxGuestResultDto,
+    description: "For a proxmox-backup task: the guest's outcome",
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProxmoxGuestResultDto)
+  proxmoxGuest?: ProxmoxGuestResultDto;
 
   @ApiPropertyOptional({
     description: 'For a check: restic reported integrity errors (status is then failed)',

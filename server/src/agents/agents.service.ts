@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -47,6 +48,14 @@ import {
   HYPERV_INVENTORY_TASK_PREFIX,
   HypervTaskPayload,
 } from '../hyperv/hyperv.contract';
+import { ProxmoxService } from '../proxmox/proxmox.service';
+import {
+  AGENT_CAPABILITY_PROXMOX,
+  PROXMOX_INVENTORY_TASK_PREFIX,
+  PROXMOX_RETENTION_TASK_PREFIX,
+  ProxmoxInventory,
+  ProxmoxTaskPayload,
+} from '../proxmox/proxmox.contract';
 import {
   CreateEnrollmentTokenDto,
   EnrollDto,
@@ -107,7 +116,11 @@ export interface AgentTask {
     | 'stats'
     | 'hyperv-inventory'
     | 'hyperv-backup'
-    | 'hyperv-restore';
+    | 'hyperv-restore'
+    | 'proxmox-inventory'
+    | 'proxmox-backup'
+    | 'proxmox-restore'
+    | 'proxmox-retention';
   taskId: string;
   repository: string;
   password: string;
@@ -130,11 +143,17 @@ export interface AgentTask {
   checkSubset?: string;
   // hyperv-inventory, hyperv-backup, hyperv-restore
   hyperv?: HypervTaskPayload;
+  // proxmox-inventory, proxmox-backup, proxmox-restore, proxmox-retention
+  proxmox?: ProxmoxTaskPayload;
 }
 
 /** Why a Hyper-V task can't go to an agent that does not announce Hyper-V. */
 const HYPERV_UNSUPPORTED =
   'The agent cannot run Hyper-V tasks: it is too old, or Hyper-V (its PowerShell module) is not installed on its host.';
+
+/** Why a Proxmox task can't go to an agent that does not announce Proxmox. */
+const PROXMOX_UNSUPPORTED =
+  'The agent cannot run Proxmox tasks: it is too old, or it does not run on a Proxmox VE node.';
 
 export type PublicAgent = Omit<Agent, 'agent_key_hash' | 'server_privkey'>;
 
@@ -153,6 +172,7 @@ export class AgentsService {
     private readonly retries: RunRetryService,
     // Optional so unit tests that predate Hyper-V can build the service without it.
     @Optional() private readonly hyperv?: HypervService,
+    @Optional() private readonly proxmox?: ProxmoxService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -562,6 +582,16 @@ echo "Amber agent installed and started."
   }
 
   async remove(id: string): Promise<void> {
+    const cluster = await this.db
+      .selectFrom('proxmox_clusters')
+      .select('name')
+      .where('primary_agent_id', '=', id)
+      .executeTakeFirst();
+    if (cluster) {
+      throw new ConflictException(
+        `The agent is the primary agent of Proxmox cluster "${cluster.name}"; pick another one first`,
+      );
+    }
     await this.db.deleteFrom('agents').where('id', '=', id).execute();
   }
 
@@ -667,6 +697,8 @@ echo "Amber agent installed and started."
         restic_version: dto.resticVersion ?? null,
         agent_version: dto.agentVersion ?? null,
         last_ip: agent.ip ?? null,
+        // What a PVE node agent runs on; it links the agent to its cluster.
+        proxmox_info: dto.proxmox ? JSON.stringify(dto.proxmox) : null,
         updated_at: new Date(),
       })
       .where('id', '=', agent.id)
@@ -675,11 +707,16 @@ echo "Amber agent installed and started."
 
     const hypervCapable =
       !!this.hyperv && (dto.capabilities?.includes(AGENT_CAPABILITY_HYPERV) ?? false);
+    const proxmoxCapable =
+      !!this.proxmox && (dto.capabilities?.includes(AGENT_CAPABILITY_PROXMOX) ?? false);
     const tasks: AgentTask[] = [];
     tasks.push(...(await this.claimBackupTasks(agent.id, hypervCapable)));
-    tasks.push(...(await this.claimRestoreTasks(agent.id, hypervCapable)));
+    tasks.push(...(await this.claimRestoreTasks(agent.id, hypervCapable, proxmoxCapable)));
     if (hypervCapable) {
       tasks.push(...(await this.hyperv!.claimInventoryTasks(agent.id)));
+    }
+    if (proxmoxCapable) {
+      tasks.push(...(await this.proxmox!.claimTasks(agent.id, dto.proxmox)));
     }
     if (dto.capabilities?.includes(AGENT_CAPABILITY_CHECK)) {
       tasks.push(...(await this.claimCheckTasks(agent.id)));
@@ -722,6 +759,8 @@ echo "Amber agent installed and started."
         'backup_jobs.hyperv_config',
       ])
       .where('backup_jobs.agent_id', '=', agentId)
+      // Proxmox runs are split into per-guest items (ProxmoxService).
+      .where('backup_jobs.source_kind', '!=', 'proxmox')
       .where('job_runs.kind', '=', 'backup')
       .where('job_runs.status', '=', 'queued')
       // A retry waits out its delay before it is handed over.
@@ -900,6 +939,7 @@ echo "Amber agent installed and started."
   private async claimRestoreTasks(
     agentId: string,
     hypervCapable = false,
+    proxmoxCapable = false,
   ): Promise<AgentTask[]> {
     const runs = await this.db
       .selectFrom('restore_runs')
@@ -946,9 +986,25 @@ echo "Amber agent installed and started."
         };
       }
 
+      let proxmox: ProxmoxTaskPayload | undefined;
+      if (run.mode === 'proxmox') {
+        const spec = destination.proxmox;
+        if (!proxmoxCapable || !spec) {
+          await this.failClaimedRun('restore_runs', run.id, PROXMOX_UNSUPPORTED);
+          continue;
+        }
+        try {
+          proxmox = await this.proxmox!.restorePayload(spec);
+        } catch (e) {
+          await this.failClaimedRun('restore_runs', run.id, `Preparing the restore failed: ${e}`);
+          continue;
+        }
+      }
+
       tasks.push({
-        type: hyperv ? 'hyperv-restore' : 'restore',
+        type: hyperv ? 'hyperv-restore' : proxmox ? 'proxmox-restore' : 'restore',
         hyperv,
+        proxmox,
         taskId: run.id,
         repository: resolved.repository,
         password: resolved.password,
@@ -1152,6 +1208,32 @@ echo "Amber agent installed and started."
       );
       return { ok: true };
     }
+    if (taskId.startsWith(PROXMOX_INVENTORY_TASK_PREFIX)) {
+      if (!this.proxmox) throw new NotFoundException('Task not found for this agent');
+      await this.proxmox.recordInventory(
+        agentId,
+        taskId.slice(PROXMOX_INVENTORY_TASK_PREFIX.length),
+        {
+          status: dto.status,
+          inventory: dto.proxmoxInventory as ProxmoxInventory | undefined,
+          error: dto.error,
+        },
+      );
+      return { ok: true };
+    }
+    if (taskId.startsWith(PROXMOX_RETENTION_TASK_PREFIX)) {
+      if (!this.proxmox) throw new NotFoundException('Task not found for this agent');
+      await this.proxmox.recordRetention(
+        agentId,
+        taskId.slice(PROXMOX_RETENTION_TASK_PREFIX.length),
+        dto,
+      );
+      return { ok: true };
+    }
+    // One guest of a Proxmox run.
+    if (this.proxmox && (await this.proxmox.recordItemResult(agentId, taskId, dto))) {
+      return { ok: true };
+    }
     // Route to the correct run table.
     const jobRun = await this.db
       .selectFrom('job_runs')
@@ -1197,6 +1279,9 @@ echo "Amber agent installed and started."
   ): Promise<{ ok: boolean }> {
     // Progress during a long task keeps the agent marked online without a poll.
     await this.touchAgent(agentId);
+    if (this.proxmox && (await this.proxmox.recordItemProgress(agentId, taskId, stats))) {
+      return { ok: true };
+    }
     const jobRun = await this.db
       .selectFrom('job_runs')
       .select('id')
@@ -1216,6 +1301,10 @@ echo "Amber agent installed and started."
   async taskState(agentId: string, taskId: string): Promise<{ cancelled: boolean }> {
     // Polled throughout a long task, so it doubles as a heartbeat.
     await this.touchAgent(agentId);
+    if (this.proxmox) {
+      const state = await this.proxmox.taskState(agentId, taskId);
+      if (state) return state;
+    }
     if (!UUID_RE.test(taskId)) throw new NotFoundException('Task not found for this agent');
 
     const row =

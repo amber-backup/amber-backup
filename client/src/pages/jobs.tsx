@@ -13,6 +13,12 @@ import {
   type HypervHost,
   type HypervHostDetail,
   type HypervJobConfig,
+  type ProxmoxCluster,
+  type ProxmoxClusterDetail,
+  type ProxmoxGuestType,
+  type ProxmoxJobConfig,
+  type ProxmoxMethodChoice,
+  type ProxmoxVzdumpMode,
 } from '../core/api';
 import { Icon } from '../core/icons';
 import { fmtBytes, fmtDateTime, fmtDuration, fmtRelative } from '../core/format';
@@ -40,6 +46,8 @@ export function Jobs() {
       api.get<BackendDef[]>('/targets/backends'),
       // Hyper-V hosts are admin-only too.
       api.get<HypervHost[]>('/hyperv/hosts').catch(() => [] as HypervHost[]),
+      // So are Proxmox clusters.
+      api.get<ProxmoxCluster[]>('/proxmox/clusters').catch(() => [] as ProxmoxCluster[]),
     ]),
   );
   const { open } = useModal();
@@ -47,7 +55,7 @@ export function Jobs() {
   const [query, setQuery] = useState('');
 
   if (loading || !data) return <Loading label={t.common.loading} />;
-  const [jobs, targets, agents, channels, backends, hypervHosts] = data;
+  const [jobs, targets, agents, channels, backends, hypervHosts, proxmoxClusters] = data;
   const shown = jobs.filter((j) =>
     matchesSearch(query, [
       j.name,
@@ -66,6 +74,7 @@ export function Jobs() {
         channels={channels}
         backends={backends}
         hypervHosts={hypervHosts}
+        proxmoxClusters={proxmoxClusters}
         onClose={close}
         onSaved={reload}
       />
@@ -97,6 +106,7 @@ export function Jobs() {
               channels={channels}
               backends={backends}
               hypervHosts={hypervHosts}
+              proxmoxClusters={proxmoxClusters}
               reload={reload}
             />
           ))
@@ -113,6 +123,7 @@ function JobRow({
   channels,
   backends,
   hypervHosts,
+  proxmoxClusters,
   reload,
 }: {
   job: Job;
@@ -121,6 +132,7 @@ function JobRow({
   channels: NotificationChannel[];
   backends: BackendDef[];
   hypervHosts: HypervHost[];
+  proxmoxClusters: ProxmoxCluster[];
   reload: () => void;
 }) {
   const toast = useToast();
@@ -186,6 +198,20 @@ function JobRow({
               {' · '}
             </>
           )}
+          {j.source_kind === 'proxmox' && (
+            <>
+              <Icon name="server" size={13} />{' '}
+              <span style={{ color: 'var(--amber)' }}>
+                {t.proxmox.job.rowSource(
+                  proxmoxClusters.find((c) => c.id === j.proxmox_cluster_id)?.name ?? '?',
+                  j.proxmox_config?.allGuests
+                    ? t.proxmox.job.rowAllGuests
+                    : t.proxmox.page.guestCount(j.proxmox_config?.vmids.length ?? 0),
+                )}
+              </span>
+              {' · '}
+            </>
+          )}
           {m.agent} <span style={{ color: 'var(--amber)' }}>{agentName}</span>
           {' · '}{m.target} <span style={{ color: 'var(--amber)' }}>{targetName}</span>
           {' · '}{m.repository} <span style={{ color: 'var(--amber)' }}>{repoName}</span>
@@ -234,6 +260,7 @@ function JobRow({
                 channels={channels}
                 backends={backends}
                 hypervHosts={hypervHosts}
+                proxmoxClusters={proxmoxClusters}
                 job={j}
                 onClose={close}
                 onSaved={reload}
@@ -254,6 +281,7 @@ function JobRow({
                 channels={channels}
                 backends={backends}
                 hypervHosts={hypervHosts}
+                proxmoxClusters={proxmoxClusters}
                 job={j}
                 duplicate
                 onClose={close}
@@ -382,6 +410,22 @@ export interface HypervJobPreset {
   vmIds: string[];
 }
 
+/** A new Proxmox job prefilled from the cluster page's guest selection. */
+export interface ProxmoxJobPreset {
+  clusterId: string;
+  vmids: number[];
+}
+
+/** Toggles one value in a Set held in state. */
+function toggleSet<T>(setter: (fn: (cur: Set<T>) => Set<T>) => void, value: T, on: boolean) {
+  setter((cur) => {
+    const next = new Set(cur);
+    if (on) next.add(value);
+    else next.delete(value);
+    return next;
+  });
+}
+
 export function JobEditor({
   targets,
   agents,
@@ -389,6 +433,8 @@ export function JobEditor({
   backends,
   hypervHosts = [],
   preset,
+  proxmoxClusters = [],
+  proxmoxPreset,
   job,
   duplicate = false,
   onClose,
@@ -400,6 +446,8 @@ export function JobEditor({
   backends: BackendDef[];
   hypervHosts?: HypervHost[];
   preset?: HypervJobPreset;
+  proxmoxClusters?: ProxmoxCluster[];
+  proxmoxPreset?: ProxmoxJobPreset;
   job?: Job;
   duplicate?: boolean;
   onClose: () => void;
@@ -432,8 +480,8 @@ export function JobEditor({
   // Hyper-V source: one host's VMs; the job then runs on the host's agent. A
   // saved job keeps its kind.
   const hv = t.hyperv.job;
-  const [sourceKind, setSourceKind] = useState<'files' | 'hyperv'>(
-    job?.source_kind ?? (preset ? 'hyperv' : 'files'),
+  const [sourceKind, setSourceKind] = useState<'files' | 'hyperv' | 'proxmox'>(
+    job?.source_kind ?? (proxmoxPreset ? 'proxmox' : preset ? 'hyperv' : 'files'),
   );
   const isHyperv = sourceKind === 'hyperv';
   const hvConfig: HypervJobConfig | null = job?.hyperv_config ?? null;
@@ -475,6 +523,52 @@ export function JobEditor({
     if (isHyperv && hvAgentId && where !== hvAgentId) changeWhere(hvAgentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHyperv, hvAgentId]);
+
+  // Proxmox source: guests of one cluster, backed up by the agent of each
+  // guest's node; the job itself belongs to the cluster's primary agent.
+  const px = t.proxmox.job;
+  const isProxmox = sourceKind === 'proxmox';
+  const pxConfig: ProxmoxJobConfig | null = job?.proxmox_config ?? null;
+  const [pxClusterId, setPxClusterId] = useState<string>(
+    job?.proxmox_cluster_id ?? proxmoxPreset?.clusterId ?? proxmoxClusters[0]?.id ?? '',
+  );
+  const [pxAll, setPxAll] = useState<boolean>(pxConfig?.allGuests ?? false);
+  const [pxVmids, setPxVmids] = useState<Set<number>>(() => new Set(pxConfig?.vmids ?? proxmoxPreset?.vmids ?? []));
+  const [pxExclude, setPxExclude] = useState<Set<number>>(() => new Set(pxConfig?.excludeVmids ?? []));
+  const [pxPools, setPxPools] = useState<Set<string>>(() => new Set(pxConfig?.pools ?? []));
+  const [pxTags, setPxTags] = useState<Set<string>>(() => new Set(pxConfig?.pveTags ?? []));
+  const [pxTypes, setPxTypes] = useState<Set<ProxmoxGuestType>>(() => new Set(pxConfig?.types ?? ['qemu', 'lxc']));
+  const [pxTemplates, setPxTemplates] = useState<boolean>(pxConfig?.includeTemplates ?? false);
+  const [pxVmMethod, setPxVmMethod] = useState<ProxmoxMethodChoice>(pxConfig?.vmMethod ?? 'auto');
+  const [pxCtMethod, setPxCtMethod] = useState<ProxmoxMethodChoice>(pxConfig?.ctMethod ?? 'auto');
+  const [pxMode, setPxMode] = useState<ProxmoxVzdumpMode>(pxConfig?.vzdumpMode ?? 'snapshot');
+  const [pxRequireConsistent, setPxRequireConsistent] = useState<boolean>(pxConfig?.requireConsistent ?? false);
+  const [pxParallel, setPxParallel] = useState<number>(pxConfig?.parallelPerNode ?? 1);
+  const [pxMaxParallel, setPxMaxParallel] = useState<string>(
+    pxConfig?.maxParallel != null ? String(pxConfig.maxParallel) : '',
+  );
+  const [pxDetail, setPxDetail] = useState<ProxmoxClusterDetail | null>(null);
+  useEffect(() => {
+    if (!isProxmox || !pxClusterId) return;
+    let live = true;
+    api
+      .get<ProxmoxClusterDetail>(`/proxmox/clusters/${pxClusterId}`)
+      .then((d) => live && setPxDetail(d))
+      .catch(() => live && setPxDetail(null));
+    return () => {
+      live = false;
+    };
+  }, [isProxmox, pxClusterId]);
+  const pxGuests = [...(pxDetail?.inventory?.guests ?? [])].sort((a, b) => a.vmid - b.vmid);
+  const pxPoolNames = [...new Set(pxGuests.map((g) => g.pool).filter((p): p is string => !!p)), ...pxPools]
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
+  const pxTagNames = [...new Set([...pxGuests.flatMap((g) => g.tags), ...pxTags])].sort();
+  const pxAgentId = proxmoxClusters.find((c) => c.id === pxClusterId)?.primary_agent_id;
+  useEffect(() => {
+    if (isProxmox && pxAgentId && where !== pxAgentId) changeWhere(pxAgentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProxmox, pxAgentId]);
 
   // Repository: a connection (target) plus the repo-specific fields
   // (bucket/prefix/path), or the local filesystem (LOCAL_REPO ⇒ target_id null).
@@ -615,6 +709,41 @@ export function JobEditor({
       };
     }
 
+    let proxmoxPayload: Record<string, unknown> = {};
+    if (isProxmox) {
+      if (!pxClusterId) {
+        toast(px.noClusters, 'error');
+        return false;
+      }
+      if (pxTypes.size === 0) {
+        toast(px.selectTypes, 'error');
+        return false;
+      }
+      if (!pxAll && pxVmids.size === 0 && pxPools.size === 0 && pxTags.size === 0) {
+        toast(px.selectGuests, 'error');
+        return false;
+      }
+      const config: ProxmoxJobConfig = {
+        allGuests: pxAll,
+        vmids: pxAll ? [] : [...pxVmids],
+        pools: pxAll ? [] : [...pxPools],
+        pveTags: pxAll ? [] : [...pxTags],
+        excludeVmids: [...pxExclude],
+        types: [...pxTypes],
+        includeTemplates: pxTemplates,
+        vmMethod: pxVmMethod,
+        ctMethod: pxCtMethod,
+        vzdumpMode: pxMode,
+        requireConsistent: pxRequireConsistent,
+        parallelPerNode: pxParallel,
+      };
+      const max = Math.floor(Number(pxMaxParallel) || 0);
+      if (max > 0) config.maxParallel = max;
+      proxmoxPayload = { proxmoxClusterId: pxClusterId, proxmoxConfig: config };
+    }
+    const vmSource = isHyperv || isProxmox;
+    const sourcePayload = isHyperv ? hypervPayload : proxmoxPayload;
+
     // 'local' means the server; any other value is an agent id.
     const location = where === 'local' ? 'local' : 'agent';
     const agentId = where === 'local' ? undefined : where;
@@ -663,7 +792,7 @@ export function JobEditor({
       if (isEdit) {
         const patch: Record<string, unknown> = {
           name,
-          ...(isHyperv ? hypervPayload : { location, agentId, paths: pathList }),
+          ...(vmSource ? sourcePayload : { location, agentId, paths: pathList }),
           targetId: targetIdPayload,
           repoConfig,
           cronExpr: cron,
@@ -679,8 +808,8 @@ export function JobEditor({
       } else {
         const payload: Record<string, unknown> = {
           name,
-          location: isHyperv ? 'agent' : location,
-          ...(isHyperv ? { sourceKind: 'hyperv', ...hypervPayload } : { paths: pathList }),
+          location: vmSource ? 'agent' : location,
+          ...(vmSource ? { sourceKind, ...sourcePayload } : { paths: pathList }),
           targetId: targetIdPayload,
           repoConfig,
           repoPassword,
@@ -690,7 +819,7 @@ export function JobEditor({
           ...retryPayload,
           enabled,
         };
-        if (agentId && !isHyperv) payload.agentId = agentId;
+        if (agentId && !vmSource) payload.agentId = agentId;
         if (repoCredentials) payload.repoCredentials = repoCredentials;
         await api.post('/jobs', payload);
       }
@@ -730,19 +859,166 @@ export function JobEditor({
         </Section>
 
         <Section title={m.source.title} sub={m.source.sub}>
-          {(hypervHosts.length > 0 || isHyperv) && (
+          {(hypervHosts.length > 0 || proxmoxClusters.length > 0 || sourceKind !== 'files') && (
             <Field label={hv.sourceKind}>
               <select
                 value={sourceKind}
                 disabled={isEdit}
-                onChange={(e) => setSourceKind(e.target.value as 'files' | 'hyperv')}
+                onChange={(e) => setSourceKind(e.target.value as 'files' | 'hyperv' | 'proxmox')}
               >
                 <option value="files">{hv.kindFiles}</option>
-                <option value="hyperv">{hv.kindHyperv}</option>
+                {(hypervHosts.length > 0 || isHyperv) && <option value="hyperv">{hv.kindHyperv}</option>}
+                {(proxmoxClusters.length > 0 || isProxmox) && <option value="proxmox">{px.kindProxmox}</option>}
               </select>
             </Field>
           )}
-          {isHyperv ? (
+          {isProxmox ? (
+            <>
+              <Field label={px.cluster} help={proxmoxClusters.length ? px.runsOn : px.noClusters}>
+                <select value={pxClusterId} onChange={(e) => setPxClusterId(e.target.value)}>
+                  {proxmoxClusters.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={px.types}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={pxTypes.has('qemu')}
+                      onChange={(e) => toggleSet(setPxTypes, 'qemu' as ProxmoxGuestType, e.target.checked)}
+                    />
+                    {px.typeVms}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={pxTypes.has('lxc')}
+                      onChange={(e) => toggleSet(setPxTypes, 'lxc' as ProxmoxGuestType, e.target.checked)}
+                    />
+                    {px.typeCts}
+                  </label>
+                  <label className="checkbox">
+                    <input type="checkbox" checked={pxTemplates} onChange={(e) => setPxTemplates(e.target.checked)} />
+                    {px.includeTemplates}
+                  </label>
+                </div>
+              </Field>
+              <label className="checkbox">
+                <input type="checkbox" checked={pxAll} onChange={(e) => setPxAll(e.target.checked)} />
+                {px.allGuests}
+              </label>
+              {!pxAll && (
+                <Field label={px.guests} help={pxDetail && !pxDetail.inventory ? px.noInventory : undefined}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                    {pxGuests.map((g) => (
+                      <label key={g.vmid} className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={pxVmids.has(g.vmid)}
+                          onChange={(e) => toggleSet(setPxVmids, g.vmid, e.target.checked)}
+                        />
+                        {g.vmid} · {g.name}{' '}
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {g.type === 'qemu' ? t.proxmox.detail.typeVm : t.proxmox.detail.typeCt} · {g.node} · {g.status}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+              )}
+              {!pxAll && (
+                <Field label={px.pools}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                    {pxPoolNames.length === 0 ? (
+                      <span className="muted" style={{ fontSize: 12 }}>{px.none}</span>
+                    ) : (
+                      pxPoolNames.map((p) => (
+                        <label key={p} className="checkbox">
+                          <input type="checkbox" checked={pxPools.has(p)} onChange={(e) => toggleSet(setPxPools, p, e.target.checked)} />
+                          {p}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </Field>
+              )}
+              {!pxAll && (
+                <Field label={px.tags}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                    {pxTagNames.length === 0 ? (
+                      <span className="muted" style={{ fontSize: 12 }}>{px.none}</span>
+                    ) : (
+                      pxTagNames.map((tag) => (
+                        <label key={tag} className="checkbox">
+                          <input type="checkbox" checked={pxTags.has(tag)} onChange={(e) => toggleSet(setPxTags, tag, e.target.checked)} />
+                          {tag}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </Field>
+              )}
+              <Field label={px.excludeGuests}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+                  {pxGuests.map((g) => (
+                    <label key={g.vmid} className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={pxExclude.has(g.vmid)}
+                        onChange={(e) => toggleSet(setPxExclude, g.vmid, e.target.checked)}
+                      />
+                      {g.vmid} · {g.name}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+              <Field label={px.vmMethod} help={px.methodHelp}>
+                <select value={pxVmMethod} onChange={(e) => setPxVmMethod(e.target.value as ProxmoxMethodChoice)}>
+                  <option value="auto">{px.methodAuto}</option>
+                  <option value="vzdump">{px.methodVzdump}</option>
+                </select>
+              </Field>
+              <Field label={px.ctMethod}>
+                <select value={pxCtMethod} onChange={(e) => setPxCtMethod(e.target.value as ProxmoxMethodChoice)}>
+                  <option value="auto">{px.methodAuto}</option>
+                  <option value="vzdump">{px.methodVzdump}</option>
+                </select>
+              </Field>
+              <Field label={px.vzdumpMode}>
+                <select value={pxMode} onChange={(e) => setPxMode(e.target.value as ProxmoxVzdumpMode)}>
+                  <option value="snapshot">{px.modeSnapshot}</option>
+                  <option value="suspend">{px.modeSuspend}</option>
+                  <option value="stop">{px.modeStop}</option>
+                </select>
+              </Field>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={pxRequireConsistent}
+                  onChange={(e) => setPxRequireConsistent(e.target.checked)}
+                />
+                {px.requireConsistent}
+              </label>
+              <Field label={px.parallelPerNode}>
+                <select value={pxParallel} onChange={(e) => setPxParallel(Number(e.target.value))}>
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={px.maxParallel} help={px.maxParallelHelp}>
+                <input
+                  type="number"
+                  min="1"
+                  value={pxMaxParallel}
+                  placeholder={px.unlimited}
+                  onChange={(e) => setPxMaxParallel(e.target.value)}
+                />
+              </Field>
+            </>
+          ) : isHyperv ? (
             <>
               <Field label={hv.host} help={hypervHosts.length ? undefined : hv.noHosts}>
                 <select value={hvHostId} onChange={(e) => setHvHostId(e.target.value)}>

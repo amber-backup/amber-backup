@@ -6,6 +6,16 @@ import {
   Selectable,
   Updateable,
 } from 'kysely';
+import type {
+  ProxmoxAgentInfo,
+  ProxmoxCbtState,
+  ProxmoxGuestResult,
+  ProxmoxGuestType,
+  ProxmoxInventory,
+  ProxmoxJobConfig,
+  ProxmoxMethod,
+  ProxmoxRestoreSpec,
+} from '../proxmox/proxmox.contract';
 
 /**
  * Kysely database schema. Mirrors the migrations in `src/database/migrations`.
@@ -49,7 +59,7 @@ export type RunStatus =
   | 'success'
   | 'failed'
   | 'cancelled';
-export type RestoreMode = 'original' | 'alternate_path' | 'download' | 'hyperv';
+export type RestoreMode = 'original' | 'alternate_path' | 'download' | 'hyperv' | 'proxmox';
 export type SecretType =
   | 'repo_password'
   | 'backend_credential'
@@ -292,6 +302,8 @@ export interface AgentsTable {
   allowed_ips: JSONColumnType<string[], string | undefined, string>;
   /** Source address of the agent's latest poll. */
   last_ip: ColumnType<string | null, string | null | undefined, string | null>;
+  /** What an agent on a PVE node announced in its latest poll; null elsewhere. */
+  proxmox_info: JSONColumnType<ProxmoxAgentInfo | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -376,6 +388,86 @@ export interface HypervCredential {
   username: string;
   password: string;
 }
+
+// --- proxmox_clusters --------------------------------------------------------
+
+/**
+ * A Proxmox VE cluster (a standalone node is a one-node cluster). Its node
+ * agents are the agents whose `proxmox_info.clusterId` equals `pve_cluster_id`.
+ */
+export interface ProxmoxClustersTable {
+  id: Generated<string>;
+  name: string;
+  slug: string;
+  /** sha256 of /etc/pve/pve-root-ca.pem, as the node agents announce it. */
+  pve_cluster_id: string;
+  /** corosync cluster name; null for a standalone node. */
+  cluster_name: string | null;
+  /** Reads the inventory, runs retention; agent_id of the cluster's jobs. */
+  primary_agent_id: string;
+  inventory: JSONColumnType<ProxmoxInventory | null, string | null | undefined, string | null>;
+  inventory_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  inventory_error: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Set to ask for a fresh inventory on the next poll of a node agent. */
+  inventory_requested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  owner_id: string;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+export type ProxmoxCluster = Selectable<ProxmoxClustersTable>;
+
+export type ProxmoxRunPhase = 'items' | 'retention' | 'retention_running' | 'done';
+
+export type ProxmoxRunItemStatus =
+  | 'queued'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
+
+/** One guest of a Proxmox backup run, handed to the agent of its node. */
+export interface ProxmoxRunItemsTable {
+  id: Generated<string>;
+  run_id: string;
+  job_id: string;
+  vmid: number;
+  guest_type: ProxmoxGuestType;
+  name: ColumnType<string, string | undefined, string>;
+  /** Node the guest is expected on; changes when the guest moved. */
+  node: string;
+  /** Agent that claimed the item. */
+  agent_id: ColumnType<string | null, string | null | undefined, string | null>;
+  status: ColumnType<ProxmoxRunItemStatus, ProxmoxRunItemStatus | undefined, ProxmoxRunItemStatus>;
+  method: ColumnType<ProxmoxMethod | null, ProxmoxMethod | null | undefined, ProxmoxMethod | null>;
+  /** How often the guest was found on another node. */
+  moves: ColumnType<number, number | undefined, number>;
+  result: JSONColumnType<ProxmoxGuestResult | null, string | null | undefined, string | null>;
+  progress: JSONColumnType<Record<string, unknown> | null, string | null | undefined, string | null>;
+  error: ColumnType<string | null, string | null | undefined, string | null>;
+  log: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+export type ProxmoxRunItem = Selectable<ProxmoxRunItemsTable>;
+
+/** A guest as one job last backed it up: the next run's parent and CBT state. */
+export interface ProxmoxJobGuestsTable {
+  job_id: string;
+  vmid: number;
+  guest_type: ProxmoxGuestType;
+  name: ColumnType<string, string | undefined, string>;
+  /** Last successful snapshot (the next backup's --parent). */
+  last_snapshot_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Outcome of the latest attempt (success | failed | skipped). */
+  last_status: ColumnType<string | null, string | null | undefined, string | null>;
+  last_result: JSONColumnType<ProxmoxGuestResult | null, string | null | undefined, string | null>;
+  last_finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  cbt: JSONColumnType<ProxmoxCbtState | null, string | null | undefined, string | null>;
+  updated_at: UpdatedAt;
+}
+export type ProxmoxJobGuest = Selectable<ProxmoxJobGuestsTable>;
 
 // --- enrollment_tokens ------------------------------------------------------
 
@@ -467,8 +559,8 @@ export interface JobNotifyConfig {
   onFailure?: boolean;
 }
 
-/** What a backup job reads: host paths, or the VMs of a Hyper-V host. */
-export type SourceKind = 'files' | 'hyperv';
+/** What a backup job reads: host paths, the VMs of a Hyper-V host, or the guests of a Proxmox cluster. */
+export type SourceKind = 'files' | 'hyperv' | 'proxmox';
 
 /**
  * Production: application-consistent checkpoint (guest VSS), falling back to a
@@ -498,6 +590,9 @@ export interface BackupJobsTable {
   /** For source_kind = hyperv: the host and its VM selection. */
   hyperv_host_id: string | null;
   hyperv_config: JSONColumnType<HypervJobConfig | null, string | null | undefined, string | null>;
+  /** For source_kind = proxmox: the cluster and its guest selection. */
+  proxmox_cluster_id: ColumnType<string | null, string | null | undefined, string | null>;
+  proxmox_config: JSONColumnType<ProxmoxJobConfig | null, string | null | undefined, string | null>;
   /** Where the data lives (embedded, formerly the sources table). */
   location: SourceLocation;
   agent_id: string | null;
@@ -607,6 +702,9 @@ export interface JobRunsTable {
   >;
   log: string | null;
   error: string | null;
+  /** Proxmox runs: items → retention → retention_running → done; null otherwise. */
+  proxmox_phase: ColumnType<ProxmoxRunPhase | null, ProxmoxRunPhase | null | undefined, ProxmoxRunPhase | null>;
+  proxmox_phase_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
 }
 export type JobRun = Selectable<JobRunsTable>;
@@ -651,6 +749,8 @@ export interface RestoreDestination {
   path?: string;
   /** For hyperv mode. */
   hyperv?: HypervRestoreSpec;
+  /** For proxmox mode. */
+  proxmox?: ProxmoxRestoreSpec;
   /** When restoring onto an agent host. */
   agentId?: string;
   /** For download mode: server-side artifact reference. */
@@ -833,6 +933,9 @@ export interface Database {
   repository_stats_history: RepositoryStatsHistoryTable;
   agents: AgentsTable;
   hyperv_hosts: HypervHostsTable;
+  proxmox_clusters: ProxmoxClustersTable;
+  proxmox_run_items: ProxmoxRunItemsTable;
+  proxmox_job_guests: ProxmoxJobGuestsTable;
   enrollment_tokens: EnrollmentTokensTable;
   app_settings: AppSettingsTable;
   backup_jobs: BackupJobsTable;

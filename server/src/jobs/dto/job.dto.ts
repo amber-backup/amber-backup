@@ -18,6 +18,7 @@ import {
 import { Type } from 'class-transformer';
 import { ResticOptions, JobNotifyConfig } from '../../database/database.types';
 import { HypervJobConfigDto } from '../../hyperv/dto/hyperv.dto';
+import { ProxmoxJobConfigDto } from '../../proxmox/dto/proxmox.dto';
 
 export class CreateJobDto {
   @ApiProperty()
@@ -26,13 +27,14 @@ export class CreateJobDto {
   name!: string;
 
   @ApiPropertyOptional({
-    enum: ['files', 'hyperv'],
+    enum: ['files', 'hyperv', 'proxmox'],
     default: 'files',
-    description: 'files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent)',
+    description:
+      "files: host paths; hyperv: VMs of a Hyper-V host (runs on its agent); proxmox: guests of a Proxmox cluster (run on their nodes' agents)",
   })
   @IsOptional()
-  @IsIn(['files', 'hyperv'])
-  sourceKind?: 'files' | 'hyperv';
+  @IsIn(['files', 'hyperv', 'proxmox'])
+  sourceKind?: 'files' | 'hyperv' | 'proxmox';
 
   @ApiProperty({
     enum: ['local', 'agent'],
@@ -41,13 +43,13 @@ export class CreateJobDto {
   @IsIn(['local', 'agent'])
   location!: 'local' | 'agent';
 
-  @ApiPropertyOptional({ description: 'Required when location = agent (not for Hyper-V jobs)' })
-  @ValidateIf((o) => o.location === 'agent' && o.sourceKind !== 'hyperv')
+  @ApiPropertyOptional({ description: 'Required when location = agent (not for Hyper-V/Proxmox jobs)' })
+  @ValidateIf((o) => o.location === 'agent' && o.sourceKind !== 'hyperv' && o.sourceKind !== 'proxmox')
   @IsUUID()
   agentId?: string;
 
-  @ApiProperty({ type: [String], example: ['/home', '/etc'], description: 'Not used by Hyper-V jobs' })
-  @ValidateIf((o) => o.sourceKind !== 'hyperv')
+  @ApiProperty({ type: [String], example: ['/home', '/etc'], description: 'Not used by Hyper-V/Proxmox jobs' })
+  @ValidateIf((o) => o.sourceKind !== 'hyperv' && o.sourceKind !== 'proxmox')
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
@@ -63,6 +65,17 @@ export class CreateJobDto {
   @ValidateNested()
   @Type(() => HypervJobConfigDto)
   hypervConfig?: HypervJobConfigDto;
+
+  @ApiPropertyOptional({ description: 'Proxmox jobs: the cluster whose guests are backed up' })
+  @ValidateIf((o) => o.sourceKind === 'proxmox')
+  @IsUUID()
+  proxmoxClusterId?: string;
+
+  @ApiPropertyOptional({ type: ProxmoxJobConfigDto, description: 'Proxmox jobs: guest selection and method' })
+  @ValidateIf((o) => o.sourceKind === 'proxmox')
+  @ValidateNested()
+  @Type(() => ProxmoxJobConfigDto)
+  proxmoxConfig?: ProxmoxJobConfigDto;
 
   @ApiPropertyOptional({
     description: 'Shared connection the repository lives on; omit for a local repo',
@@ -204,6 +217,17 @@ export class UpdateJobDto {
   @ValidateNested()
   @Type(() => HypervJobConfigDto)
   hypervConfig?: HypervJobConfigDto;
+
+  @ApiPropertyOptional({ description: 'Proxmox jobs: move to another cluster' })
+  @IsOptional()
+  @IsUUID()
+  proxmoxClusterId?: string;
+
+  @ApiPropertyOptional({ type: ProxmoxJobConfigDto, description: 'Proxmox jobs: guest selection and method' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProxmoxJobConfigDto)
+  proxmoxConfig?: ProxmoxJobConfigDto;
 
   @ApiPropertyOptional({ description: 'Connection id, or null for a local repo' })
   @IsOptional()

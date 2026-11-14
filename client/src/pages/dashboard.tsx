@@ -17,6 +17,8 @@ import { PageHeader, ActionButton, Loading, Spinner, ListSearch } from '../ui/pr
 import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
 import { checkLevelLabel } from '../ui/integrity';
+import { useModal } from '../ui/modal';
+import { ProxmoxAttention, ProxmoxRunItemsModal } from './proxmox';
 import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 
@@ -60,6 +62,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
   const [agents, setAgents] = useState(agents0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [pageLoading, setPageLoading] = useState(false);
+  // Backups of these jobs fan out over Proxmox guests; their rows open the per-guest view.
+  const proxmoxJobIds = new Set(jobs.filter((j) => j.source_kind === 'proxmox').map((j) => j.id));
   // Maintenance (prunes, integrity checks) is noise next to the backups, so it
   // stays hidden until asked for.
   const [showMaintenance, setShowMaintenance] = useState(false);
@@ -265,6 +269,8 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
 
       <HypervAttention />
 
+      <ProxmoxAttention />
+
       <div className="content-grid dashboard-grid">
         <div className="main-stack fill-col">
           <StoragePanel />
@@ -298,7 +304,12 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
             <div className="panel-scroll" ref={scrollRef}>
               <div>
                 {runs.map((r) => (
-                  <RunRow key={r.id} run={r} onCancelled={() => markCancelled(r.id)} />
+                  <RunRow
+                    key={r.id}
+                    run={r}
+                    proxmox={r.kind === 'backup' && proxmoxJobIds.has(r.job_id ?? '')}
+                    onCancelled={() => markCancelled(r.id)}
+                  />
                 ))}
                 {pageLoading && (
                   <div className="loading" style={{ padding: 16 }}>
@@ -453,10 +464,29 @@ function StatCard({
   );
 }
 
-function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) {
+function RunRow({
+  run: r,
+  proxmox = false,
+  onCancelled,
+}: {
+  run: Run;
+  /** A backup of a Proxmox job: its per-guest rows can be opened. */
+  proxmox?: boolean;
+  onCancelled: () => void;
+}) {
   const t = useT();
   const a = t.dashboard.activity;
   const toast = useToast();
+  const { open } = useModal();
+  const openGuests = () =>
+    open((close) => (
+      <ProxmoxRunItemsModal
+        runId={r.id}
+        jobName={r.job_name ?? a.jobFallback}
+        active={isActive(r.status)}
+        onClose={close}
+      />
+    ));
   const [cancelling, setCancelling] = useState(false);
   const restore = r.kind === 'restore';
   // What a finished activity moved: the data a backup added, or the size a
@@ -599,12 +629,29 @@ function RunRow({ run: r, onCancelled }: { run: Run; onCancelled: () => void }) 
             </span>
           )}
           {retry > 0 && <span className="badge muted row-kind">{a.retryBadge(retry)}</span>}
+          {proxmox && (
+            <button
+              className="badge muted row-kind"
+              style={{ cursor: 'pointer', border: 'none' }}
+              title={t.proxmox.runItems.open}
+              onClick={openGuests}
+            >
+              {proxmoxGuestsLabel(r, t)}
+            </button>
+          )}
         </div>
         <div className="row-sub">{sub}</div>
       </div>
       {meta}
     </div>
   );
+}
+
+/** Badge of a Proxmox run: "Guests" or, once settled, "3/4 guests". */
+function proxmoxGuestsLabel(r: Run, t: Messages): string {
+  const s = r.stats?.proxmoxGuests as { total?: number; success?: number } | undefined;
+  if (s && typeof s.total === 'number') return `${t.proxmox.runItems.open} ${s.success ?? 0}/${s.total}`;
+  return t.proxmox.runItems.open;
 }
 
 /** Sub line of a finished or queued check: what it read and what it found. */

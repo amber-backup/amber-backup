@@ -19,6 +19,7 @@ export const common = {
     overview: 'Overview',
     agents: 'Agents',
     hyperv: 'Hyper-V',
+    proxmox: 'Proxmox VE',
     targets: 'Targets',
     jobs: 'Jobs',
     snapshots: 'Snapshots',

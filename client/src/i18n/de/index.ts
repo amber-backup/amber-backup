@@ -7,6 +7,7 @@ import { targets } from './targets';
 import { jobs } from './jobs';
 import { agents } from './agents';
 import { hyperv } from './hyperv';
+import { proxmox } from './proxmox';
 import { snapshots } from './snapshots';
 import { users } from './users';
 import { notifications } from './notifications';
@@ -27,6 +28,7 @@ export const de: Messages = {
   jobs,
   agents,
   hyperv,
+  proxmox,
   snapshots,
   users,
   notifications,

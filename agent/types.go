@@ -24,6 +24,8 @@ type PollRequest struct {
 	// Task types supported beyond backup/restore; the server only hands out
 	// tasks of a type the agent announces here.
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Set when the agent runs on a Proxmox VE node (or its mock).
+	Proxmox *ProxmoxAgentInfo `json:"proxmox,omitempty"`
 }
 
 type CredentialFile struct {
@@ -99,6 +101,8 @@ type Task struct {
 	CheckSubset string `json:"checkSubset,omitempty"`
 	// hyperv-inventory, hyperv-backup, hyperv-restore
 	Hyperv *HypervTask `json:"hyperv,omitempty"`
+	// proxmox-inventory, proxmox-backup, proxmox-retention, proxmox-restore
+	Proxmox *ProxmoxTask `json:"proxmox,omitempty"`
 }
 
 type PollResponse struct {
@@ -136,8 +140,12 @@ type TaskResult struct {
 	RepoStatsError string     `json:"repoStatsError,omitempty"`
 	// For a hyperv-inventory task: the host's VMs.
 	HypervInventory *HypervInventory `json:"hypervInventory,omitempty"`
-	Error           string           `json:"error,omitempty"`
-	Log             string           `json:"log,omitempty"`
+	// For a proxmox-inventory task: the cluster's guests, nodes and storages.
+	ProxmoxInventory *ProxmoxInventory `json:"proxmoxInventory,omitempty"`
+	// For a proxmox-backup task: the guest's outcome.
+	ProxmoxGuest *ProxmoxGuestResult `json:"proxmoxGuest,omitempty"`
+	Error        string              `json:"error,omitempty"`
+	Log          string              `json:"log,omitempty"`
 }
 
 // RepoStats mirrors the server's RepoStatsDto.

@@ -206,6 +206,14 @@ export class RunsService {
       .set({ status: 'cancelled', finished_at: new Date(), error })
       .where('id', '=', id)
       .execute();
+    // A Proxmox run's guests stop with it; their agents notice through the
+    // task-state watch of each item.
+    await this.db
+      .updateTable('proxmox_run_items')
+      .set({ status: 'cancelled', finished_at: new Date(), error })
+      .where('run_id', '=', id)
+      .where('status', 'in', ['queued', 'running'])
+      .execute();
     return { cancelled: true };
   }
 

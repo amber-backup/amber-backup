@@ -835,6 +835,11 @@ input, select, textarea {
     font-size: 11px;
 }
 
+/* Proxmox run items: "read … · added …" needs more room than a size column. */
+.row.compact .run-meta.pve-item-meta {
+    grid-template-columns: auto 84px;
+}
+
 /* Running activity: progress bar with the transferred/total figures below.
    Those figures must never wrap, so the cell is sized to hold them. */
 .run-progress {
@@ -1911,6 +1916,24 @@ input[type="checkbox"]:disabled {
     .row-meta {
         text-align: left;
         margin-right: auto;
+    }
+
+    /* Pages with several header buttons (e.g. a Proxmox cluster) wrap them
+       instead of pushing the page wider than the screen. */
+    .topbar-actions {
+        flex-wrap: wrap;
+    }
+
+    /* Proxmox guest rows: protection/last-backup text wraps instead of
+       pushing the row wider than the screen. */
+    .pve-guest-meta {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .row.compact .run-meta.pve-item-meta {
+        grid-template-columns: auto auto;
     }
 
     /* On their own line the activity figures no longer need to line up as

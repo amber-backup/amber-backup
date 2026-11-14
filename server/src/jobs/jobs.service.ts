@@ -24,6 +24,7 @@ import {
   splitConfig,
 } from '../targets/backend-registry';
 import { uniqueSlug } from '../common/slug';
+import type { ProxmoxJobConfig } from '../proxmox/proxmox.contract';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 import { IntegrityCheckConfigDto } from './dto/integrity-check.dto';
 import { DEFAULT_RETRY_DELAY_SECONDS } from './run-retry.service';
@@ -166,6 +167,54 @@ export class JobsService {
     };
   }
 
+  /**
+   * Validates a Proxmox job's cluster and guest selection. The job's agent is
+   * the cluster's primary agent; the guests are backed up by their nodes' agents.
+   */
+  private async resolveProxmoxSource(
+    clusterId: string | undefined,
+    config: ProxmoxJobConfig | undefined,
+  ): Promise<{ clusterId: string; agentId: string; config: ProxmoxJobConfig }> {
+    if (!clusterId || !config) {
+      throw new BadRequestException('A Proxmox job needs a cluster and a guest selection');
+    }
+    const cluster = await this.db
+      .selectFrom('proxmox_clusters')
+      .select(['id', 'primary_agent_id'])
+      .where('id', '=', clusterId)
+      .executeTakeFirst();
+    if (!cluster) throw new BadRequestException('Unknown Proxmox cluster');
+    const uniq = <T>(v: T[] | undefined): T[] => [...new Set(v ?? [])];
+    const vmids = uniq(config.vmids);
+    const pools = uniq(config.pools);
+    const pveTags = uniq(config.pveTags);
+    if (!config.allGuests && vmids.length + pools.length + pveTags.length === 0) {
+      throw new BadRequestException(
+        'Select at least one guest, pool or tag, or all guests of the cluster',
+      );
+    }
+    const types = uniq(config.types);
+    return {
+      clusterId: cluster.id,
+      agentId: cluster.primary_agent_id,
+      config: {
+        allGuests: config.allGuests,
+        vmids: config.allGuests ? [] : vmids,
+        pools: config.allGuests ? [] : pools,
+        pveTags: config.allGuests ? [] : pveTags,
+        excludeVmids: uniq(config.excludeVmids),
+        types: types.length ? types : ['qemu', 'lxc'],
+        includeTemplates: config.includeTemplates ?? false,
+        vmMethod: config.vmMethod ?? 'auto',
+        ctMethod: config.ctMethod ?? 'auto',
+        vzdumpMode: config.vzdumpMode ?? 'snapshot',
+        requireConsistent: config.requireConsistent ?? false,
+        parallelPerNode: Math.min(4, Math.max(1, config.parallelPerNode ?? 1)),
+        ...(config.maxParallel ? { maxParallel: config.maxParallel } : {}),
+      },
+    };
+  }
+
   nextRun(expr: string): Date | null {
     try {
       return parser
@@ -284,6 +333,16 @@ export class JobsService {
       dto.agentId = hyperv.agentId;
       dto.paths = [];
     }
+    // A Proxmox job reads the guests of a cluster; its agent is the primary.
+    const proxmox =
+      dto.sourceKind === 'proxmox'
+        ? await this.resolveProxmoxSource(dto.proxmoxClusterId, dto.proxmoxConfig)
+        : null;
+    if (proxmox) {
+      dto.location = 'agent';
+      dto.agentId = proxmox.agentId;
+      dto.paths = [];
+    }
 
     if (dto.location === 'agent') {
       if (!dto.agentId) {
@@ -341,9 +400,11 @@ export class JobsService {
           location: dto.location,
           agent_id: dto.location === 'agent' ? dto.agentId! : null,
           paths: JSON.stringify(dto.paths),
-          source_kind: hyperv ? 'hyperv' : 'files',
+          source_kind: hyperv ? 'hyperv' : proxmox ? 'proxmox' : 'files',
           hyperv_host_id: hyperv?.hostId ?? null,
           hyperv_config: hyperv ? JSON.stringify(hyperv.config) : null,
+          proxmox_cluster_id: proxmox?.clusterId ?? null,
+          proxmox_config: proxmox ? JSON.stringify(proxmox.config) : null,
           repository_id: repo.id,
           cron_expr: dto.cronExpr,
           restic_options: JSON.stringify(dto.resticOptions ?? {}),
@@ -388,6 +449,8 @@ export class JobsService {
       dto.paths !== undefined ||
       dto.hypervHostId !== undefined ||
       dto.hypervConfig !== undefined ||
+      dto.proxmoxClusterId !== undefined ||
+      dto.proxmoxConfig !== undefined ||
       dto.resticOptions !== undefined;
     if (touchesHost && !user.isAdmin) {
       throw new ForbiddenException(
@@ -400,6 +463,7 @@ export class JobsService {
     // A Hyper-V job stays one: it always runs on its host's agent and has no
     // paths. A file job can't take Hyper-V settings.
     const isHyperv = job.source_kind === 'hyperv';
+    const isProxmox = job.source_kind === 'proxmox';
     if (isHyperv) {
       if (dto.location === 'local') {
         throw new BadRequestException('A Hyper-V job runs on its host\'s agent');
@@ -411,6 +475,18 @@ export class JobsService {
       dto.paths = undefined;
     } else if (dto.hypervHostId !== undefined || dto.hypervConfig !== undefined) {
       throw new BadRequestException('Hyper-V settings only apply to Hyper-V jobs');
+    }
+    if (isProxmox) {
+      if (dto.location === 'local') {
+        throw new BadRequestException("A Proxmox job runs on its cluster's agents");
+      }
+      if (dto.paths !== undefined && dto.paths.length > 0) {
+        throw new BadRequestException('A Proxmox job backs up guests, not paths');
+      }
+      dto.agentId = undefined;
+      dto.paths = undefined;
+    } else if (dto.proxmoxClusterId !== undefined || dto.proxmoxConfig !== undefined) {
+      throw new BadRequestException('Proxmox settings only apply to Proxmox jobs');
     }
 
     // Guard against a local repo on an agent job, considering the effective
@@ -450,6 +526,18 @@ export class JobsService {
       jobPatch.hyperv_host_id = hyperv.hostId;
       jobPatch.hyperv_config = JSON.stringify(hyperv.config);
       jobPatch.agent_id = hyperv.agentId;
+    }
+    if (isProxmox && (dto.proxmoxClusterId !== undefined || dto.proxmoxConfig !== undefined)) {
+      const current = job.proxmox_config as ProxmoxJobConfig | string | null;
+      const proxmox = await this.resolveProxmoxSource(
+        dto.proxmoxClusterId ?? job.proxmox_cluster_id ?? undefined,
+        dto.proxmoxConfig ??
+          (typeof current === 'string' ? JSON.parse(current) : current) ??
+          undefined,
+      );
+      jobPatch.proxmox_cluster_id = proxmox.clusterId;
+      jobPatch.proxmox_config = JSON.stringify(proxmox.config);
+      jobPatch.agent_id = proxmox.agentId;
     }
     if (dto.cronExpr !== undefined) jobPatch.cron_expr = dto.cronExpr;
     if (dto.resticOptions !== undefined)

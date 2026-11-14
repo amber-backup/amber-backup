@@ -201,7 +201,16 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 	return 0, nil
 }
 
+// initLocks serializes ensureInitialized per repository: Proxmox guests are
+// backed up concurrently, and two `restic init` racing on a new repository
+// leave its config and keys under different master keys.
+var initLocks sync.Map // repository → *sync.Mutex
+
 func (r *resticRunner) ensureInitialized(ctx context.Context, t *Task) error {
+	mu, _ := initLocks.LoadOrStore(t.Repository, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+
 	code, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil)
 	if err != nil {
 		return err
@@ -214,6 +223,10 @@ func (r *resticRunner) ensureInitialized(ctx context.Context, t *Task) error {
 		return err
 	}
 	if code != 0 {
+		// Another host may have initialized it meanwhile.
+		if again, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil); err == nil && again == 0 {
+			return nil
+		}
 		return fmt.Errorf("restic init failed")
 	}
 	return nil

@@ -7,6 +7,7 @@ export type SlugTable =
   | 'repositories'
   | 'agents'
   | 'hyperv_hosts'
+  | 'proxmox_clusters'
   | 'backup_jobs'
   | 'notification_channels'
   | 'reports';

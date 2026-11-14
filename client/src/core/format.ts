@@ -72,6 +72,7 @@ export function restoreModeLabel(mode: string): string {
     alternate_path: t.modeAlternate,
     download: t.modeDownload,
     hyperv: t.modeHyperv,
+    proxmox: t.modeProxmox,
   };
   return labels[mode] ?? mode;
 }

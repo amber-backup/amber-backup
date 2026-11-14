@@ -61,6 +61,7 @@ export const snapshots = {
     modeAlternate: 'Alt. path',
     modeDownload: 'Download',
     modeHyperv: 'Hyper-V VM',
+    modeProxmox: 'Proxmox VE',
     download: 'Download',
   },
 };

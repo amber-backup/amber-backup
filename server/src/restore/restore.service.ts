@@ -13,10 +13,13 @@ import {
   CANCELLED_NO_PROCESS_MESSAGE,
   CANCELLED_ON_SERVER_AGENT_MESSAGE,
 } from '../common/cancel-messages';
+import { sql } from 'kysely';
 import { RestoreDestination } from '../database/database.types';
 import { JobsService } from '../jobs/jobs.service';
 import { RestoreRunnerService } from './restore-runner.service';
 import { CreateRestoreDto } from './dto/restore.dto';
+import { ProxmoxRestoreSpecDto } from '../proxmox/dto/proxmox.dto';
+import { ProxmoxInventory } from '../proxmox/proxmox.contract';
 
 @Injectable()
 export class RestoreService {
@@ -68,6 +71,47 @@ export class RestoreService {
       dto.includedPaths = undefined;
     } else if (dto.destination?.hyperv) {
       throw new BadRequestException('destination.hyperv only applies to the hyperv mode');
+    }
+
+    // A guest restore runs on the agent of the target node — which may be
+    // another node (or cluster) than the one backed up.
+    if (dto.mode === 'proxmox') {
+      const spec = dto.destination?.proxmox;
+      if (job.source_kind !== 'proxmox' || !spec) {
+        throw new BadRequestException(
+          'A Proxmox restore needs a Proxmox job and destination.proxmox',
+        );
+      }
+      if (spec.action === 'files' && spec.guestType !== 'lxc') {
+        throw new BadRequestException('Only container backups can be restored file by file');
+      }
+      if (spec.action === 'guest' && spec.replaceOriginal && spec.newVmid && spec.newVmid !== spec.vmid) {
+        throw new BadRequestException('replaceOriginal keeps the original VMID; drop newVmid');
+      }
+      assertProxmoxRestoreSpec(spec, dto.includedPaths);
+      const cluster = await this.db
+        .selectFrom('proxmox_clusters')
+        .select(['id', 'pve_cluster_id', 'inventory'])
+        .where('id', '=', spec.clusterId)
+        .executeTakeFirst();
+      if (!cluster) throw new BadRequestException('Unknown Proxmox cluster');
+      if (spec.liveRestore && spec.overlayStorage) {
+        assertOverlayStorage(cluster.inventory, spec.overlayStorage, spec.targetNode);
+      }
+      const agent = await this.db
+        .selectFrom('agents')
+        .select('id')
+        .where(sql<string>`proxmox_info->>'clusterId'`, '=', cluster.pve_cluster_id)
+        .where(sql<string>`proxmox_info->>'node'`, '=', spec.targetNode)
+        .executeTakeFirst();
+      if (!agent) {
+        throw new BadRequestException(`No Amber agent runs on node ${spec.targetNode}`);
+      }
+      dto.destination = { ...dto.destination, agentId: agent.id };
+      // Selected paths only make sense for file restores.
+      if (spec.action === 'guest') dto.includedPaths = undefined;
+    } else if (dto.destination?.proxmox) {
+      throw new BadRequestException('destination.proxmox only applies to the proxmox mode');
     }
 
     const run = await this.db
@@ -184,5 +228,67 @@ export class RestoreService {
       throw new NotFoundException('Download artifact missing');
     }
     return { path: dest.downloadRef, filename: `restore-${id}.tar.gz` };
+  }
+}
+
+/** Guest-path selector of a vm-files restore: optional `[disk][pN]:` before an absolute path. */
+const VM_FILES_PATH_RE = /^(?:[a-z]+[0-9]+(?:p[0-9]+)?:|p[0-9]+:)?\/.*$/;
+
+/** Field combinations of a Proxmox restore that the DTO alone can't check. */
+export function assertProxmoxRestoreSpec(
+  spec: ProxmoxRestoreSpecDto,
+  includedPaths: string[] | undefined,
+): void {
+  if (spec.action === 'vm-files') {
+    if (spec.guestType !== 'qemu') {
+      throw new BadRequestException('Only VM backups can restore files to a directory (use files for containers)');
+    }
+    const target = (spec.targetPath ?? '').replace(/\/+$/, '');
+    if (!target.startsWith('/') || target.split('/').includes('..')) {
+      throw new BadRequestException('vm-files needs targetPath: an absolute directory on the node other than /');
+    }
+    for (const p of includedPaths ?? []) {
+      if (!VM_FILES_PATH_RE.test(p) || p.split('/').includes('..')) {
+        throw new BadRequestException(
+          `"${p}" is no guest path: use /path, p<N>:/path, <disk>:/path or <disk>p<N>:/path`,
+        );
+      }
+    }
+  } else if (spec.targetPath !== undefined) {
+    throw new BadRequestException('targetPath only applies to vm-files restores');
+  }
+  if (spec.liveRestore) {
+    if (spec.action !== 'guest' || spec.guestType !== 'qemu') {
+      throw new BadRequestException('Only whole VMs can be live-restored');
+    }
+    if (!spec.overlayStorage) {
+      throw new BadRequestException('A live restore needs overlayStorage (a dir, NFS or CIFS storage)');
+    }
+    if (spec.replaceOriginal) {
+      throw new BadRequestException('A live restore always creates a new VM; it cannot replace the original');
+    }
+  } else if (spec.overlayStorage !== undefined) {
+    throw new BadRequestException('overlayStorage only applies to a live restore');
+  }
+}
+
+/** Storage types whose volumes are files that can be qcow2 overlays. */
+const OVERLAY_STORAGE_TYPES = ['dir', 'nfs', 'cifs', 'glusterfs'];
+
+/** With an inventory at hand, the overlay storage must exist, take images and reach the node. */
+function assertOverlayStorage(inventoryColumn: unknown, storageId: string, node: string): void {
+  const inventory = (
+    typeof inventoryColumn === 'string' ? JSON.parse(inventoryColumn) : inventoryColumn
+  ) as ProxmoxInventory | null;
+  if (!inventory) return;
+  const st = inventory.storages.find((s) => s.id === storageId);
+  if (!st) throw new BadRequestException(`Unknown storage ${storageId}`);
+  if (!OVERLAY_STORAGE_TYPES.includes(st.type) || !st.content.includes('images')) {
+    throw new BadRequestException(
+      `Storage ${storageId} (${st.type}) cannot hold qcow2 overlays; pick a dir, NFS or CIFS storage with disk images`,
+    );
+  }
+  if (st.nodes.length > 0 && !st.nodes.includes(node)) {
+    throw new BadRequestException(`Storage ${storageId} is not available on node ${node}`);
   }
 }

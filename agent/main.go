@@ -39,6 +39,8 @@ type agent struct {
 	runner  *resticRunner
 	// hyperv drives Hyper-V hosts; nil when this agent can't (not Windows, no mock).
 	hyperv hypervBackend
+	// proxmox drives this Proxmox VE node; nil when the agent isn't on one.
+	proxmox *pveRuntime
 
 	// ctx ends when the agent is stopped (Windows service stop); running tasks
 	// derive their context from it. shuttingDown tells such a stop apart from
@@ -92,6 +94,7 @@ func runAgent(ctx context.Context) {
 		http:     &http.Client{Timeout: 60 * time.Second},
 		runner:   newResticRunner(),
 		hyperv:   newHypervBackend(),
+		proxmox:  newProxmoxRuntime(),
 		ctx:      ctx,
 		tasks:    make(chan Task, 64),
 		inflight: make(map[string]bool),
@@ -242,7 +245,22 @@ func (a *agent) enqueue(t Task) {
 	a.mu.Unlock()
 
 	atomic.AddInt32(&a.active, 1)
+	// A Proxmox guest backup runs next to the others: the server already caps
+	// how many run on this node at once, and each touches only its own guest.
+	if t.Type == "proxmox-backup" {
+		go a.runAndRelease(t)
+		return
+	}
 	go func() { a.tasks <- t }()
+}
+
+// runAndRelease runs a task and drops it from the in-flight bookkeeping.
+func (a *agent) runAndRelease(t Task) {
+	a.runTask(&t)
+	a.mu.Lock()
+	delete(a.inflight, t.TaskID)
+	a.mu.Unlock()
+	atomic.AddInt32(&a.active, -1)
 }
 
 // worker executes tasks one at a time. Serializing restic invocations keeps the
@@ -250,11 +268,7 @@ func (a *agent) enqueue(t Task) {
 // loop meanwhile keeps sending heartbeats.
 func (a *agent) worker() {
 	for t := range a.tasks {
-		a.runTask(&t)
-		a.mu.Lock()
-		delete(a.inflight, t.TaskID)
-		a.mu.Unlock()
-		atomic.AddInt32(&a.active, -1)
+		a.runAndRelease(t)
 	}
 }
 
@@ -265,6 +279,11 @@ func (a *agent) poll() (PollResponse, string, error) {
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
 		Capabilities:  a.capabilities(),
+	}
+	if a.proxmox != nil {
+		ctx, cancel := context.WithTimeout(a.context(), 30*time.Second)
+		req.Proxmox, _ = a.proxmox.agentInfo(ctx)
+		cancel()
 	}
 	var resp PollResponse
 	if err := a.post("/api/agents/me/poll", a.state.AgentKey, req, &resp); err != nil {
@@ -278,6 +297,9 @@ func (a *agent) capabilities() []string {
 	caps := []string{"check", "stats"}
 	if a.hyperv != nil {
 		caps = append(caps, "hyperv")
+	}
+	if a.proxmox != nil {
+		caps = append(caps, "proxmox")
 	}
 	return caps
 }
@@ -293,7 +315,7 @@ func (a *agent) runTask(t *Task) {
 	// the task on the server. A stats task has no run row to cancel.
 	ctx, cancel := context.WithCancel(a.context())
 	defer cancel()
-	if t.Type != "stats" && t.Type != "hyperv-inventory" {
+	if t.Type != "stats" && t.Type != "hyperv-inventory" && t.Type != "proxmox-inventory" {
 		w := &cancelWatch{agent: a, taskID: t.TaskID, cancel: cancel}
 		// A task cancelled while it waited behind another one never starts.
 		if w.check(ctx) {
@@ -319,6 +341,14 @@ func (a *agent) runTask(t *Task) {
 		a.runHypervBackup(ctx, t)
 	case "hyperv-restore":
 		a.runHypervRestore(ctx, t)
+	case "proxmox-inventory":
+		a.runProxmoxInventory(ctx, t)
+	case "proxmox-backup":
+		a.runProxmoxBackup(ctx, t)
+	case "proxmox-retention":
+		a.runProxmoxRetention(ctx, t)
+	case "proxmox-restore":
+		a.runProxmoxRestore(ctx, t)
 	default:
 		log.Printf("unknown task type: %s", t.Type)
 	}

@@ -230,6 +230,39 @@ Agent: `hyperv.go` (flow, manifest, restore file matching by path suffix),
 against a real Hyper-V host in CI — only parsed; behaviour is verified through
 the mock (`AMBER_TEST_RESTIC=… go test -run HypervE2E`).
 
+### Proxmox VE
+
+Spec: `docs/superpowers/specs/2026-11-14-proxmox-design.md`. Shared types:
+`server/src/proxmox/proxmox.contract.ts` ↔ `agent/proxmox*.go` ↔
+`client/src/core/api.ts`. Migration `026_proxmox`. **Built on assumptions —
+not yet run against a real PVE host**; the agent marks every such point with
+`// ASSUMPTION(pve):` (grep it before the first real-host test).
+
+- An agent runs on **every** PVE node and announces `PollDto.proxmox`
+  (cluster id = sha256 of `/etc/pve/pve-root-ca.pem`, node name). A
+  `proxmox_clusters` row links all agents with that cluster id; its **primary
+  agent** reads the inventory, runs the per-run retention task and is
+  `backup_jobs.agent_id` (so checks/stats work unchanged).
+- A Proxmox run is split into `proxmox_run_items` (one guest each), claimed by
+  the agent of the guest's current node (`proxmox-backup`, task id = item id;
+  these run concurrently on the agent, capped by the server). A guest that
+  migrated comes back as `moved` and is reassigned. Retention runs once per run
+  (`pveret-<runId>`) after all items settle. `proxmox_job_guests` holds each
+  guest's parent snapshot and change-tracking state.
+- Methods: `vzdump` (stream into `restic --stdin-from-command`, works
+  everywhere), `block` for VMs (PVE snapshot → read-only FUSE segment view;
+  QEMU dirty bitmaps over QMP/NBD give the changed segments, restic `--parent`
+  reads only those), `files` for CTs (snapshot mounted read-only, file backup).
+  All snapshots of a cluster use `--host pve-<slug>` so migrations keep parents.
+- Restores always go through PVE's tools: the agent streams a synthesized
+  vzdump archive (VMA writer / CT tar rewriter) into `qmrestore -` /
+  `pct restore … -`. Two exceptions read a `block` snapshot as disk images
+  (`restic mount` + a FUSE raw-image view over the segments,
+  `proxmox_vmrestore.go`): `vm-files` (loop-mount the guest filesystems
+  read-only, copy paths to a node folder) and live restore (qcow2 overlays on
+  the images, `qm start`, `qm disk move` — the VM depends on the agent until
+  the moves finish).
+
 ### CLI (Go)
 
 `cli/` is the standalone `ambb` module (see `cli/README.md`); release binaries

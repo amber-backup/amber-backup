@@ -12,6 +12,7 @@ import { Targets } from './pages/targets';
 import { Jobs } from './pages/jobs';
 import { Agents } from './pages/agents';
 import { Hyperv, HypervHostPage } from './pages/hyperv';
+import { Proxmox, ProxmoxClusterPage } from './pages/proxmox';
 import { Snapshots } from './pages/snapshots';
 import { Users } from './pages/users';
 import { Notifications } from './pages/notifications';
@@ -66,6 +67,8 @@ function Gate() {
         <Route path="/agents" element={<Agents />} />
         <Route path="/hyperv" element={<Hyperv />} />
         <Route path="/hyperv/:hostId" element={<HypervHostPage />} />
+        <Route path="/proxmox" element={<Proxmox />} />
+        <Route path="/proxmox/:clusterId" element={<ProxmoxClusterPage />} />
         <Route path="/snapshots" element={<Snapshots />} />
         <Route path="/snapshots/:jobId" element={<Snapshots />} />
         {/* The page was called Restore; keep old bookmarks and links working. */}

@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { RestoreOptions } from '../../database/database.types';
 import { HypervRestoreSpecDto } from '../../hyperv/dto/hyperv.dto';
+import { ProxmoxRestoreSpecDto } from '../../proxmox/dto/proxmox.dto';
 
 export class RestoreDestinationDto {
   @ApiPropertyOptional({ description: 'Filesystem path for original/alternate restore' })
@@ -31,6 +32,15 @@ export class RestoreDestinationDto {
   @ValidateNested()
   @Type(() => HypervRestoreSpecDto)
   hyperv?: HypervRestoreSpecDto;
+
+  @ApiPropertyOptional({
+    type: ProxmoxRestoreSpecDto,
+    description: 'proxmox mode: which guest, onto which node, and how (or files into a container)',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProxmoxRestoreSpecDto)
+  proxmox?: ProxmoxRestoreSpecDto;
 }
 
 export class CreateRestoreDto {
@@ -49,11 +59,12 @@ export class CreateRestoreDto {
   includedPaths?: string[];
 
   @ApiProperty({
-    enum: ['original', 'alternate_path', 'download', 'hyperv'],
-    description: 'hyperv: register a backed-up VM (or restore its disks) on a Hyper-V host',
+    enum: ['original', 'alternate_path', 'download', 'hyperv', 'proxmox'],
+    description:
+      'hyperv: register a backed-up VM (or restore its disks) on a Hyper-V host; proxmox: restore a guest (or files into a container) on a PVE node',
   })
-  @IsIn(['original', 'alternate_path', 'download', 'hyperv'])
-  mode!: 'original' | 'alternate_path' | 'download' | 'hyperv';
+  @IsIn(['original', 'alternate_path', 'download', 'hyperv', 'proxmox'])
+  mode!: 'original' | 'alternate_path' | 'download' | 'hyperv' | 'proxmox';
 
   @ApiPropertyOptional({
     description: 'Destination: { path } or { agentId, path } for original/alternate',
