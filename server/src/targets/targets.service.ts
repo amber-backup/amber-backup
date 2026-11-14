@@ -336,6 +336,13 @@ export class TargetsService {
       | 'credential_secret_id'
     >,
   ): Promise<ResolvedTarget> {
+    if (!run.repo_password_secret_id) {
+      // Deleting a job deletes its repository password; its restore history
+      // stays, but none of it can run anymore.
+      throw new Error(
+        "The repository password is gone: the restore's job was deleted.",
+      );
+    }
     return this.resolveRepo(
       run.target_id,
       this.parseConfig(run.repo_config),

@@ -151,6 +151,8 @@ function EnrollPanel() {
         toast(t.admin.enroll.rotated, 'success');
         reload();
       },
+      false,
+      { confirmLabel: t.common.rotate },
     );
 
   return (

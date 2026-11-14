@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 )
@@ -23,6 +24,19 @@ func platformInit() {}
 // runAsService runs the agent under the OS service manager when started by it.
 // On Unix systemd and Docker run the agent as a plain process.
 func runAsService(func(ctx context.Context)) bool { return false }
+
+// signalContext ends on SIGTERM (systemd stop, docker stop) or SIGINT, so a
+// stop runs the agent's shutdown path: running tasks are cancelled (restic
+// removes its lock, per-run credential files are deleted) and reported. A
+// second signal kills the process as usual.
+func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
+}
 
 func detectOS() string {
 	if data, err := os.ReadFile("/etc/os-release"); err == nil {

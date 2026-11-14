@@ -23,6 +23,7 @@ import {
   RepositoriesService,
   StatsReading,
 } from '../repositories/repositories.service';
+import { repositoryKnownInitialized } from '../repositories/repository-initialized';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
 import { RunRetryService } from '../jobs/run-retry.service';
 import { CheckRunnerService } from '../jobs/check-runner.service';
@@ -37,6 +38,7 @@ import {
   ResticOptions,
   RestoreOptions,
   RestoreDestination,
+  RestoreRun,
 } from '../database/database.types';
 import { RequestAgent } from '../common/auth/request-user';
 import { uniqueSlug } from '../common/slug';
@@ -63,6 +65,13 @@ import {
   TaskResultDto,
   UpdateAgentDto,
 } from './dto/agent.dto';
+import { RunLeaseService } from './run-lease.service';
+import {
+  agentWaitSeconds,
+  agentWaitSql,
+  LEASE_EXPIRED_MESSAGES,
+  RESTORE_NOT_PICKED_UP_MESSAGE,
+} from './run-lease';
 
 /** Placeholder swapped for the operator-chosen agent name in rollout commands. */
 const NAME_PLACEHOLDER = '__AGENT_NAME__';
@@ -132,6 +141,13 @@ export interface AgentTask {
   jobName?: string;
   paths?: string[];
   options?: ResticOptions;
+  /**
+   * backup, hyperv-backup, proxmox-backup: true when the server knows the
+   * repository already existed (it held a backup, or was initialised or read
+   * before). The agent then never runs `restic init` on a missing repository
+   * (exit 10 of `cat config`) but fails: the target is most likely unmounted.
+   */
+  repoInitialized?: boolean;
   // restore
   snapshotId?: string;
   targetPath?: string;
@@ -173,6 +189,7 @@ export class AgentsService {
     // Optional so unit tests that predate Hyper-V can build the service without it.
     @Optional() private readonly hyperv?: HypervService,
     @Optional() private readonly proxmox?: ProxmoxService,
+    @Optional() private readonly leases?: RunLeaseService,
   ) {}
 
   private toPublic(a: Agent): PublicAgent {
@@ -233,7 +250,9 @@ export class AgentsService {
     }
     if (method === 'docker') {
       return (
-        `docker run -d --restart unless-stopped ` +
+        // The agent needs up to ~45 s to stop a running task cleanly; Docker's
+        // default of 10 s would SIGKILL it before it reports the task.
+        `docker run -d --restart unless-stopped --stop-timeout 60 ` +
         `-e AMBER_URL=${baseUrl} -e AMBER_TOKEN=${token} -e AMBER_NAME="${nameVal}" ` +
         `-v amber-agent:/var/lib/amber-agent ${image}`
       );
@@ -244,6 +263,7 @@ export class AgentsService {
         '  amber-agent:',
         `    image: ${image}`,
         '    restart: unless-stopped',
+        '    stop_grace_period: 60s',
         '    environment:',
         `      AMBER_URL: ${baseUrl}`,
         `      AMBER_TOKEN: ${token}`,
@@ -424,12 +444,20 @@ cat > /etc/systemd/system/amber-agent.service <<EOF
 [Unit]
 Description=Amber Backup Agent
 After=network-online.target
+# On a Proxmox VE node: start (and clear guest locks a crash left) before
+# PVE autostarts its guests; ignored elsewhere.
+Before=pve-guests.service
 
 [Service]
 EnvironmentFile=$INSTALL_DIR/agent.env
 ExecStart=$INSTALL_DIR/amber-agent
 Restart=always
 RestartSec=10
+# On stop the agent alone gets SIGTERM and time to stop restic (SIGINT, so it
+# releases its repository lock), report the task and clean up; only then is
+# whatever is left of the process group killed.
+KillMode=mixed
+TimeoutStopSec=60
 # Hardening: the agent never needs to gain privileges beyond those it starts with.
 NoNewPrivileges=true
 
@@ -689,48 +717,80 @@ echo "Amber agent installed and started."
     latestAgentVersion?: string;
     latestResticVersion?: string;
   }> {
+    const now = new Date();
+    // The tasks the agent still holds; undefined for an older agent that does
+    // not send the list (an explicit null is an empty list, as Go encodes a
+    // nil slice).
+    const held: string[] | undefined =
+      dto.runningTaskIds === null ? [] : dto.runningTaskIds;
+    // When the agent polled before: tasks claimed earlier that it no longer
+    // lists are lost (see RunLeaseService.reconcile).
+    const previous = held
+      ? await this.db
+          .selectFrom('agents')
+          .select('last_poll_at')
+          .where('id', '=', agent.id)
+          .executeTakeFirst()
+      : undefined;
     const row = await this.db
       .updateTable('agents')
       .set({
-        last_seen_at: new Date(),
+        last_seen_at: now,
+        last_poll_at: now,
         status: 'online',
         restic_version: dto.resticVersion ?? null,
         agent_version: dto.agentVersion ?? null,
         last_ip: agent.ip ?? null,
         // What a PVE node agent runs on; it links the agent to its cluster.
         proxmox_info: dto.proxmox ? JSON.stringify(dto.proxmox) : null,
-        updated_at: new Date(),
+        reports_running_tasks: held !== undefined,
+        updated_at: now,
       })
       .where('id', '=', agent.id)
       .returning('poll_interval_seconds')
       .executeTakeFirst();
+    const pollInterval = row?.poll_interval_seconds ?? 30;
+
+    if (held && this.leases) {
+      await this.leases
+        .reconcile(agent.id, held, previous?.last_poll_at ?? null)
+        .catch((e) => this.logger.error(`Reconciling the tasks of agent ${agent.id} failed: ${e}`));
+    }
 
     const hypervCapable =
       !!this.hyperv && (dto.capabilities?.includes(AGENT_CAPABILITY_HYPERV) ?? false);
     const proxmoxCapable =
       !!this.proxmox && (dto.capabilities?.includes(AGENT_CAPABILITY_PROXMOX) ?? false);
     const tasks: AgentTask[] = [];
-    tasks.push(...(await this.claimBackupTasks(agent.id, hypervCapable)));
-    tasks.push(...(await this.claimRestoreTasks(agent.id, hypervCapable, proxmoxCapable)));
+    // A failure in one kind of task must not cost the agent the others (nor
+    // leave the runs already claimed in this poll stranded behind a 500).
+    const claim = async (kind: string, fn: () => Promise<AgentTask[]>) => {
+      try {
+        tasks.push(...(await fn()));
+      } catch (e) {
+        this.logger.error(`Poll of agent ${agent.id}: claiming ${kind} tasks failed: ${e}`);
+      }
+    };
+    await claim('backup', () => this.claimBackupTasks(agent.id, hypervCapable));
+    await claim('restore', () =>
+      this.claimRestoreTasks(agent.id, hypervCapable, proxmoxCapable, pollInterval),
+    );
     if (hypervCapable) {
-      tasks.push(...(await this.hyperv!.claimInventoryTasks(agent.id)));
+      await claim('Hyper-V inventory', () => this.hyperv!.claimInventoryTasks(agent.id));
     }
     if (proxmoxCapable) {
-      tasks.push(...(await this.proxmox!.claimTasks(agent.id, dto.proxmox)));
+      await claim('Proxmox', () => this.proxmox!.claimTasks(agent.id, dto.proxmox));
     }
     if (dto.capabilities?.includes(AGENT_CAPABILITY_CHECK)) {
-      tasks.push(...(await this.claimCheckTasks(agent.id)));
+      await claim('check', () => this.claimCheckTasks(agent.id));
     }
-    tasks.push(
-      ...(await this.claimStatsTasks(
-        agent.id,
-        dto.capabilities?.includes(AGENT_CAPABILITY_STATS) ?? false,
-      )),
+    await claim('stats', () =>
+      this.claimStatsTasks(agent.id, dto.capabilities?.includes(AGENT_CAPABILITY_STATS) ?? false),
     );
 
     return {
       tasks,
-      pollIntervalSeconds: row?.poll_interval_seconds ?? 30,
+      pollIntervalSeconds: pollInterval,
       latestAgentVersion: this.latestAgentVersion() ?? undefined,
       latestResticVersion: this.latestResticVersion() ?? undefined,
     };
@@ -748,6 +808,7 @@ echo "Amber agent installed and started."
         'job_runs.id as run_id',
         'backup_jobs.id as job_id',
         'backup_jobs.name as job_name',
+        'repositories.id as repository_id',
         'repositories.target_id',
         'repositories.repo_config',
         'repositories.repo_password_secret_id',
@@ -775,58 +836,62 @@ echo "Amber agent installed and started."
     const tasks: AgentTask[] = [];
     for (const run of runs) {
       // Claim the run so it is not handed out twice.
+      const now = new Date();
       const claimed = await this.db
         .updateTable('job_runs')
-        .set({ status: 'running', agent_id: agentId, started_at: new Date() })
+        .set({ status: 'running', agent_id: agentId, started_at: now, heartbeat_at: now })
         .where('id', '=', run.run_id)
         .where('status', '=', 'queued')
         .returning('id')
         .executeTakeFirst();
       if (!claimed) continue;
 
-      let hyperv: HypervTaskPayload | undefined;
-      if (run.source_kind === 'hyperv') {
-        if (!hypervCapable || !run.hyperv_host_id) {
-          await this.failClaimedRun('job_runs', run.run_id, HYPERV_UNSUPPORTED);
-          void this.retries.finalize(run.run_id);
-          continue;
+      try {
+        let hyperv: HypervTaskPayload | undefined;
+        if (run.source_kind === 'hyperv') {
+          if (!hypervCapable || !run.hyperv_host_id) {
+            await this.failClaimedRun('job_runs', run.run_id, HYPERV_UNSUPPORTED);
+            void this.retries.finalize(run.run_id);
+            continue;
+          }
+          const config = parseJsonColumn<HypervJobConfig>(run.hyperv_config)!;
+          const host = await this.hyperv!.getRow(run.hyperv_host_id);
+          hyperv = {
+            connection: await this.hyperv!.connection(host),
+            allVms: config.allVms,
+            vmIds: config.vmIds,
+            excludeVmIds: config.excludeVmIds ?? [],
+            checkpointMode: config.checkpointMode ?? 'Production',
+            parallelVms: config.parallelVms ?? 1,
+          };
         }
-        const config = parseJsonColumn<HypervJobConfig>(run.hyperv_config)!;
-        const host = await this.hyperv!.getRow(run.hyperv_host_id);
-        hyperv = {
-          connection: await this.hyperv!.connection(host),
-          allVms: config.allVms,
-          vmIds: config.vmIds,
-          excludeVmIds: config.excludeVmIds ?? [],
-          checkpointMode: config.checkpointMode ?? 'Production',
-          parallelVms: config.parallelVms ?? 1,
-        };
-      }
 
-      const resolved = await this.targets.resolveForJob({
-        target_id: run.target_id,
-        repo_config: run.repo_config,
-        repo_password_secret_id: run.repo_password_secret_id,
-        credential_secret_id: run.credential_secret_id,
-      });
-      tasks.push({
-        type: hyperv ? 'hyperv-backup' : 'backup',
-        hyperv,
-        taskId: run.run_id,
-        jobId: run.job_id,
-        jobName: run.job_name,
-        repository: resolved.repository,
-        password: resolved.password,
-        env: resolved.env,
-        credentialFiles: resolved.credentialFiles,
-        extraArgs: resolved.extraArgs,
-        paths:
-          typeof run.paths === 'string' ? JSON.parse(run.paths) : run.paths,
-        options:
-          typeof run.restic_options === 'string'
-            ? JSON.parse(run.restic_options)
-            : run.restic_options,
-      });
+        const resolved = await this.targets.resolveForJob({
+          target_id: run.target_id,
+          repo_config: run.repo_config,
+          repo_password_secret_id: run.repo_password_secret_id,
+          credential_secret_id: run.credential_secret_id,
+        });
+        tasks.push({
+          type: hyperv ? 'hyperv-backup' : 'backup',
+          hyperv,
+          taskId: run.run_id,
+          jobId: run.job_id,
+          jobName: run.job_name,
+          repository: resolved.repository,
+          password: resolved.password,
+          env: resolved.env,
+          credentialFiles: resolved.credentialFiles,
+          extraArgs: resolved.extraArgs,
+          paths: parseJsonColumn<string[]>(run.paths) ?? [],
+          // All of the job's options, timeLimitSeconds included (the agent
+          // enforces it).
+          options: parseJsonColumn<ResticOptions>(run.restic_options) ?? {},
+          repoInitialized: await repositoryKnownInitialized(this.db, run.repository_id),
+        });
+      } catch (e) {
+        await this.failUnpreparedRun('job_runs', run.run_id, e);
+      }
     }
     return tasks;
   }
@@ -853,41 +918,43 @@ echo "Amber agent installed and started."
 
     const tasks: AgentTask[] = [];
     for (const run of runs) {
+      const now = new Date();
       const claimed = await this.db
         .updateTable('job_runs')
-        .set({ status: 'running', agent_id: agentId, started_at: new Date() })
+        .set({ status: 'running', agent_id: agentId, started_at: now, heartbeat_at: now })
         .where('id', '=', run.run_id)
         .where('status', '=', 'queued')
         .returning('id')
         .executeTakeFirst();
       if (!claimed) continue;
 
-      const info: CheckInfo =
-        (typeof run.check_info === 'string'
-          ? JSON.parse(run.check_info)
-          : run.check_info) ?? { level: 'quick' };
-      const resolved = await this.targets.resolveForJob({
-        target_id: run.target_id,
-        repo_config: run.repo_config,
-        repo_password_secret_id: run.repo_password_secret_id,
-        credential_secret_id: run.credential_secret_id,
-      });
-      tasks.push({
-        type: 'check',
-        taskId: run.run_id,
-        jobId: run.job_id,
-        jobName: run.job_name,
-        repository: resolved.repository,
-        password: resolved.password,
-        env: resolved.env,
-        credentialFiles: resolved.credentialFiles,
-        extraArgs: resolved.extraArgs,
-        checkLevel: info.level,
-        checkSubset:
-          info.level === 'rotating' && info.part && info.parts
-            ? `${info.part}/${info.parts}`
-            : undefined,
-      });
+      try {
+        const info: CheckInfo = parseJsonColumn<CheckInfo>(run.check_info) ?? { level: 'quick' };
+        const resolved = await this.targets.resolveForJob({
+          target_id: run.target_id,
+          repo_config: run.repo_config,
+          repo_password_secret_id: run.repo_password_secret_id,
+          credential_secret_id: run.credential_secret_id,
+        });
+        tasks.push({
+          type: 'check',
+          taskId: run.run_id,
+          jobId: run.job_id,
+          jobName: run.job_name,
+          repository: resolved.repository,
+          password: resolved.password,
+          env: resolved.env,
+          credentialFiles: resolved.credentialFiles,
+          extraArgs: resolved.extraArgs,
+          checkLevel: info.level,
+          checkSubset:
+            info.level === 'rotating' && info.part && info.parts
+              ? `${info.part}/${info.parts}`
+              : undefined,
+        });
+      } catch (e) {
+        await this.failUnpreparedRun('job_runs', run.run_id, e);
+      }
     }
     return tasks;
   }
@@ -908,16 +975,22 @@ echo "Amber agent installed and started."
     }
     const tasks: AgentTask[] = [];
     for (const r of requests) {
-      const resolved = await this.targets.resolveForJob(r);
-      tasks.push({
-        type: 'stats',
-        taskId: STATS_TASK_PREFIX + r.id,
-        repository: resolved.repository,
-        password: resolved.password,
-        env: resolved.env,
-        credentialFiles: resolved.credentialFiles,
-        extraArgs: resolved.extraArgs,
-      });
+      try {
+        const resolved = await this.targets.resolveForJob(r);
+        tasks.push({
+          type: 'stats',
+          taskId: STATS_TASK_PREFIX + r.id,
+          repository: resolved.repository,
+          password: resolved.password,
+          env: resolved.env,
+          credentialFiles: resolved.credentialFiles,
+          extraArgs: resolved.extraArgs,
+        });
+      } catch (e) {
+        await this.repositories
+          .recordStats(r.id, { error: `Preparing the task failed: ${errorText(e)}` })
+          .catch((err) => this.logger.warn(`Recording stats of repository ${r.id} failed: ${err}`));
+      }
     }
     return tasks;
   }
@@ -936,10 +1009,30 @@ echo "Amber agent installed and started."
       .execute();
   }
 
+  /**
+   * A claimed run whose task could not be built (e.g. its secret no longer
+   * decrypts, or its Hyper-V host is gone) fails on its own; the rest of the
+   * poll goes ahead. A job run is settled (retry/notify).
+   */
+  private async failUnpreparedRun(
+    table: 'job_runs' | 'restore_runs',
+    id: string,
+    err: unknown,
+  ): Promise<void> {
+    this.logger.error(`Preparing task ${id} failed: ${errorText(err)}`);
+    try {
+      await this.failClaimedRun(table, id, `Preparing the task failed: ${errorText(err)}`);
+      if (table === 'job_runs') void this.retries.finalize(id);
+    } catch (e) {
+      this.logger.error(`Could not fail task ${id}: ${e}`);
+    }
+  }
+
   private async claimRestoreTasks(
     agentId: string,
     hypervCapable = false,
     proxmoxCapable = false,
+    pollInterval?: number,
   ): Promise<AgentTask[]> {
     const runs = await this.db
       .selectFrom('restore_runs')
@@ -948,76 +1041,104 @@ echo "Amber agent installed and started."
       .where('status', '=', 'queued')
       .execute();
 
+    const queueTimeout = loadConfig().restoreQueueTimeoutSeconds;
+    const maxWaitMs =
+      queueTimeout > 0 ? agentWaitSeconds(queueTimeout, pollInterval) * 1000 : Infinity;
     const tasks: AgentTask[] = [];
     for (const run of runs) {
+      // A restore that waited too long is discarded rather than run long
+      // after the operator gave up on it (it may overwrite live data).
+      if (Date.now() - new Date(run.created_at).getTime() > maxWaitMs) {
+        await this.db
+          .updateTable('restore_runs')
+          .set({ status: 'failed', finished_at: new Date(), error: RESTORE_NOT_PICKED_UP_MESSAGE })
+          .where('id', '=', run.id)
+          .where('status', '=', 'queued')
+          .execute();
+        continue;
+      }
+      const now = new Date();
       const claimed = await this.db
         .updateTable('restore_runs')
-        .set({ status: 'running', started_at: new Date() })
+        .set({ status: 'running', started_at: now, heartbeat_at: now })
         .where('id', '=', run.id)
         .where('status', '=', 'queued')
         .returning('id')
         .executeTakeFirst();
       if (!claimed) continue;
-
-      const resolved = await this.targets.resolveForRestore(run);
-      const destination: RestoreDestination =
-        typeof run.destination === 'string'
-          ? JSON.parse(run.destination)
-          : run.destination;
-      const options: RestoreOptions =
-        typeof run.options === 'string' ? JSON.parse(run.options) : run.options;
-      const includedPaths = run.included_paths
-        ? typeof run.included_paths === 'string'
-          ? JSON.parse(run.included_paths)
-          : run.included_paths
-        : null;
-
-      let hyperv: HypervTaskPayload | undefined;
-      if (run.mode === 'hyperv') {
-        const spec = destination.hyperv;
-        if (!hypervCapable || !spec) {
-          await this.failClaimedRun('restore_runs', run.id, HYPERV_UNSUPPORTED);
-          continue;
-        }
-        const host = await this.hyperv!.getRow(spec.hostId);
-        hyperv = {
-          connection: await this.hyperv!.connection(host),
-          restore: { ...spec, targetPath: destination.path ?? '' },
-        };
+      try {
+        const task = await this.restoreTask(run, hypervCapable, proxmoxCapable);
+        if (task) tasks.push(task);
+      } catch (e) {
+        await this.failUnpreparedRun('restore_runs', run.id, e);
       }
-
-      let proxmox: ProxmoxTaskPayload | undefined;
-      if (run.mode === 'proxmox') {
-        const spec = destination.proxmox;
-        if (!proxmoxCapable || !spec) {
-          await this.failClaimedRun('restore_runs', run.id, PROXMOX_UNSUPPORTED);
-          continue;
-        }
-        try {
-          proxmox = await this.proxmox!.restorePayload(spec);
-        } catch (e) {
-          await this.failClaimedRun('restore_runs', run.id, `Preparing the restore failed: ${e}`);
-          continue;
-        }
-      }
-
-      tasks.push({
-        type: hyperv ? 'hyperv-restore' : proxmox ? 'proxmox-restore' : 'restore',
-        hyperv,
-        proxmox,
-        taskId: run.id,
-        repository: resolved.repository,
-        password: resolved.password,
-        env: resolved.env,
-        credentialFiles: resolved.credentialFiles,
-        extraArgs: resolved.extraArgs,
-        snapshotId: run.snapshot_id,
-        targetPath: destination.path || '/',
-        includedPaths,
-        restoreOptions: options,
-      });
     }
     return tasks;
+  }
+
+  /** The task of a claimed restore, or null when it was failed instead. */
+  private async restoreTask(
+    run: RestoreRun,
+    hypervCapable: boolean,
+    proxmoxCapable: boolean,
+  ): Promise<AgentTask | null> {
+    const resolved = await this.targets.resolveForRestore(run);
+    const destination: RestoreDestination =
+      typeof run.destination === 'string'
+        ? JSON.parse(run.destination)
+        : run.destination;
+    const options: RestoreOptions =
+      typeof run.options === 'string' ? JSON.parse(run.options) : run.options;
+    const includedPaths = run.included_paths
+      ? typeof run.included_paths === 'string'
+        ? JSON.parse(run.included_paths)
+        : run.included_paths
+      : null;
+
+    let hyperv: HypervTaskPayload | undefined;
+    if (run.mode === 'hyperv') {
+      const spec = destination.hyperv;
+      if (!hypervCapable || !spec) {
+        await this.failClaimedRun('restore_runs', run.id, HYPERV_UNSUPPORTED);
+        return null;
+      }
+      const host = await this.hyperv!.getRow(spec.hostId);
+      hyperv = {
+        connection: await this.hyperv!.connection(host),
+        restore: { ...spec, targetPath: destination.path ?? '' },
+      };
+    }
+
+    let proxmox: ProxmoxTaskPayload | undefined;
+    if (run.mode === 'proxmox') {
+      const spec = destination.proxmox;
+      if (!proxmoxCapable || !spec) {
+        await this.failClaimedRun('restore_runs', run.id, PROXMOX_UNSUPPORTED);
+        return null;
+      }
+      try {
+        proxmox = await this.proxmox!.restorePayload(spec);
+      } catch (e) {
+        await this.failClaimedRun('restore_runs', run.id, `Preparing the restore failed: ${e}`);
+        return null;
+      }
+    }
+
+    return {
+      type: hyperv ? 'hyperv-restore' : proxmox ? 'proxmox-restore' : 'restore',
+      hyperv,
+      proxmox,
+      taskId: run.id,
+      repository: resolved.repository,
+      password: resolved.password,
+      env: resolved.env,
+      credentialFiles: resolved.credentialFiles,
+      extraArgs: resolved.extraArgs,
+      snapshotId: run.snapshot_id,
+      targetPath: destination.path || '/',
+      includedPaths,
+      restoreOptions: options,
+    };
   }
 
   // --- Agent: task progress & result ---------------------------------------
@@ -1029,7 +1150,7 @@ echo "Amber agent installed and started."
   ): Promise<void> {
     await this.db
       .updateTable('job_runs')
-      .set({ stats: JSON.stringify(stats) })
+      .set({ stats: JSON.stringify(stats), heartbeat_at: new Date() })
       .where('id', '=', taskId)
       .where('agent_id', '=', agentId)
       // A run cancelled on the server stays cancelled — don't revive it.
@@ -1068,24 +1189,39 @@ echo "Amber agent installed and started."
       return;
     }
 
-    await this.db
+    const patch = {
+      status: dto.status,
+      finished_at: new Date(),
+      snapshot_id: dto.snapshotId ?? null,
+      stats: dto.stats ? JSON.stringify(dto.stats) : null,
+      forget_result: dto.forgetResult ? JSON.stringify(dto.forgetResult) : null,
+      error: dto.error ?? null,
+      log: dto.log ?? null,
+    };
+    const settled = await this.db
       .updateTable('job_runs')
-      .set({
-        status: dto.status,
-        finished_at: new Date(),
-        snapshot_id: dto.snapshotId ?? null,
-        stats: dto.stats ? JSON.stringify(dto.stats) : null,
-        forget_result: dto.forgetResult
-          ? JSON.stringify(dto.forgetResult)
-          : null,
-        error: dto.error ?? null,
-        log: dto.log ?? null,
-      })
+      .set(patch)
       .where('id', '=', taskId)
       // The operator may have cancelled this run while the agent worked on it;
       // that decision wins over a late result.
       .where('status', '=', 'running')
-      .execute();
+      .returning('id')
+      .executeTakeFirst();
+    // A run the server gave up on (lease expired) takes the real outcome
+    // when it arrives after all; it was settled (retry/notify) back then.
+    const late = settled
+      ? undefined
+      : await this.db
+          .updateTable('job_runs')
+          .set(patch)
+          .where('id', '=', taskId)
+          .where('status', '=', 'failed')
+          .where('error', 'in', LEASE_EXPIRED_MESSAGES)
+          .returning('id')
+          .executeTakeFirst();
+    // Anything else is a repeated (or too late) result: acknowledged without
+    // recording stats, a prune or a notification a second time.
+    if (!settled && !late) return;
 
     // The repository just changed size. A current agent read the new figures
     // itself (after its prune, if any); only an older one leaves it to us.
@@ -1113,6 +1249,18 @@ echo "Amber agent installed and started."
       });
     }
 
+    if (late) {
+      // Only a success changes the verdict: the retry queued for the "failed"
+      // run is not needed any more, and the success is notified as usual.
+      if (dto.status !== 'success') return;
+      await this.db
+        .updateTable('job_runs')
+        .set({ status: 'cancelled', finished_at: new Date(), error: RETRY_NOT_NEEDED_MESSAGE })
+        .where('retry_of_run_id', '=', taskId)
+        .where('status', '=', 'queued')
+        .execute();
+    }
+
     // Queue a retry of a failed run, or fire the configured notifications
     // for the now-terminal run (best-effort).
     void this.retries.finalize(taskId);
@@ -1125,7 +1273,7 @@ echo "Amber agent installed and started."
   ): Promise<void> {
     await this.db
       .updateTable('restore_runs')
-      .set({ stats: JSON.stringify(stats) })
+      .set({ stats: JSON.stringify(stats), heartbeat_at: new Date() })
       .where('id', '=', taskId)
       .where('agent_id', '=', agentId)
       .where('status', '=', 'running')
@@ -1155,18 +1303,32 @@ echo "Amber agent installed and started."
       return;
     }
 
-    await this.db
-      .updateTable('restore_runs')
-      .set({
-        status: dto.status,
-        finished_at: new Date(),
-        stats: dto.stats ? JSON.stringify(dto.stats) : null,
-        error: dto.error ?? null,
-        log: dto.log ?? null,
-      })
-      .where('id', '=', taskId)
-      .where('status', '=', 'running')
-      .execute();
+    const patch = {
+      status: dto.status,
+      finished_at: new Date(),
+      stats: dto.stats ? JSON.stringify(dto.stats) : null,
+      error: dto.error ?? null,
+      log: dto.log ?? null,
+    };
+    const settled =
+      (await this.db
+        .updateTable('restore_runs')
+        .set(patch)
+        .where('id', '=', taskId)
+        .where('status', '=', 'running')
+        .returning('id')
+        .executeTakeFirst()) ??
+      // A restore the server gave up on (lease expired) still records how it ended.
+      (await this.db
+        .updateTable('restore_runs')
+        .set(patch)
+        .where('id', '=', taskId)
+        .where('status', '=', 'failed')
+        .where('error', 'in', LEASE_EXPIRED_MESSAGES)
+        .returning('id')
+        .executeTakeFirst());
+    // A repeated result: acknowledged, nothing done twice.
+    if (!settled) return;
 
     // A VM restored in place of its original has a new id; jobs follow it.
     const info = dto.stats?.hypervRestore as
@@ -1307,6 +1469,27 @@ echo "Amber agent installed and started."
     }
     if (!UUID_RE.test(taskId)) throw new NotFoundException('Task not found for this agent');
 
+    // The usual answer for a task still running: renew its lease on the way.
+    const now = new Date();
+    const beat =
+      (await this.db
+        .updateTable('job_runs')
+        .set({ heartbeat_at: now })
+        .where('id', '=', taskId)
+        .where('agent_id', '=', agentId)
+        .where('status', '=', 'running')
+        .returning('id')
+        .executeTakeFirst()) ??
+      (await this.db
+        .updateTable('restore_runs')
+        .set({ heartbeat_at: now })
+        .where('id', '=', taskId)
+        .where('agent_id', '=', agentId)
+        .where('status', '=', 'running')
+        .returning('id')
+        .executeTakeFirst());
+    if (beat) return { cancelled: false };
+
     const row =
       (await this.db
         .selectFrom('job_runs')
@@ -1342,17 +1525,25 @@ echo "Amber agent installed and started."
 
   // --- Offline detection ----------------------------------------------------
 
+  /**
+   * Marks agents offline that have not been heard of for the configured
+   * timeout, but never before two of their poll intervals plus a minute have
+   * passed (an agent polling every 10 min is not offline between two polls).
+   */
   @Interval(30_000)
   async sweepOffline(): Promise<void> {
-    const timeout = (await this.offlineTimeoutSeconds()) * 1000;
-    const cutoff = new Date(Date.now() - timeout);
-    await this.db
-      .updateTable('agents')
-      .set({ status: 'offline' })
-      .where('status', '=', 'online')
-      .where('last_seen_at', '<', cutoff)
-      .execute()
-      .catch((e) => this.logger.warn(`Offline sweep failed: ${e}`));
+    try {
+      const timeout = await this.offlineTimeoutSeconds();
+      const wait = agentWaitSql(timeout, 'poll_interval_seconds');
+      await this.db
+        .updateTable('agents')
+        .set({ status: 'offline' })
+        .where('status', '=', 'online')
+        .where('last_seen_at', '<', sql<Date>`${new Date()}::timestamptz - ${wait} * interval '1 second'`)
+        .execute();
+    } catch (e) {
+      this.logger.warn(`Offline sweep failed: ${e}`);
+    }
   }
 
   /** Admin-configurable offline threshold (app_settings), default 120s. */
@@ -1373,6 +1564,15 @@ echo "Amber agent installed and started."
 function parseJsonColumn<T>(v: unknown): T | null {
   if (v == null) return null;
   return (typeof v === 'string' ? JSON.parse(v) : v) as T;
+}
+
+/** A queued retry made redundant by a late success of the run it repeats. */
+const RETRY_NOT_NEEDED_MESSAGE =
+  'Not needed — the run it would have repeated finished successfully after all.';
+
+/** The message of a thrown value. */
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** Trims entries and drops blanks and duplicates, keeping the first occurrence's order. */

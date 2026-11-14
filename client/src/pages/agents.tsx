@@ -207,6 +207,7 @@ function AgentRow({ agent: a, reload }: { agent: Agent; reload: () => void }) {
                 reload();
               },
               true,
+              { confirmLabel: t.remove },
             )
           }
         >

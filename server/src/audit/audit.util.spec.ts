@@ -90,7 +90,20 @@ describe('audit action derivation', () => {
     ['POST', '/api/users/u1/enable', { id: 'u1' }, 'Enable user', 'user'],
     ['POST', '/api/auth/logout', {}, 'Log out', 'auth'],
     ['POST', '/api/auth/change-password', {}, 'Change password', 'auth'],
+    [
+      'POST',
+      '/api/jobs/j1/repository-password/reveal',
+      { id: 'j1' },
+      'Reveal repository password of job',
+      'job',
+    ],
   ];
+
+  it('never stores the password re-entered to reveal a secret', () => {
+    expect(redactSecrets({ currentPassword: 'hunter2' })).toEqual({
+      currentPassword: '[redacted]',
+    });
+  });
 
   it.each(cases)('%s %s -> %s', (method, path, params, action, resourceType) => {
     const meta = deriveAction(method, path, params);

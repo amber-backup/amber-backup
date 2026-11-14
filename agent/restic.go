@@ -92,6 +92,9 @@ func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, map[string
 		"RESTIC_REPOSITORY="+t.Repository,
 		"RESTIC_PASSWORD="+t.Password,
 		"RESTIC_CACHE_DIR="+r.cacheDir,
+		// One status line per second is all the progress report needs; the
+		// default (60/s) only burns CPU and log space.
+		"RESTIC_PROGRESS_FPS=1",
 	)
 	for k, v := range t.Env {
 		env = append(env, k+"="+v)
@@ -117,15 +120,23 @@ func (r *resticRunner) prepareEnv(t *Task, workDir string) ([]string, map[string
 // and kills it if it hasn't exited after stopGrace; callers tell a cancel apart
 // from a failure by ctx.Err().
 func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine func(map[string]any), onLog func(string)) (int, error) {
+	code, _, err := r.runCapture(ctx, t, args, onLine, onLog)
+	return code, err
+}
+
+// runCapture is run that also returns why restic failed: its last fatal
+// error (the exit_error message, or a "Fatal: …" line), else its last line on
+// stderr — "" when it printed none.
+func (r *resticRunner) runCapture(ctx context.Context, t *Task, args []string, onLine func(map[string]any), onLog func(string)) (int, string, error) {
 	workDir, err := os.MkdirTemp(tempBaseDir(), "amber-restic-")
 	if err != nil {
-		return -1, err
+		return -1, "", err
 	}
 	defer os.RemoveAll(workDir)
 
 	env, credPaths, err := r.prepareEnv(t, workDir)
 	if err != nil {
-		return -1, err
+		return -1, "", err
 	}
 	os.MkdirAll(r.cacheDir, 0o700)
 
@@ -145,20 +156,37 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 	if err := cmd.Start(); err != nil {
-		return -1, err
+		return -1, "", err
 	}
 
 	var readers sync.WaitGroup
 	readers.Add(2)
 	// Both streams feed the same log; callers append to a plain strings.Builder.
 	var logMu sync.Mutex
+	var fatal, lastLine string
 	logLine := func(line string) {
-		if onLog == nil {
-			return
-		}
 		logMu.Lock()
 		defer logMu.Unlock()
-		onLog(line)
+		if strings.TrimSpace(line) != "" {
+			lastLine = line
+		}
+		if strings.HasPrefix(line, "Fatal: ") {
+			fatal = line
+		}
+		if onLog != nil {
+			onLog(line)
+		}
+	}
+	// exitError records restic's final error (restic --json, >= 0.17).
+	exitError := func(obj map[string]any) (string, bool) {
+		if obj["message_type"] != "exit_error" {
+			return "", false
+		}
+		msg, _ := obj["message"].(string)
+		logMu.Lock()
+		fatal = msg
+		logMu.Unlock()
+		return msg, true
 	}
 	go func() {
 		defer readers.Done()
@@ -168,7 +196,9 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 			line := sc.Text()
 			var obj map[string]any
 			if json.Unmarshal([]byte(line), &obj) == nil {
-				if onLine != nil {
+				if msg, ok := exitError(obj); ok {
+					logLine(msg)
+				} else if onLine != nil {
 					onLine(obj)
 				}
 			} else {
@@ -181,8 +211,22 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 	go func() {
 		defer readers.Done()
 		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		for sc.Scan() {
-			logLine(sc.Text())
+			line := sc.Text()
+			// restic --json reports errors as JSON on stderr; log them readably.
+			var obj map[string]any
+			if strings.HasPrefix(line, "{") && json.Unmarshal([]byte(line), &obj) == nil {
+				if msg, ok := exitError(obj); ok {
+					logLine(msg)
+					continue
+				}
+				if text := resticErrorLine(obj); text != "" {
+					logLine(text)
+					continue
+				}
+			}
+			logLine(line)
 		}
 		io.Copy(io.Discard, stderr)
 	}()
@@ -191,14 +235,57 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 	stdoutW.Close()
 	stderrW.Close()
 	readers.Wait()
+	failure := strings.TrimSpace(strings.TrimPrefix(fatal, "Fatal: "))
+	if failure == "" {
+		failure = strings.TrimSpace(lastLine)
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), nil
+		return exitErr.ExitCode(), failure, nil
 	}
 	if err != nil {
-		return -1, err
+		return -1, failure, err
 	}
-	return 0, nil
+	return 0, failure, nil
+}
+
+// resticErrorLine renders a `{"message_type":"error",…}` line of restic --json
+// as text ("" for anything else).
+func resticErrorLine(obj map[string]any) string {
+	if obj["message_type"] != "error" {
+		return ""
+	}
+	msg := ""
+	if e, ok := obj["error"].(map[string]any); ok {
+		msg, _ = e["message"].(string)
+	}
+	item, _ := obj["item"].(string)
+	during, _ := obj["during"].(string)
+	var b strings.Builder
+	b.WriteString("error")
+	if during != "" {
+		b.WriteString(" (" + during + ")")
+	}
+	if item != "" {
+		b.WriteString(": " + item)
+	}
+	if msg != "" {
+		b.WriteString(": " + msg)
+	}
+	return b.String()
+}
+
+// resticError describes a failed restic command by restic's own error rather
+// than a bare exit code.
+func resticError(what string, code int, err error, failure string) error {
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s failed: %w", what, err)
+	case failure != "":
+		return fmt.Errorf("%s exited %d: %s", what, code, failure)
+	default:
+		return fmt.Errorf("%s exited %d", what, code)
+	}
 }
 
 // initLocks serializes ensureInitialized per repository: Proxmox guests are
@@ -206,30 +293,58 @@ func (r *resticRunner) run(ctx context.Context, t *Task, args []string, onLine f
 // leave its config and keys under different master keys.
 var initLocks sync.Map // repository → *sync.Mutex
 
-func (r *resticRunner) ensureInitialized(ctx context.Context, t *Task) error {
+// resticExitNoRepository is restic's exit code for "repository does not
+// exist" (restic >= 0.17).
+const resticExitNoRepository = 10
+
+// ensureInitialized opens the repository and creates it only when restic
+// says it does not exist and the server has never known it to (a target that
+// is not mounted must not get a fresh, empty repository). restic's output
+// goes to appendLog (may be nil).
+func (r *resticRunner) ensureInitialized(ctx context.Context, t *Task, appendLog func(string)) error {
 	mu, _ := initLocks.LoadOrStore(t.Repository, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 
-	code, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil)
+	code, failure, err := r.runCapture(ctx, t, []string{"cat", "config"}, nil, appendLog)
 	if err != nil {
-		return err
+		return fmt.Errorf("opening the repository: %w", err)
 	}
-	if code == 0 {
+	switch {
+	case code == 0:
+		return nil
+	case code != resticExitNoRepository:
+		err := resticError("opening the repository (restic cat config)", code, nil, failure)
+		// restic before 0.17 has no exit code for a missing repository, so a
+		// new one is never created automatically with it.
+		if code == 1 && strings.Contains(failure, "unable to open config file") {
+			err = fmt.Errorf("%w (if this is a new repository: restic older than 0.17 cannot report a missing "+
+				"repository, so Amber does not create it; update restic or run restic init once)", err)
+		}
+		return err
+	case t.RepoInitialized:
+		return fmt.Errorf("Repository not found at %s — is the target mounted and reachable? "+
+			"Amber does not re-create a repository that already held backups.", redactRepository(t.Repository))
+	}
+	if appendLog != nil {
+		appendLog("the repository does not exist yet, initialising it")
+	}
+	code, failure, err = r.runCapture(ctx, t, []string{"init"}, nil, appendLog)
+	if err == nil && code == 0 {
 		return nil
 	}
-	code, err = r.run(ctx, t, []string{"init"}, nil, nil)
-	if err != nil {
-		return err
+	// Another host may have initialized it meanwhile.
+	if again, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil); err == nil && again == 0 {
+		return nil
 	}
-	if code != 0 {
-		// Another host may have initialized it meanwhile.
-		if again, err := r.run(ctx, t, []string{"cat", "config"}, nil, nil); err == nil && again == 0 {
-			return nil
-		}
-		return fmt.Errorf("restic init failed")
-	}
-	return nil
+	return resticError("restic init", code, err, failure)
+}
+
+var repoUserinfoRE = regexp.MustCompile(`://[^/@\s]*@`)
+
+// redactRepository hides credentials in a repository URL (rest:https://u:p@…).
+func redactRepository(repo string) string {
+	return repoUserinfoRE.ReplaceAllString(repo, "://***@")
 }
 
 func backupArgs(t *Task) []string {

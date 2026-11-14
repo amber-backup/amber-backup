@@ -71,7 +71,7 @@ export function Hyperv() {
                 <div className="row-sub">
                   {h.mode === 'local' ? m.modeLocal : `${h.mode === 'cluster' ? m.modeCluster : m.modeRemote} · ${h.address}`}
                   {' · '}
-                  {m.viaAgent} <span style={{ color: 'var(--amber)' }}>{h.agent_name ?? '?'}</span>
+                  {m.viaAgent} <span className="ref">{h.agent_name ?? '?'}</span>
                 </div>
               </div>
               <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
@@ -285,7 +285,7 @@ export function HypervHostPage() {
       await api.del(`/hyperv/hosts/${host.id}`);
       toast(m.removed, 'success');
       navigate('/hyperv');
-    }, true);
+    }, true, { confirmLabel: m.remove });
 
   const restore = (vm: HypervVm) =>
     open((close) => <VmRestoreModal vm={vm} host={host} hosts={hosts} onClose={close} />);
@@ -408,14 +408,14 @@ function VmRow({
               {vm.backupIntegration ? (
                 <span style={{ color: 'var(--green, #4caf50)' }}>{m.vssOk}</span>
               ) : (
-                <span style={{ color: 'var(--amber)' }} title={m.vssMissingTitle}>{m.vssMissing}</span>
+                <span className="warn-text" title={m.vssMissingTitle}><Icon name="alert" size={12} />{m.vssMissing}</span>
               )}
             </>
           )}
           {vm.staleCheckpoints.length > 0 && (
             <>
               {' · '}
-              <span style={{ color: 'var(--amber)' }} title={m.staleTitle}>{m.staleCheckpoints(vm.staleCheckpoints.length)}</span>
+              <span className="warn-text" title={m.staleTitle}><Icon name="alert" size={12} />{m.staleCheckpoints(vm.staleCheckpoints.length)}</span>
             </>
           )}
         </div>
@@ -427,7 +427,7 @@ function VmRow({
             {protection!.jobs.map((j, i) => (
               <span key={j.id}>
                 {i > 0 && ', '}
-                <Link to="/jobs" style={{ color: 'var(--amber)' }}>{j.name}</Link>
+                <Link to="/jobs" className="ref-link">{j.name}</Link>
               </span>
             ))}
           </div>
@@ -442,8 +442,9 @@ function VmRow({
         )}
       </div>
       <div className="row-actions">
-        <button className="btn btn-ghost btn-sm" title={m.restore} onClick={onRestore}>
+        <button className="btn btn-ghost btn-sm" title={m.restore} aria-label={m.restore} onClick={onRestore}>
           <Icon name="restore" />
+          <span className="btn-label">{m.restore}</span>
         </button>
       </div>
     </div>
@@ -466,7 +467,7 @@ function VmRestoreModal({
   const t = useT();
   const m = t.hyperv.restore;
   const toast = useToast();
-  const { confirmDialog } = useModal();
+  const { confirm } = useModal();
   const { data: snapshots, loading } = useAsync(() =>
     api.get<HypervVmSnapshot[]>(`/hyperv/vms/${vm.id}/snapshots`),
   );
@@ -485,6 +486,7 @@ function VmRestoreModal({
   const chosen =
     snapshots?.find((s) => `${s.jobId}:${s.snapshot.id}` === snapshotKey) ?? snapshots?.[0];
   const canReplace = action === 'vm' && targetHostId === host.id;
+  const replaceActive = canReplace && replace;
 
   const send = async () => {
     await api.post('/restores', {
@@ -514,18 +516,27 @@ function VmRestoreModal({
       toast(m.targetPathRequired, 'error');
       return false;
     }
+    // A second, explicit confirmation before the original goes away. The
+    // restore dialog stays open behind it: cancelling returns to the filled-in
+    // form, and only a started restore closes it.
+    if (
+      replaceActive &&
+      !(await confirm({
+        title: m.replaceConfirmTitle,
+        message: m.replaceConfirm(
+          vm.name,
+          fmtDateTime(chosen.snapshot.time),
+          targetHost?.mode === 'cluster' && node.trim()
+            ? `${targetHost.name} / ${node.trim()}`
+            : (targetHost?.name ?? host.name),
+        ),
+        confirmLabel: m.replaceConfirmAction,
+        danger: true,
+      }))
+    ) {
+      return false;
+    }
     try {
-      if (canReplace && replace) {
-        // A second, explicit confirmation before the original goes away.
-        confirmDialog(m.replaceConfirmTitle, m.replaceConfirm(vm.name), async () => {
-          try {
-            await send();
-          } catch (err) {
-            toast(err instanceof Error ? err.message : m.failed, 'error');
-          }
-        }, true);
-        return;
-      }
       await send();
     } catch (err) {
       toast(err instanceof Error ? err.message : m.failed, 'error');
@@ -534,7 +545,14 @@ function VmRestoreModal({
   };
 
   return (
-    <FormModal title={m.title(vm.name)} wide confirmLabel={m.action} onClose={onClose} onSubmit={submit}>
+    <FormModal
+      title={m.title(vm.name)}
+      wide
+      confirmLabel={replaceActive ? m.replaceAction : m.action}
+      danger={replaceActive}
+      onClose={onClose}
+      onSubmit={submit}
+    >
       {loading || !snapshots ? (
         <Loading label={m.loading} />
       ) : snapshots.length === 0 ? (
@@ -582,12 +600,17 @@ function VmRestoreModal({
           {action === 'vm' && (
             <>
               {canReplace && (
-                <Field label="" help={m.replaceHelp}>
+                <Field label="" help={replace ? undefined : m.replaceHelp}>
                   <label className="checkbox">
                     <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
                     {m.replace}
                   </label>
                 </Field>
+              )}
+              {replaceActive && (
+                <div className="warn-box" role="alert">
+                  {m.replaceHelp}
+                </div>
               )}
               <Field label="" help={m.connectNetworkHelp}>
                 <label className="checkbox">

@@ -144,8 +144,10 @@ export const proxmox: ProxmoxMessages = {
     replace: 'Ursprünglichen Gast ersetzen (gleiche VMID)',
     replaceHelp: 'Der ursprüngliche Gast wird gestoppt und mit dem Snapshot überschrieben.',
     replaceConfirmTitle: 'Ursprünglichen Gast ersetzen?',
-    replaceConfirm: (name: string, vmid: number) =>
-      `Gast ${vmid} „${name}“ wird gestoppt und mit dem Snapshot überschrieben. Seine aktuellen Disks gehen verloren.`,
+    replaceConfirm: (name: string, vmid: number, snapshot: string, node: string) =>
+      `Gast ${vmid} „${name}“ wird auf Node ${node} gestoppt und mit dem Snapshot vom ${snapshot} überschrieben. Seine aktuellen Disks gehen verloren.`,
+    replaceConfirmAction: 'Original ersetzen',
+    replaceAction: 'Wiederherstellen und ersetzen',
     storage: 'Ziel-Storage',
     storageOriginal: 'Ursprüngliche Storages',
     unique: 'Neue MAC-Adressen und eindeutige IDs (--unique)',

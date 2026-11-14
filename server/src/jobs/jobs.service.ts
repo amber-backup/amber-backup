@@ -5,7 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import parser from 'cron-parser';
+import * as argon2 from 'argon2';
+import { cronError, nextCronRun } from '../common/cron';
 import { SettingsService } from '../settings/settings.service';
 import { Db, KYSELY } from '../database/database.module';
 import { AccessControlService } from '../common/access-control.service';
@@ -28,12 +29,26 @@ import type { ProxmoxJobConfig } from '../proxmox/proxmox.contract';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 import { IntegrityCheckConfigDto } from './dto/integrity-check.dto';
 import { DEFAULT_RETRY_DELAY_SECONDS } from './run-retry.service';
+import { relocationPatch } from '../repositories/repository-initialized';
 
 /** A job's latest finished backup, as shown in the job list. */
 export type LastBackupRun = Pick<
   JobRun,
   'id' | 'status' | 'started_at' | 'finished_at' | 'error'
 >;
+
+/** JSON with sorted object keys, so jsonb round trips compare equal. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          ),
+        )
+      : v,
+  );
+}
 
 @Injectable()
 export class JobsService {
@@ -44,12 +59,20 @@ export class JobsService {
     private readonly settings: SettingsService,
   ) {}
 
+  /**
+   * Rejects an expression the scheduler could not run. Validated with the
+   * scheduler's own parser (`cron`), in the configured timezone.
+   */
   private validateCron(expr: string): void {
-    try {
-      parser.parseExpression(expr);
-    } catch {
-      throw new BadRequestException(`Invalid cron expression: ${expr}`);
+    const error = cronError(expr, this.settings.getTimezone());
+    if (error) {
+      throw new BadRequestException(`Invalid cron expression "${expr}": ${error}`);
     }
+  }
+
+  /** Why the stored expression cannot be scheduled, or null (API field). */
+  scheduleError(expr: string): string | null {
+    return cronError(expr, this.settings.getTimezone());
   }
 
   private parseConfig(c: unknown): Record<string, unknown> {
@@ -215,15 +238,9 @@ export class JobsService {
     };
   }
 
+  /** Next scheduled run, computed like the scheduler does; null if unschedulable. */
   nextRun(expr: string): Date | null {
-    try {
-      return parser
-        .parseExpression(expr, { tz: this.settings.getTimezone() })
-        .next()
-        .toDate();
-    } catch {
-      return null;
-    }
+    return nextCronRun(expr, this.settings.getTimezone());
   }
 
   /**
@@ -555,10 +572,15 @@ export class JobsService {
         dto.targetId !== undefined ? dto.targetId : job.target_id;
       const backendType = await this.resolveBackendType(user, targetId);
       const rawRepo = dto.repoConfig ?? this.parseConfig(job.repo_config);
+      const repoConfig = this.buildRepoConfig(backendType, rawRepo);
       repoPatch.target_id = targetId ?? null;
-      repoPatch.repo_config = JSON.stringify(
-        this.buildRepoConfig(backendType, rawRepo),
-      );
+      repoPatch.repo_config = JSON.stringify(repoConfig);
+      // Pointed at another location: whatever showed the old repository
+      // existed does not apply to the new one, which may be initialised.
+      const relocated =
+        (targetId ?? null) !== (job.target_id ?? null) ||
+        stableJson(repoConfig) !== stableJson(this.parseConfig(job.repo_config));
+      if (relocated) Object.assign(repoPatch, relocationPatch());
     }
     if (dto.repoPassword !== undefined) {
       await this.secrets.update(job.repo_password_secret_id, dto.repoPassword);
@@ -633,20 +655,77 @@ export class JobsService {
     return this.getRow(id);
   }
 
+  /**
+   * Hands an administrator the job's restic repository password — the only
+   * key to its snapshots, needed to restore without Amber. A caller with a
+   * local password must re-enter it; an SSO-only account cannot, so its
+   * session suffices. The request is audited (success and failure) by the
+   * audit interceptor, which redacts the submitted password; the revealed
+   * password is never logged.
+   */
+  async revealRepositoryPassword(
+    user: RequestUser,
+    id: string,
+    currentPassword?: string,
+  ): Promise<{ password: string }> {
+    if (!user.isAdmin || user.authVia !== 'session') {
+      throw new ForbiddenException(
+        'Revealing a repository password requires an administrator session',
+      );
+    }
+    const account = await this.db
+      .selectFrom('users')
+      .select(['password_hash'])
+      .where('id', '=', user.id)
+      .executeTakeFirst();
+    if (!account) throw new ForbiddenException('Unknown account');
+    if (account.password_hash) {
+      if (!currentPassword) {
+        throw new ForbiddenException(
+          'Enter your current password to reveal the repository password',
+        );
+      }
+      let ok = false;
+      try {
+        ok = await argon2.verify(account.password_hash, currentPassword);
+      } catch {
+        ok = false;
+      }
+      if (!ok) throw new ForbiddenException('The current password is not correct');
+    }
+    const job = await this.getRow(id);
+    return { password: await this.secrets.reveal(job.repo_password_secret_id) };
+  }
+
   async remove(user: RequestUser, id: string): Promise<void> {
     await this.acl.assert(user, 'job', id, 'manage');
     const job = await this.getRow(id);
-    // Order matters: the job references the repository, which references the
-    // password secret (both ON DELETE RESTRICT).
-    await this.db.deleteFrom('backup_jobs').where('id', '=', id).execute();
-    await this.db
-      .deleteFrom('repositories')
-      .where('id', '=', job.repository_id)
-      .execute();
-    await this.secrets.remove(job.repo_password_secret_id);
-    if (job.credential_secret_id) {
-      await this.secrets.remove(job.credential_secret_id);
-    }
+    // All or nothing: a failure part-way used to leave the job deleted but
+    // its repository and secrets behind, answered with HTTP 500.
+    await this.db.transaction().execute(async (trx) => {
+      // A restore still waiting would start without its password; settle it.
+      await trx
+        .updateTable('restore_runs')
+        .set({
+          status: 'failed',
+          finished_at: new Date(),
+          error: 'The job was deleted before this restore started.',
+        })
+        .where('job_id', '=', id)
+        .where('status', '=', 'queued')
+        .execute();
+      // Order matters: the job references the repository, which references
+      // the password secret (both ON DELETE RESTRICT). Restore runs share the
+      // secret; their reference is ON DELETE SET NULL (migration 028).
+      await trx.deleteFrom('backup_jobs').where('id', '=', id).execute();
+      await trx
+        .deleteFrom('repositories')
+        .where('id', '=', job.repository_id)
+        .execute();
+      const secretIds = [job.repo_password_secret_id];
+      if (job.credential_secret_id) secretIds.push(job.credential_secret_id);
+      await trx.deleteFrom('secrets').where('id', 'in', secretIds).execute();
+    });
   }
 
   /**

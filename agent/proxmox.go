@@ -261,18 +261,9 @@ type pveBackupCtx struct {
 }
 
 func (a *agent) runProxmoxBackup(ctx context.Context, t *Task) {
-	var logMu sync.Mutex
-	var logBuf strings.Builder
-	appendLog := func(s string) {
-		logMu.Lock()
-		logBuf.WriteString(s + "\n")
-		logMu.Unlock()
-	}
-	logText := func() string {
-		logMu.Lock()
-		defer logMu.Unlock()
-		return logBuf.String()
-	}
+	var logBuf logBuffer
+	appendLog := logBuf.appendLine
+	logText := logBuf.String
 	px := t.Proxmox
 	if a.proxmox == nil || px == nil || px.Guest == nil {
 		a.failTask(t, "Proxmox VE is not available on this agent", "")
@@ -345,7 +336,7 @@ func (a *agent) runProxmoxBackup(ctx context.Context, t *Task) {
 			return
 		}
 	}
-	if err := a.runner.ensureInitialized(ctx, t); err != nil {
+	if err := a.runner.ensureInitialized(ctx, t, appendLog); err != nil {
 		res.Error = err.Error()
 	} else {
 		a.backupGuest(ctx, t, res, appendLog)
@@ -504,7 +495,7 @@ func (b *pveBackupCtx) resticBackupArgs() []string {
 func (b *pveBackupCtx) runResticBackup(ctx context.Context, args []string, bytesRead func() int64) error {
 	var last time.Time
 	var summary map[string]any
-	code, err := b.a.runner.run(ctx, b.t, args, func(msg map[string]any) {
+	code, failure, err := b.a.runner.runCapture(ctx, b.t, args, func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			if time.Since(last) > time.Second {
@@ -536,7 +527,7 @@ func (b *pveBackupCtx) runResticBackup(ctx context.Context, args []string, bytes
 	}
 	// Exit 3 (some files unreadable) is a failure for a guest backup.
 	if err != nil || code != 0 || b.res.SnapshotID == "" {
-		return fmt.Errorf("restic backup exited %d: %v", code, err)
+		return resticError("restic backup", code, err, failure)
 	}
 	return nil
 }
@@ -948,21 +939,21 @@ func proxmoxForgetArgs(slug string) func(*Retention) []string {
 }
 
 func (a *agent) runProxmoxRetention(ctx context.Context, t *Task) {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	var logBuf logBuffer
+	appendLog := logBuf.appendLine
 	result := TaskResult{Status: "success"}
 	slug := ""
 	if t.Proxmox != nil {
 		slug = t.Proxmox.ClusterSlug
 	}
 	if t.Options != nil && hasRetention(t.Options.Retention) && slug != "" {
-		code, err := a.runner.run(ctx, t, proxmoxForgetArgs(slug)(t.Options.Retention), func(msg map[string]any) {}, appendLog)
+		code, failure, err := a.runner.runCapture(ctx, t, proxmoxForgetArgs(slug)(t.Options.Retention), func(msg map[string]any) {}, appendLog)
 		if ctx.Err() != nil {
 			a.cancelTask(t, logBuf.String())
 			return
 		}
 		if err != nil || code != 0 {
-			a.failTask(t, fmt.Sprintf("forget exited %d: %v", code, err), logBuf.String())
+			a.failTask(t, resticError("forget", code, err, failure).Error(), logBuf.String())
 			return
 		}
 		if t.Options.Retention.Prune {

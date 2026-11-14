@@ -8,6 +8,8 @@ import { AppModule } from './app.module';
 import { loadConfig, validateConfig } from './config/configuration';
 import { httpLogger } from './common/middleware/http-logger.middleware';
 import { runMigrations } from './database/migrator';
+import { AGENT_CHANNEL_PATH, agentJsonBodyParser } from './agents/agent-body-parser';
+import { JobRunnerService } from './jobs/job-runner.service';
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
@@ -19,6 +21,12 @@ async function bootstrap(): Promise<void> {
   await runMigrations('up', (m) => migrationLogger.log(m));
 
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
+
+  // Activities this server ran itself and a restart or crash cut off are
+  // failed before any scheduler, sweeper or poll can see them (those only
+  // start in listen() → init()); they are settled (retry/notify) once up.
+  const runner = app.get(JobRunnerService);
+  const interrupted = await runner.failInterruptedRuns();
 
   // Honour X-Forwarded-For only as far as the deployment declares (default: not
   // at all), so the audit log and rate limiter see a client IP that cannot be
@@ -71,6 +79,11 @@ async function bootstrap(): Promise<void> {
   // Access log for every HTTP request (before guards/routing so 401/403 and 404
   // are logged too). Disable with HTTP_LOGGING=false.
   if (config.httpLogging) app.use(httpLogger);
+  // Agent results carry logs and inventories far beyond the 100 KiB default:
+  // the agent channel gets its own JSON parser with a higher limit (Nest's
+  // default parser then skips the already-read body). Other routes keep the
+  // default.
+  app.use(AGENT_CHANNEL_PATH, agentJsonBodyParser());
   // Same-origin SPA needs no cross-origin access; a reflected `origin: true`
   // with credentials would let any site read authenticated responses. Allow
   // only the configured public URL and any explicit WebAuthn origins (e.g. the
@@ -136,6 +149,7 @@ async function bootstrap(): Promise<void> {
   new Logger('Bootstrap').log(
     `Amber Backup server listening on port ${config.port}`,
   );
+  void runner.finalizeInterrupted(interrupted);
 }
 
 void bootstrap();

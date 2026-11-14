@@ -18,6 +18,7 @@ import { settings } from './settings';
 import { integrity } from './integrity';
 import { backendFields } from './backendFields';
 import { storageChart } from './storageChart';
+import { runs } from './runs';
 
 export const de: Messages = {
   common,
@@ -39,4 +40,5 @@ export const de: Messages = {
   integrity,
   backendFields,
   storageChart,
+  runs,
 };

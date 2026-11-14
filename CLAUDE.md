@@ -118,6 +118,29 @@ Key cross-cutting flows to understand before editing:
   row as "Cancelled on the agent." — never retried or notified. Older
   servers/agents without the endpoint simply ignore it.
 
+- **Run leases — nothing may stay `running` forever.** `job_runs`,
+  `restore_runs` and `proxmox_run_items` carry `heartbeat_at` (migration
+  `027_run_leases`), bumped on claim, progress and `GET me/tasks/:id/state`.
+  A sweeper fails agent rows whose heartbeat is older than
+  `AGENT_TASK_HEARTBEAT_TIMEOUT_SECONDS` (legacy agents:
+  `AGENT_TASK_LEGACY_TIMEOUT_SECONDS`) and finalizes them (retry/notify). Every
+  poll carries `runningTaskIds`; a run claimed in an earlier poll that is missing
+  from it is failed ("The agent restarted or lost this task."). On boot, local
+  runs left `running` are failed as "Interrupted by a server restart." Claim
+  loops prepare each task in its own try/catch (`failUnpreparedRun`), so one bad
+  task never 500s a poll. Queue/offline/lease timeouts are never shorter than
+  2 × the agent's poll interval + 60 s.
+- **Agent results are spooled and idempotent.** The agent caps logs (first
+  4 KiB + last 64 KiB) and errors (4 KiB), writes each result to
+  `results/<taskId>.json` next to its state file and retries until 2xx/404
+  (on 400/413 it sends a minimal result once). The server accepts 8 MB on
+  `/api/agents/me/*`, truncates over-long fields instead of rejecting them, and
+  acknowledges a repeated result for a settled run without side effects.
+- **Never auto-init an existing repository.** Tasks carry `repoInitialized`
+  (from `repositories.initialized_at`, migration `028`). Agent and server-local
+  restic only run `restic init` when `cat config` exits 10 *and* the repository
+  is not known; otherwise a missing repository fails ("is the target mounted?").
+
 - **One timezone for the whole system.** `SettingsService` stores it in
   `app_settings` (key `timezone`, default = the server process zone) and caches
   it so synchronous callers can read it via `getTimezone()`. The schedulers pass

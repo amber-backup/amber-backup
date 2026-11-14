@@ -260,6 +260,18 @@ export interface RepositoriesTable {
   check_subset_next: ColumnType<number, number | undefined, number>;
   /** Number of parts the rotation in progress splits the data into. */
   check_subset_parts: number | null;
+  /**
+   * When Amber first saw this repository exist (initialised it or found it
+   * before a backup); null ⇒ not known yet. A backup never re-creates a
+   * repository that is known to have existed (see `repositoryKnownInitialized`).
+   */
+  initialized_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  /**
+   * When the job last pointed this repository at another location (connection
+   * or repository fields changed); evidence of an existing repository older
+   * than this belongs to the old location. null ⇒ never moved.
+   */
+  relocated_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -304,6 +316,10 @@ export interface AgentsTable {
   last_ip: ColumnType<string | null, string | null | undefined, string | null>;
   /** What an agent on a PVE node announced in its latest poll; null elsewhere. */
   proxmox_info: JSONColumnType<ProxmoxAgentInfo | null, string | null | undefined, string | null>;
+  /** When the agent last polled (last_seen_at also follows its other requests). */
+  last_poll_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  /** The agent's latest poll listed the tasks it holds (`runningTaskIds`). */
+  reports_running_tasks: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -447,7 +463,11 @@ export interface ProxmoxRunItemsTable {
   error: ColumnType<string | null, string | null | undefined, string | null>;
   log: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
+  /** When the item became claimable: created, or re-queued after its guest moved. */
+  queued_at: ColumnType<Date, Date | undefined, Date>;
   started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  /** Last sign of life of the agent working on the item (lease, migration 027). */
+  heartbeat_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 export type ProxmoxRunItem = Selectable<ProxmoxRunItemsTable>;
@@ -692,6 +712,8 @@ export interface JobRunsTable {
   /** Set when dispatched to an agent; null for local runs. */
   agent_id: string | null;
   started_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** Last sign of life of the agent working on the run (lease, migration 027). */
+  heartbeat_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   finished_at: ColumnType<Date | null, Date | null, Date | null>;
   snapshot_id: string | null;
   stats: JSONColumnType<RunStats | null, string | null, string | null>;
@@ -765,8 +787,11 @@ export interface RestoreRunsTable {
   job_id: string | null;
   /** Repository-specific config, snapshotted from the job at create time. */
   repo_config: JSONColumnType<Record<string, unknown>>;
-  /** Repository password secret, snapshotted from the job at create time. */
-  repo_password_secret_id: string;
+  /**
+   * The job's repository password secret (shared with the job); null once the
+   * job — and with it the password — was deleted.
+   */
+  repo_password_secret_id: string | null;
   /** Credential override secret, snapshotted from the job at create time. */
   credential_secret_id: string | null;
   snapshot_id: string;
@@ -777,6 +802,8 @@ export interface RestoreRunsTable {
   status: ColumnType<RunStatus, RunStatus | undefined, RunStatus>;
   agent_id: string | null;
   started_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** Last sign of life of the agent working on the restore (lease, migration 027). */
+  heartbeat_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   finished_at: ColumnType<Date | null, Date | null, Date | null>;
   stats: JSONColumnType<RunStats | null, string | null, string | null>;
   download_expires_at: ColumnType<Date | null, Date | null, Date | null>;

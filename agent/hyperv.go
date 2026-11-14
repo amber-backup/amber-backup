@@ -599,7 +599,7 @@ func (a *agent) backupVM(ctx context.Context, t *Task, sess *hvSession, inv *Hyp
 	}
 	args := hypervBackupArgs(t, inv.ComputerName, vm, paths, conn.Mode == "local")
 
-	code, err := a.runner.run(ctx, t, args, func(msg map[string]any) {
+	code, failure, err := a.runner.runCapture(ctx, t, args, func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			report(jsonNum(msg, "percent_done"), msg)
@@ -616,7 +616,7 @@ func (a *agent) backupVM(ctx context.Context, t *Task, sess *hvSession, inv *Hyp
 	}
 	if err != nil || code != 0 || res.SnapshotID == "" {
 		// A VM backup with unreadable files (exit 3) is not restorable.
-		res.Error = fmt.Sprintf("restic backup exited %d: %v", code, err)
+		res.Error = resticError("restic backup", code, err, failure).Error()
 		logf("%s", res.Error)
 		return res
 	}
@@ -695,8 +695,8 @@ func shortID(id string) string {
 // --- Restore ------------------------------------------------------------------
 
 func (a *agent) runHypervRestore(ctx context.Context, t *Task) {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	var logBuf logBuffer
+	appendLog := logBuf.appendLine
 	stats, err := a.restoreVM(ctx, t, appendLog)
 	switch {
 	case ctx.Err() != nil:

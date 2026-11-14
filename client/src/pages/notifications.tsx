@@ -120,6 +120,7 @@ function ChannelRow({
                 reload();
               },
               true,
+              { confirmLabel: t.common.delete },
             )
           }
         >

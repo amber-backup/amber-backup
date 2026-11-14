@@ -97,8 +97,10 @@ export const hyperv = {
     connectNetworkHelp:
       'Off by default: a copy running next to the original would clash on the network. Adapters keep their switch name and VLAN either way.',
     replaceConfirmTitle: 'Replace the original VM?',
-    replaceConfirm: (name: string) =>
-      `"${name}" will be turned off and unregistered before the restore. This cannot be undone from Amber.`,
+    replaceConfirm: (name: string, snapshot: string, host: string) =>
+      `"${name}" on ${host} will be turned off and unregistered, then replaced by the snapshot from ${snapshot}. This cannot be undone from Amber.`,
+    replaceConfirmAction: 'Replace original',
+    replaceAction: 'Restore and replace',
     started: 'Restore started — follow it under Snapshots',
     failed: 'Restore failed',
     note: 'The VM is rebuilt from the backup (processors, memory, disks, network, Secure Boot) and starts without checkpoints. A virtual TPM gets new keys.',

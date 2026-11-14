@@ -99,7 +99,7 @@ function make(opts: {
     pruneRunner as unknown as PruneRunnerService,
     repositories as unknown as RepositoriesService,
   );
-  return { service, mock, retries, pruneRunner, repositories };
+  return { service, mock, retries, pruneRunner, repositories, jobs };
 }
 
 describe('ProxmoxService — run expansion', () => {
@@ -382,7 +382,8 @@ describe('ProxmoxService — results', () => {
     });
 
     expect(itemUpdate.set).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'queued', node: 'pve2', agent_id: null, moves: 1 }),
+      // The wait for the new node's agent starts afresh.
+      expect.objectContaining({ status: 'queued', node: 'pve2', agent_id: null, moves: 1, queued_at: expect.any(Date) }),
     );
   });
 
@@ -534,6 +535,24 @@ describe('ProxmoxService — clusters', () => {
     await expect(
       service.create({ id: 'u-1' } as never, { name: 'Prod', primaryAgentId: 'agent-1' }),
     ).rejects.toThrow(/does not run on a Proxmox VE node/);
+  });
+
+  it('keeps the slug (restic host and tag of its snapshots) on a rename', async () => {
+    const clusterUpdate = chain();
+    const { service, mock } = make({
+      select: { proxmox_clusters: chain({ executeTakeFirst: cluster }) },
+      update: { proxmox_clusters: clusterUpdate },
+    });
+    (mock.db as unknown as { transaction: unknown }).transaction = () => ({
+      execute: (cb: (trx: unknown) => Promise<unknown>) => cb(mock.db),
+    });
+    jest.spyOn(service, 'get').mockResolvedValue({} as never);
+
+    await service.update('cluster-1', { name: 'Production West' });
+
+    const patch = clusterUpdate.set.mock.calls[0][0];
+    expect(patch).toMatchObject({ name: 'Production West' });
+    expect(patch).not.toHaveProperty('slug');
   });
 
   it('refuses to delete a cluster that jobs still back up', async () => {

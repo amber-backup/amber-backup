@@ -52,6 +52,7 @@ export const dashboard: DashboardMessages = {
     total: 'gesamt',
     failedWeek: 'Fehlgeschlagen (7 T)',
     needsAttention: 'Handlungsbedarf',
+    showFailures: 'Fehlgeschlagene Backups anzeigen',
     allGood: 'alles in Ordnung',
     runningOperations: 'Laufende Vorgänge',
     active: 'aktiv',

@@ -53,8 +53,13 @@ type agent struct {
 	// The poll loop hands claimed tasks to a worker goroutine and keeps polling.
 	tasks    chan Task
 	inflight map[string]bool // task ids queued or running (dedupe)
-	mu       sync.Mutex      // guards inflight
+	mu       sync.Mutex      // guards inflight and pending
 	active   int32           // atomic: number of queued+running tasks
+
+	// pending are the tasks whose result awaits delivery (see results.go);
+	// spoolDir is where those results are kept ("" = memory only, in tests).
+	pending  map[string]bool
+	spoolDir string
 }
 
 func main() {
@@ -74,7 +79,9 @@ func main() {
 	if runAsService(runAgent) {
 		return
 	}
-	runAgent(context.Background())
+	ctx, stop := signalContext(context.Background())
+	defer stop()
+	runAgent(ctx)
 }
 
 // shutdownWait bounds how long a stop waits for running tasks to wind down.
@@ -98,6 +105,8 @@ func runAgent(ctx context.Context) {
 		ctx:      ctx,
 		tasks:    make(chan Task, 64),
 		inflight: make(map[string]bool),
+		pending:  make(map[string]bool),
+		spoolDir: resultsDir(),
 	}
 
 	if err := a.loadState(); err != nil {
@@ -110,6 +119,10 @@ func runAgent(ctx context.Context) {
 	}
 
 	log.Printf("Amber agent %s started (agent %s, %s)", agentVersion, a.state.AgentID, platformTarget())
+	// Nothing runs yet: clear what a previous run that was killed left behind,
+	// and deliver the results it could not.
+	a.reconcileOnStart()
+	a.resendSpooled()
 	go a.worker()
 	a.pollLoop()
 
@@ -237,9 +250,13 @@ func (a *agent) pollLoop() {
 // happens in its own goroutine so a busy worker can't stall the heartbeat.
 func (a *agent) enqueue(t Task) {
 	a.mu.Lock()
-	if a.inflight[t.TaskID] {
+	// A task whose result still awaits delivery has run already.
+	if a.inflight[t.TaskID] || a.pending[t.TaskID] {
 		a.mu.Unlock()
 		return
+	}
+	if a.inflight == nil {
+		a.inflight = map[string]bool{}
 	}
 	a.inflight[t.TaskID] = true
 	a.mu.Unlock()
@@ -279,6 +296,9 @@ func (a *agent) poll() (PollResponse, string, error) {
 		ResticVersion: resticVersion(a.runner.binary),
 		AgentVersion:  agentVersion,
 		Capabilities:  a.capabilities(),
+		// Lets the server fail runs this agent no longer knows (restarted,
+		// lost poll answer).
+		RunningTaskIDs: a.runningTaskIDs(),
 	}
 	if a.proxmox != nil {
 		ctx, cancel := context.WithTimeout(a.context(), 30*time.Second)
@@ -315,7 +335,16 @@ func (a *agent) runTask(t *Task) {
 	// the task on the server. A stats task has no run row to cancel.
 	ctx, cancel := context.WithCancel(a.context())
 	defer cancel()
-	if t.Type != "stats" && t.Type != "hyperv-inventory" && t.Type != "proxmox-inventory" {
+	hasRun := t.Type != "stats" && t.Type != "hyperv-inventory" && t.Type != "proxmox-inventory"
+	// A task still waiting in the queue when the agent is stopped does not
+	// start (no pre-script, no restic): it is reported right away.
+	if a.context().Err() != nil {
+		if hasRun {
+			a.failTask(t, "The agent was stopped before it started this task.", "")
+		}
+		return
+	}
+	if hasRun {
 		w := &cancelWatch{agent: a, taskID: t.TaskID, cancel: cancel}
 		// A task cancelled while it waited behind another one never starts.
 		if w.check(ctx) {
@@ -410,7 +439,7 @@ type backupBody func(ctx context.Context, t *Task, result *TaskResult, appendLog
 // backupFiles backs up the task's paths with one restic run.
 func (a *agent) backupFiles(ctx context.Context, t *Task, result *TaskResult, appendLog func(string)) error {
 	var lastProgress time.Time
-	code, err := a.runner.run(ctx, t, backupArgs(t), func(msg map[string]any) {
+	code, failure, err := a.runner.runCapture(ctx, t, backupArgs(t), func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			if time.Since(lastProgress) > time.Second {
@@ -434,7 +463,7 @@ func (a *agent) backupFiles(ctx context.Context, t *Task, result *TaskResult, ap
 	}
 	// Exit 3: some files could not be read; the snapshot exists anyway.
 	if err != nil || (code != 0 && code != 3) {
-		return fmt.Errorf("backup exited %d: %v", code, err)
+		return resticError("backup", code, err, failure)
 	}
 	return nil
 }
@@ -446,9 +475,19 @@ func retentionForgetArgs(ret *Retention) []string { return forgetArgs(ret) }
 // gate, repository init, retention (forget + prune), the repository figures
 // and the post scripts.
 func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, forget func(*Retention) []string) {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	var logBuf logBuffer
+	appendLog := logBuf.appendLine
 	result := TaskResult{Status: "success"}
+
+	// The job's time limit bounds the repository work: opening (or creating)
+	// the repository, the backup and its forget and prune. bctx is ctx with
+	// that deadline; timedOut tells the limit apart from a cancel.
+	bctx := ctx
+	limit := 0
+	if t.Options != nil && t.Options.TimeLimitSeconds > 0 {
+		limit = t.Options.TimeLimitSeconds
+	}
+	timedOut := func() bool { return ctx.Err() == nil && bctx.Err() != nil }
 
 	// handleFailure runs the on-failure script (best-effort) and reports the run
 	// as failed — or as cancelled once the operator stopped it. The script runs
@@ -458,6 +497,9 @@ func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, for
 		status := "failed"
 		if ctx.Err() != nil {
 			status, msg = "cancelled", "cancelled on the server"
+		} else if timedOut() {
+			msg = timeLimitExceeded(limit)
+			appendLog(msg)
 		}
 		if t.Options != nil && t.Options.PostFailureScript != "" {
 			appendLog("[post-failure-script] " + t.Options.PostFailureScript)
@@ -491,15 +533,21 @@ func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, for
 		return
 	}
 
-	if err := a.runner.ensureInitialized(ctx, t); err != nil {
+	if limit > 0 {
+		var cancelLimit context.CancelFunc
+		bctx, cancelLimit = context.WithTimeout(ctx, time.Duration(limit)*time.Second)
+		defer cancelLimit()
+	}
+
+	if err := a.runner.ensureInitialized(bctx, t, appendLog); err != nil {
 		handleFailure(err.Error())
 		return
 	}
 
-	err := body(ctx, t, &result, appendLog)
-	if ctx.Err() != nil {
+	err := body(bctx, t, &result, appendLog)
+	if bctx.Err() != nil {
 		if result.SnapshotID != "" {
-			appendLog("backup finished before the cancel took effect: snapshot " + result.SnapshotID)
+			appendLog("backup finished before the " + stopCause(timedOut()) + " took effect: snapshot " + result.SnapshotID)
 		}
 		handleFailure("")
 		return
@@ -512,16 +560,17 @@ func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, for
 	// Retention as part of the run (§7). Only the forget happens inside the
 	// backup; the prune it may ask for is reported as an activity of its own.
 	if t.Options != nil && hasRetention(t.Options.Retention) {
-		fcode, ferr := a.runner.run(ctx, t, forget(t.Options.Retention), nil, appendLog)
+		fcode, ffailure, ferr := a.runner.runCapture(bctx, t, forget(t.Options.Retention), nil, appendLog)
 		if ferr != nil || fcode != 0 {
-			appendLog(fmt.Sprintf("forget failed: code=%d err=%v", fcode, ferr))
+			appendLog(resticError("forget", fcode, ferr, ffailure).Error())
 		} else if t.Options.Retention.Prune {
-			result.Prune = a.runPrune(ctx, t)
+			result.Prune = a.runPrune(bctx, t)
 		}
 	}
-	// A cancel during the forget or prune stops the rest of the run too.
-	if ctx.Err() != nil {
-		appendLog("backup finished before the cancel took effect: snapshot " + result.SnapshotID)
+	// A cancel (or the time limit) during the forget or prune stops the rest
+	// of the run too.
+	if bctx.Err() != nil {
+		appendLog("backup finished before the " + stopCause(timedOut()) + " took effect: snapshot " + result.SnapshotID)
 		handleFailure("")
 		return
 	}
@@ -544,16 +593,27 @@ func (a *agent) runBackupFlow(ctx context.Context, t *Task, body backupBody, for
 	log.Printf("%s task %s complete (snapshot %s)", t.Type, t.TaskID, result.SnapshotID)
 }
 
+// timeLimitExceeded is the error of a run stopped by the job's time limit.
+func timeLimitExceeded(seconds int) string {
+	return fmt.Sprintf("Time limit of %d s exceeded.", seconds)
+}
+
+func stopCause(timedOut bool) string {
+	if timedOut {
+		return "time limit"
+	}
+	return "cancel"
+}
+
 // runPrune reclaims unreferenced storage after a backup's forget. It is timed
 // and logged separately so the server can show it as its own activity.
 func (a *agent) runPrune(ctx context.Context, t *Task) *PruneResult {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	var logBuf logBuffer
 	res := &PruneResult{Status: "success", StartedAt: time.Now().UTC().Format(time.RFC3339)}
-	code, err := a.runner.run(ctx, t, []string{"prune"}, nil, appendLog)
+	code, failure, err := a.runner.runCapture(ctx, t, []string{"prune"}, nil, logBuf.appendLine)
 	if err != nil || code != 0 {
 		res.Status = "failed"
-		res.Error = fmt.Sprintf("prune exited %d: %v", code, err)
+		res.Error = resticError("prune", code, err, failure).Error()
 	}
 	res.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	res.Log = logBuf.String()
@@ -562,8 +622,8 @@ func (a *agent) runPrune(ctx context.Context, t *Task) *PruneResult {
 }
 
 func (a *agent) runRestore(ctx context.Context, t *Task) {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
+	var logBuf logBuffer
+	appendLog := logBuf.appendLine
 	result := TaskResult{Status: "success"}
 
 	steps, err := a.restoreSteps(ctx, t, appendLog)
@@ -623,13 +683,13 @@ func (a *agent) restoreSteps(ctx context.Context, t *Task, appendLog func(string
 // per drive, e.g. /C).
 func (a *agent) snapshotTopLevel(ctx context.Context, t *Task) ([]string, error) {
 	var top []string
-	code, err := a.runner.run(ctx, t, []string{"ls", "--json", "--", t.SnapshotID, "/"}, func(msg map[string]any) {
+	code, failure, err := a.runner.runCapture(ctx, t, []string{"ls", "--json", "--", t.SnapshotID, "/"}, func(msg map[string]any) {
 		if p, _ := msg["path"].(string); p != "" && strings.Count(p, "/") == 1 {
 			top = append(top, p)
 		}
 	}, nil)
 	if err != nil || code != 0 {
-		return nil, fmt.Errorf("listing snapshot %s exited %d: %v", t.SnapshotID, code, err)
+		return nil, resticError("listing snapshot "+t.SnapshotID, code, err, failure)
 	}
 	return top, nil
 }
@@ -638,7 +698,7 @@ func (a *agent) snapshotTopLevel(ctx context.Context, t *Task) ([]string, error)
 func (a *agent) restoreOnce(ctx context.Context, t *Task, args []string, appendLog func(string)) (map[string]any, error) {
 	var stats map[string]any
 	var lastProgress time.Time
-	code, err := a.runner.run(ctx, t, args, func(msg map[string]any) {
+	code, failure, err := a.runner.runCapture(ctx, t, args, func(msg map[string]any) {
 		switch msg["message_type"] {
 		case "status":
 			if time.Since(lastProgress) > time.Second {
@@ -650,7 +710,7 @@ func (a *agent) restoreOnce(ctx context.Context, t *Task, args []string, appendL
 		}
 	}, appendLog)
 	if err != nil || code != 0 {
-		return nil, fmt.Errorf("restore exited %d: %v", code, err)
+		return nil, resticError("restore", code, err, failure)
 	}
 	return stats, nil
 }
@@ -659,10 +719,8 @@ func (a *agent) restoreOnce(ctx context.Context, t *Task, args []string, appendL
 // failed result flagged Damaged; any other non-zero exit means the check could
 // not run (lock, backend, password) and is reported as a plain failure.
 func (a *agent) runCheck(ctx context.Context, t *Task) {
-	var logBuf strings.Builder
-	appendLog := func(s string) { logBuf.WriteString(s + "\n") }
-
-	code, err := a.runner.run(ctx, t, checkArgs(t), nil, appendLog)
+	var logBuf logBuffer
+	code, failure, err := a.runner.runCapture(ctx, t, checkArgs(t), nil, logBuf.appendLine)
 	switch {
 	case ctx.Err() != nil:
 		a.cancelTask(t, logBuf.String())
@@ -678,7 +736,7 @@ func (a *agent) runCheck(ctx context.Context, t *Task) {
 		})
 		log.Printf("check task %s found integrity errors", t.TaskID)
 	default:
-		a.failTask(t, fmt.Sprintf("check exited %d: %v", code, err), logBuf.String())
+		a.failTask(t, resticError("check", code, err, failure).Error(), logBuf.String())
 	}
 }
 
@@ -697,14 +755,14 @@ func (a *agent) runStats(ctx context.Context, t *Task) {
 // readRepoStats runs `restic stats` and puts the figures — or why they could
 // not be read — on the result.
 func (a *agent) readRepoStats(ctx context.Context, t *Task, result *TaskResult) {
-	var logBuf strings.Builder
+	var logBuf logBuffer
 	var stats map[string]any
 	code, err := a.runner.run(ctx, t, statsArgs(), func(msg map[string]any) { stats = msg },
-		func(s string) { logBuf.WriteString(s + "\n") })
+		logBuf.appendLine)
 	if err != nil || code != 0 || stats == nil {
 		msg := strings.TrimSpace(logBuf.String())
 		if msg == "" {
-			msg = fmt.Sprintf("stats exited %d: %v", code, err)
+			msg = resticError("stats", code, err, "").Error()
 		}
 		result.RepoStatsError = msg
 		return
@@ -720,7 +778,9 @@ func (a *agent) failTask(t *Task, msg, logStr string) {
 // cancelTask reports a task stopped because it was cancelled on the server —
 // or, when the agent itself is being stopped, as failed: nobody cancelled it.
 func (a *agent) cancelTask(t *Task, logStr string) {
-	if a.shuttingDown.Load() {
+	// The agent's own context ending means it is being stopped, even before
+	// the poll loop has noticed and set shuttingDown.
+	if a.shuttingDown.Load() || a.context().Err() != nil {
 		a.failTask(t, "The agent was stopped while this task ran.", logStr)
 		return
 	}
@@ -731,12 +791,6 @@ func (a *agent) cancelTask(t *Task, logStr string) {
 func (a *agent) postProgress(taskID string, stats map[string]any) {
 	_ = a.post("/api/agents/me/tasks/"+taskID+"/progress", a.state.AgentKey,
 		map[string]any{"stats": stats}, nil)
-}
-
-func (a *agent) postResult(taskID string, result TaskResult) {
-	if err := a.post("/api/agents/me/tasks/"+taskID+"/result", a.state.AgentKey, result, nil); err != nil {
-		log.Printf("failed to post result for %s: %v", taskID, err)
-	}
 }
 
 // --- HTTP helper ------------------------------------------------------------
@@ -775,7 +829,7 @@ func (a *agent) do(req *http.Request, bearer string, out any) error {
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return &httpError{Status: resp.StatusCode, Body: strings.TrimSpace(string(respBody))}
 	}
 	if out != nil && len(respBody) > 0 {
 		return json.Unmarshal(respBody, out)

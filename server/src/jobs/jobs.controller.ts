@@ -3,12 +3,17 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
+  HttpCode,
   Param,
   Patch,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { RequireAdmin } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SlugResolverService } from '../common/slug-resolver.service';
@@ -18,7 +23,12 @@ import { JobsService, LastBackupRun } from './jobs.service';
 import { SchedulerService } from './scheduler.service';
 import { JobRunnerService } from './job-runner.service';
 import { CheckRunnerService, parseIntegrityConfig } from './check-runner.service';
-import { CreateJobDto, UpdateJobDto, TestRepoDto } from './dto/job.dto';
+import {
+  CreateJobDto,
+  RevealRepositoryPasswordDto,
+  UpdateJobDto,
+  TestRepoDto,
+} from './dto/job.dto';
 import { IntegrityCheckConfigDto, StartCheckDto } from './dto/integrity-check.dto';
 import { BackupJobRow } from '../database/database.types';
 
@@ -54,6 +64,13 @@ export class JobsController {
       next_check:
         job.enabled && integrity.enabled && integrity.cronExpr
           ? this.jobs.nextRun(integrity.cronExpr)
+          : null,
+      // Why the schedule (or the integrity check's) cannot run, e.g. a job
+      // saved before the API validated with the scheduler's parser.
+      schedule_error: this.jobs.scheduleError(job.cron_expr),
+      check_schedule_error:
+        integrity.enabled && integrity.cronExpr
+          ? this.jobs.scheduleError(integrity.cronExpr)
           : null,
       last_run: lastRun,
       has_credential_override: credential_secret_id != null,
@@ -124,6 +141,25 @@ export class JobsController {
     await this.jobs.remove(user, id);
     this.scheduler.unregister(id);
     return { ok: true };
+  }
+
+  @Post(':id/repository-password/reveal')
+  @RequireAdmin()
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary:
+      "Reveal the job's restic repository password (admin; re-enter your password; audited)",
+  })
+  async revealRepositoryPassword(
+    @CurrentUser() user: RequestUser,
+    @Param('id') idOrSlug: string,
+    @Body() dto: RevealRepositoryPasswordDto,
+  ): Promise<{ password: string }> {
+    const id = await this.slugs.resolve('backup_jobs', idOrSlug);
+    return this.jobs.revealRepositoryPassword(user, id, dto?.currentPassword);
   }
 
   @Post(':id/run')

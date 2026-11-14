@@ -13,10 +13,8 @@ import {
   type ProxmoxClusterDetail,
   type ProxmoxGuest,
   type ProxmoxGuestProtection,
-  type ProxmoxGuestResult,
   type ProxmoxGuestSnapshot,
   type ProxmoxRestoreSpec,
-  type ProxmoxRunItem,
   type ProxmoxSummary,
   type Target,
 } from '../core/api';
@@ -28,28 +26,13 @@ import { useToast } from '../ui/toast';
 import { useModal, FormModal, ModalFrame } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, ListSearch } from '../ui/primitives';
 import { useT } from '../i18n';
-import type { Messages } from '../i18n/en';
 import { JobEditor } from './jobs';
+import { methodLabel, ProxmoxRunItemsList } from '../ui/proxmox-run-items';
 
 /** Inventory updates arrive with the agent's next poll; pages refresh quietly meanwhile. */
 const REFRESH_MS = 5000;
 
 const diskBytes = (g: ProxmoxGuest) => g.disks.reduce((n, d) => n + (d.sizeBytes || 0), 0);
-
-/** Label of a backup method. */
-export function methodLabel(t: Messages, method: string | null | undefined): string {
-  if (!method) return '';
-  return (t.proxmox.method as Record<string, string>)[method] ?? method;
-}
-
-/** "incremental · application-consistent" etc. for one guest result. */
-function resultDetails(t: Messages, r: ProxmoxGuestResult): string[] {
-  const out: string[] = [];
-  if (r.method) out.push(methodLabel(t, r.method));
-  if (r.cbt) out.push(t.proxmox.cbt[r.cbt]);
-  if (r.consistency) out.push(t.proxmox.consistency[r.consistency]);
-  return out;
-}
 
 // --- Cluster list ---------------------------------------------------------------
 
@@ -105,7 +88,7 @@ export function Proxmox() {
                 <div className="row-sub">
                   {c.cluster_name ?? m.standalone}
                   {' · '}
-                  {m.primary} <span style={{ color: 'var(--amber)' }}>{c.agent_name ?? '?'}</span>
+                  {m.primary} <span className="ref">{c.agent_name ?? '?'}</span>
                 </div>
               </div>
               <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
@@ -311,7 +294,7 @@ export function ProxmoxClusterPage() {
       await proxmoxApi.remove(cluster.id);
       toast(m.removed, 'success');
       navigate('/proxmox');
-    }, true);
+    }, true, { confirmLabel: m.remove });
 
   const restore = (guest: ProxmoxGuest) =>
     open((close) => <GuestRestoreModal guest={guest} cluster={cluster} onClose={close} />);
@@ -375,12 +358,12 @@ export function ProxmoxClusterPage() {
                   <div className="row-sub">
                     {n.agentId ? (
                       <>
-                        {m.agentLabel} <span style={{ color: 'var(--amber)' }}>{n.agentName ?? '?'}</span>
+                        {m.agentLabel} <span className="ref">{n.agentName ?? '?'}</span>
                         {' · '}
                         {statusLabel(n.agentStatus ?? 'offline')}
                       </>
                     ) : (
-                      <span style={{ color: guestsOn ? 'var(--red, #e5534b)' : 'var(--amber)' }}>{m.noAgent}</span>
+                      <span className={guestsOn ? 'danger-text' : 'warn-text'}><Icon name="alert" size={12} />{m.noAgent}</span>
                     )}
                   </div>
                 </div>
@@ -469,7 +452,7 @@ function GuestRow({
   const warn = (text: string, title?: string) => (
     <>
       {' · '}
-      <span style={{ color: 'var(--amber)' }} title={title}>{text}</span>
+      <span className="warn-text" title={title}><Icon name="alert" size={12} />{text}</span>
     </>
   );
   return (
@@ -491,7 +474,8 @@ function GuestRow({
           {m.disks(g.disks.length, fmtBytes(diskBytes(g)))}
           {' · '}
           {m.method}{' '}
-          <span style={{ color: g.autoMethod === 'vzdump' ? 'var(--amber)' : undefined }} title={g.autoMethodReason ?? ''}>
+          <span className={g.autoMethod === 'vzdump' ? 'warn-text' : undefined} title={g.autoMethodReason ?? ''}>
+            {g.autoMethod === 'vzdump' && <Icon name="alert" size={12} />}
             {methodLabel(t, g.autoMethod)}
           </span>
           {g.type === 'qemu' && g.status === 'running' && g.guestAgent === false && warn(m.noGuestAgent, m.noGuestAgentTitle)}
@@ -509,7 +493,7 @@ function GuestRow({
             {protection!.jobs.map((j, i) => (
               <span key={j.id}>
                 {i > 0 && ', '}
-                <Link to="/jobs" style={{ color: 'var(--amber)' }}>{j.name}</Link>
+                <Link to="/jobs" className="ref-link">{j.name}</Link>
               </span>
             ))}
           </div>
@@ -525,8 +509,9 @@ function GuestRow({
         )}
       </div>
       <div className="row-actions">
-        <button className="btn btn-ghost btn-sm" title={m.restore} onClick={onRestore}>
+        <button className="btn btn-ghost btn-sm" title={m.restore} aria-label={m.restore} onClick={onRestore}>
           <Icon name="restore" />
+          <span className="btn-label">{m.restore}</span>
         </button>
       </div>
     </div>
@@ -547,7 +532,7 @@ function GuestRestoreModal({
   const t = useT();
   const m = t.proxmox.restore;
   const toast = useToast();
-  const { confirmDialog } = useModal();
+  const { confirm } = useModal();
   const { data: snapshots, loading } = useAsync(() => proxmoxApi.guestSnapshots(cluster.id, guest.vmid));
   const [snapshotKey, setSnapshotKey] = useState('');
   const chosen: ProxmoxGuestSnapshot | undefined =
@@ -578,6 +563,7 @@ function GuestRestoreModal({
   const [live, setLive] = useState(false);
   const [overlayStorage, setOverlayStorage] = useState('');
   const liveRestore = effectiveAction === 'guest' && blockVm && live && !replace;
+  const replaceActive = effectiveAction === 'guest' && replace;
 
   // Storages that hold this guest type's disks and exist on the target node.
   const content = guest.type === 'qemu' ? 'images' : 'rootdir';
@@ -644,18 +630,21 @@ function GuestRestoreModal({
       toast(m.overlayRequired, 'error');
       return false;
     }
+    // A second, explicit confirmation before the original is overwritten. The
+    // restore dialog stays open behind it: cancelling returns to the filled-in
+    // form, and only a started restore closes it.
+    if (
+      replaceActive &&
+      !(await confirm({
+        title: m.replaceConfirmTitle,
+        message: m.replaceConfirm(guest.name, guest.vmid, fmtDateTime(chosen.snapshot.time), targetNode),
+        confirmLabel: m.replaceConfirmAction,
+        danger: true,
+      }))
+    ) {
+      return false;
+    }
     try {
-      if (effectiveAction === 'guest' && replace) {
-        // A second, explicit confirmation before the original is overwritten.
-        confirmDialog(m.replaceConfirmTitle, m.replaceConfirm(guest.name, guest.vmid), async () => {
-          try {
-            await send();
-          } catch (err) {
-            toast(err instanceof Error ? err.message : m.failed, 'error');
-          }
-        }, true);
-        return;
-      }
       await send();
     } catch (err) {
       toast(err instanceof Error ? err.message : m.failed, 'error');
@@ -664,7 +653,14 @@ function GuestRestoreModal({
   };
 
   return (
-    <FormModal title={m.title(`${guest.vmid} · ${guest.name}`)} wide confirmLabel={m.action} onClose={onClose} onSubmit={submit}>
+    <FormModal
+      title={m.title(`${guest.vmid} · ${guest.name}`)}
+      wide
+      confirmLabel={replaceActive ? m.replaceAction : m.action}
+      danger={replaceActive}
+      onClose={onClose}
+      onSubmit={submit}
+    >
       {loading || !snapshots ? (
         <Loading label={m.loading} />
       ) : snapshots.length === 0 ? (
@@ -713,12 +709,17 @@ function GuestRestoreModal({
           </Field>
           {effectiveAction === 'guest' ? (
             <>
-              <Field label="" help={m.replaceHelp}>
+              <Field label="" help={replace ? undefined : m.replaceHelp}>
                 <label className="checkbox">
                   <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
                   {m.replace}
                 </label>
               </Field>
+              {replace && (
+                <div className="warn-box" role="alert">
+                  {m.replaceHelp}
+                </div>
+              )}
               {blockVm && !replace && (
                 <Field label="" help={m.liveHelp}>
                   <label className="checkbox">
@@ -815,123 +816,12 @@ export function ProxmoxRunItemsModal({
   active: boolean;
   onClose: () => void;
 }) {
-  const t = useT();
-  const m = t.proxmox.runItems;
-  const [items, setItems] = useState<ProxmoxRunItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    const load = () =>
-      proxmoxApi
-        .runItems(runId)
-        .then((r) => live && setItems(r))
-        .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
-    void load();
-    if (!active) return () => {
-      live = false;
-    };
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, REFRESH_MS);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [runId, active]);
-
+  const m = useT().proxmox.runItems;
   return (
     <ModalFrame title={m.title(jobName)} wide onClose={onClose}>
-      {error ? (
-        <Empty>{error}</Empty>
-      ) : !items ? (
-        <Loading label={m.loading} />
-      ) : items.length === 0 ? (
-        <Empty>{m.empty}</Empty>
-      ) : (
-        <div>
-          {items.map((it) => (
-            <RunItemRow key={it.id} item={it} />
-          ))}
-        </div>
-      )}
+      <ProxmoxRunItemsList runId={runId} active={active} />
     </ModalFrame>
   );
-}
-
-function RunItemRow({ item: it }: { item: ProxmoxRunItem }) {
-  const t = useT();
-  const m = t.proxmox.runItems;
-  const r = it.result;
-  const p = it.progress ?? {};
-  const bytesDone = p.bytesDone as number | undefined;
-  const totalBytes = p.totalBytes as number | undefined;
-  const frac =
-    totalBytes && totalBytes > 0 && bytesDone != null ? bytesDone / totalBytes : ((p.percentDone as number) ?? 0);
-  const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
-  const details = r ? resultDetails(t, r) : it.method ? [methodLabel(t, it.method)] : [];
-  const error = it.error ?? r?.error ?? null;
-
-  return (
-    <div className="row compact">
-      <span className={`status-dot ${it.status}`} />
-      <div className="row-main">
-        <div className="row-title">
-          <span className="badge muted" style={{ marginRight: 6 }}>
-            {it.guestType === 'qemu' ? t.proxmox.detail.typeVm : t.proxmox.detail.typeCt}
-          </span>
-          {it.vmid} · {it.name}{' '}
-          <span className="muted" style={{ fontSize: 12 }}>{it.node}</span>
-        </div>
-        <div className="row-sub" title={r?.cbtReason ?? error ?? ''}>
-          {[
-            ...details,
-            r?.movedTo ? m.moved(r.movedTo) : null,
-            r?.cbtReason && r.cbt === 'full' ? r.cbtReason : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-          {error && (
-            <div style={{ color: 'var(--red, #e5534b)' }}>{error.length > 300 ? `${error.slice(0, 300)}…` : error}</div>
-          )}
-          {r?.warnings && r.warnings.length > 0 && (
-            <div style={{ color: 'var(--amber)' }}>
-              {m.warnings}: {r.warnings.join(' · ')}
-            </div>
-          )}
-        </div>
-      </div>
-      {it.status === 'running' ? (
-        <div className="row-meta run-progress">
-          <div className="progress-track">
-            <div className="fill" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="run-progress-labels">
-            <span>{totalBytes != null ? `${fmtBytes(bytesDone ?? 0)} / ${fmtBytes(totalBytes)}` : ''}</span>
-            <span>{pct}%</span>
-          </div>
-        </div>
-      ) : (
-        <div className="row-meta run-meta pve-item-meta">
-          <span>
-            {it.status === 'queued' ? (
-              <span className="badge info">{m.queued}</span>
-            ) : it.status !== 'success' ? (
-              <span className={`badge ${it.status === 'failed' ? 'danger' : 'muted'}`}>{statusLabel(it.status)}</span>
-            ) : r ? (
-              <span style={{ fontWeight: 500 }}>{m.read(fmtBytes(bytesRead(r)), fmtBytes(r.dataAdded ?? 0))}</span>
-            ) : null}
-          </span>
-          <span className="muted">{it.finishedAt ? fmtRelative(it.finishedAt) : it.startedAt ? fmtRelative(it.startedAt) : ''}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Bytes a guest backup read; the agent omits a zero, e.g. an incremental run with nothing changed. */
-function bytesRead(r: ProxmoxGuestResult): number | null {
-  if (r.bytesRead != null) return r.bytesRead;
-  return r.status === 'success' ? 0 : null;
 }
 
 // --- Dashboard ------------------------------------------------------------------------
@@ -976,7 +866,7 @@ export function ProxmoxAttention() {
       sub: `${g.clusterName} · `,
       label: m.unprotected,
       error: undefined as string | undefined,
-      color: 'var(--amber)',
+      color: 'var(--warn)',
     })),
   ];
   return (

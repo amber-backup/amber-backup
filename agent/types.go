@@ -26,6 +26,10 @@ type PollRequest struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Set when the agent runs on a Proxmox VE node (or its mock).
 	Proxmox *ProxmoxAgentInfo `json:"proxmox,omitempty"`
+	// Every task received and not yet reported successfully (queued, running
+	// or with its result awaiting delivery). Always sent, [] when idle: the
+	// server fails runs of this agent it handed out earlier that are missing.
+	RunningTaskIDs []string `json:"runningTaskIds"`
 }
 
 type CredentialFile struct {
@@ -64,6 +68,8 @@ type ResticOptions struct {
 	PreScript         string `json:"preScript,omitempty"`
 	PostSuccessScript string `json:"postSuccessScript,omitempty"`
 	PostFailureScript string `json:"postFailureScript,omitempty"`
+	// Bounds the backup including its forget and prune (0 = no limit).
+	TimeLimitSeconds int `json:"timeLimitSeconds,omitempty"`
 }
 
 type RestoreOptions struct {
@@ -86,6 +92,9 @@ type Task struct {
 	// SFTP -o sftp.command=...). May reference credential file paths via a
 	// {{credentialFile:<filename>}} placeholder.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+	// The server knows this repository exists (it held a backup or was
+	// initialised before): a missing one is then an error, never re-created.
+	RepoInitialized bool `json:"repoInitialized,omitempty"`
 	// backup, check
 	JobID   string         `json:"jobId,omitempty"`
 	JobName string         `json:"jobName,omitempty"`
@@ -146,6 +155,10 @@ type TaskResult struct {
 	ProxmoxGuest *ProxmoxGuestResult `json:"proxmoxGuest,omitempty"`
 	Error        string              `json:"error,omitempty"`
 	Log          string              `json:"log,omitempty"`
+
+	// minimal marks the log-less fallback sent after the server rejected the
+	// full result (not part of the wire format).
+	minimal bool
 }
 
 // RepoStats mirrors the server's RepoStatsDto.

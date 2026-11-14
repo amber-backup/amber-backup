@@ -72,6 +72,12 @@ func runAsService(run func(ctx context.Context)) bool {
 	return true
 }
 
+// signalContext is parent: a Windows service is stopped by the Service
+// Control Manager (see service.Execute), an interactive agent by closing it.
+func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
+
 type service struct{ run func(ctx context.Context) }
 
 // serviceStopWait bounds how long a stop waits for a running task to wind down

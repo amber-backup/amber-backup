@@ -100,7 +100,11 @@ export function deriveAction(
   }
 
   let action: string;
-  if (last && ACTION_VERBS[last]) {
+  if (last === 'reveal' && tail.length > 1) {
+    // e.g. POST /jobs/:id/repository-password/reveal → "Reveal repository password of job"
+    const what = tail.slice(0, -1).join(' ').replace(/-/g, ' ');
+    action = `Reveal ${what} of ${singular(collection)}`;
+  } else if (last && ACTION_VERBS[last]) {
     action = `${ACTION_VERBS[last]} ${singular(collection)}`;
   } else {
     const verb = METHOD_VERBS[method] ?? method;

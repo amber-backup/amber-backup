@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import parser from 'cron-parser';
+import { cronError, nextCronRun } from '../common/cron';
 import { SettingsService } from '../settings/settings.service';
 import { Db, KYSELY } from '../database/database.module';
 import { RequestUser } from '../common/auth/request-user';
@@ -63,23 +63,25 @@ export class ReportsService {
     private readonly settings: SettingsService,
   ) {}
 
+  /**
+   * Rejects an expression the scheduler could not run. Validated with the
+   * scheduler's own parser (`cron`), in the configured timezone.
+   */
   private validateCron(expr: string): void {
-    try {
-      parser.parseExpression(expr);
-    } catch {
-      throw new BadRequestException(`Invalid cron expression: ${expr}`);
+    const error = cronError(expr, this.settings.getTimezone());
+    if (error) {
+      throw new BadRequestException(`Invalid cron expression "${expr}": ${error}`);
     }
   }
 
+  /** Why the stored expression cannot be scheduled, or null (API field). */
+  scheduleError(expr: string): string | null {
+    return cronError(expr, this.settings.getTimezone());
+  }
+
+  /** Next scheduled run, computed like the scheduler does; null if unschedulable. */
   nextRun(expr: string): Date | null {
-    try {
-      return parser
-        .parseExpression(expr, { tz: this.settings.getTimezone() })
-        .next()
-        .toDate();
-    } catch {
-      return null;
-    }
+    return nextCronRun(expr, this.settings.getTimezone());
   }
 
   private parseDataset(dataset: unknown): ReportDataset {

@@ -33,6 +33,7 @@ export class ReportsController {
     return reports.map((r) => ({
       ...r,
       next_run: this.reports.nextRun(r.cron_expr),
+      schedule_error: this.reports.scheduleError(r.cron_expr),
     }));
   }
 
@@ -50,7 +51,11 @@ export class ReportsController {
     const report = await this.reports.get(
       await this.slugs.resolve('reports', idOrSlug),
     );
-    return { ...report, next_run: this.reports.nextRun(report.cron_expr) };
+    return {
+      ...report,
+      next_run: this.reports.nextRun(report.cron_expr),
+      schedule_error: this.reports.scheduleError(report.cron_expr),
+    };
   }
 
   @Patch(':id')

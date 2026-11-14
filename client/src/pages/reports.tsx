@@ -138,7 +138,7 @@ function ReportRow({
         </div>
         {r.enabled && r.next_run ? (
           <div>
-            {m.next} <span style={{ color: 'var(--amber)' }}>{fmtRelative(r.next_run)}</span>
+            {m.next} <span className="when">{fmtRelative(r.next_run)}</span>
           </div>
         ) : (
           <div className="muted">{m.disabled}</div>
@@ -189,6 +189,7 @@ function ReportRow({
                 reload();
               },
               true,
+              { confirmLabel: t.common.delete },
             )
           }
         >

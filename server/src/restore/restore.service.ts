@@ -114,6 +114,19 @@ export class RestoreService {
       throw new BadRequestException('destination.proxmox only applies to the proxmox mode');
     }
 
+    // A file restore of an agent job writes to that agent's host unless the
+    // caller names another agent — never silently to the server's own
+    // filesystem (an "original location" restore of an agent's /etc would
+    // otherwise overwrite the server's).
+    if (
+      (dto.mode === 'original' || dto.mode === 'alternate_path') &&
+      job.location === 'agent' &&
+      job.agent_id &&
+      !dto.destination?.agentId
+    ) {
+      dto.destination = { ...dto.destination, agentId: job.agent_id };
+    }
+
     const run = await this.db
       .insertInto('restore_runs')
       .values({

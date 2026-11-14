@@ -67,8 +67,15 @@ export class CheckRunnerService implements OnApplicationShutdown {
     private readonly jobs: JobsService,
   ) {}
 
-  /** Abort in-flight checks on shutdown so restic children don't block exit. */
+  private shuttingDown = false;
+
+  /**
+   * Abort in-flight checks on shutdown so restic children don't block exit.
+   * Their rows stay `running` for JobRunnerService.failInterruptedRuns at the
+   * next start (a restart is no cancel by the operator).
+   */
   onApplicationShutdown(): void {
+    this.shuttingDown = true;
     for (const ctrl of this.running.values()) ctrl.abort();
   }
 
@@ -228,6 +235,7 @@ export class CheckRunnerService implements OnApplicationShutdown {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const aborted = abort.signal.aborted;
+      if (aborted && this.shuttingDown) return;
       this.logger.warn(`Check ${runId} ${aborted ? 'cancelled' : 'failed'}: ${message}`);
       await this.settle(runId, info, job.repository_id, {
         status: aborted ? 'cancelled' : 'failed',

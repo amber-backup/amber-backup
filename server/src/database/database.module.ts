@@ -6,9 +6,9 @@ import {
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { Kysely, PostgresDialect } from 'kysely';
-import { Pool } from 'pg';
 import { loadConfig } from '../config/configuration';
 import { Database } from './database.types';
+import { createPool } from './pool';
 
 export const KYSELY = 'KYSELY_INSTANCE';
 export type Db = Kysely<Database>;
@@ -31,7 +31,12 @@ class DatabaseLifecycle implements OnApplicationShutdown {
       useFactory: (): Db => {
         const config = loadConfig();
         const dialect = new PostgresDialect({
-          pool: new Pool({ connectionString: config.databaseUrl, max: 10 }),
+          pool: createPool({
+            connectionString: config.databaseUrl,
+            max: 10,
+            statementTimeoutMs: config.dbStatementTimeoutMs,
+            connectionTimeoutMs: config.dbConnectionTimeoutMs,
+          }),
         });
         return new Kysely<Database>({ dialect });
       },

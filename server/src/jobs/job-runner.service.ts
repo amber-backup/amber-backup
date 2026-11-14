@@ -13,10 +13,15 @@ import { loadConfig } from '../config/configuration';
 import { ResticService } from '../restic/restic.service';
 import { TargetsService } from '../targets/targets.service';
 import { RepositoriesService } from '../repositories/repositories.service';
+import {
+  markRepositoryInitialized,
+  repositoryKnownInitialized,
+} from '../repositories/repository-initialized';
 import { PruneRunnerService } from './prune-runner.service';
 import { RunRetryService } from './run-retry.service';
 import { ResticOptions, RunStats } from '../database/database.types';
 import { sanitizedChildEnv } from '../common/child-env';
+import { agentWaitSql, SERVER_RESTART_MESSAGE } from '../agents/run-lease';
 
 const execFileAsync = promisify(execFile);
 
@@ -34,9 +39,16 @@ const SCRIPT_TIMEOUT_MS = 300_000;
 export class JobRunnerService implements OnApplicationShutdown {
   private readonly logger = new Logger(JobRunnerService.name);
   private readonly running = new Map<string, AbortController>();
+  private shuttingDown = false;
 
-  /** Abort in-flight runs on shutdown so restic children don't block exit. */
+  /**
+   * Abort in-flight runs on shutdown so restic children don't block exit.
+   * Their rows stay `running`: the next start fails and settles them
+   * (`failInterruptedRuns`), since the database may be gone before a write
+   * here completes — and a restart is no cancel by the operator.
+   */
   onApplicationShutdown(): void {
+    this.shuttingDown = true;
     for (const ctrl of this.running.values()) ctrl.abort();
   }
 
@@ -75,40 +87,91 @@ export class JobRunnerService implements OnApplicationShutdown {
   /**
    * Fails backup and check runs that sat in the queue for longer than the
    * configured timeout without being picked up — normally because the job's
-   * agent is offline (or, for a check, predates integrity checks). A retry
-   * waiting for its delay counts from when it became due. Each one is settled
-   * like any other failed run (retried or notified).
+   * agent is offline (or, for a check, predates integrity checks). An agent
+   * that only polls every few minutes gets at least two poll intervals plus a
+   * minute. A retry waiting for its delay counts from when it became due.
+   * Each one is settled like any other failed run (retried or notified).
    */
   @Interval(30_000)
   async failStaleQueuedRuns(): Promise<void> {
     const timeoutSeconds = loadConfig().runQueueTimeoutSeconds;
     if (timeoutSeconds <= 0) return;
-    const minutes = Math.round(timeoutSeconds / 60);
-    const staleBefore = new Date(Date.now() - timeoutSeconds * 1000);
+    const now = new Date();
     const reasons = {
       backup: 'is the agent offline?',
       check: 'is the agent offline or too old for integrity checks?',
     } as const;
-    const stale: { id: string }[] = [];
-    for (const [kind, reason] of Object.entries(reasons)) {
-      const rows = await this.db
+    const wait = agentWaitSql(timeoutSeconds, 'agents.poll_interval_seconds');
+    const candidates = await this.db
+      .selectFrom('job_runs')
+      .innerJoin('backup_jobs', 'backup_jobs.id', 'job_runs.job_id')
+      .leftJoin('agents', 'agents.id', 'backup_jobs.agent_id')
+      .select(['job_runs.id', 'job_runs.kind', wait.as('wait_seconds')])
+      .where('job_runs.kind', 'in', ['backup', 'check'])
+      .where('job_runs.status', '=', 'queued')
+      .where(
+        sql<Date>`coalesce(job_runs.not_before, job_runs.created_at)`,
+        '<',
+        sql<Date>`${now}::timestamptz - ${wait} * interval '1 second'`,
+      )
+      .execute();
+    for (const run of candidates) {
+      const reason = reasons[run.kind as keyof typeof reasons] ?? reasons.backup;
+      const minutes = Math.round(Number(run.wait_seconds) / 60);
+      const failed = await this.db
         .updateTable('job_runs')
         .set({
           status: 'failed',
           finished_at: new Date(),
           error: `Not picked up within ${minutes} min — ${reason}`,
         })
-        .where('kind', '=', kind as keyof typeof reasons)
+        .where('id', '=', run.id)
         .where('status', '=', 'queued')
-        .where(sql<Date>`coalesce(not_before, created_at)`, '<', staleBefore)
         .returning('id')
-        .execute();
-      stale.push(...rows);
-    }
-    for (const run of stale) {
+        .executeTakeFirst();
+      if (!failed) continue;
       this.logger.warn(`Run ${run.id} timed out in the queue`);
       void this.retries.finalize(run.id);
     }
+  }
+
+  /**
+   * Called once at startup, before any scheduler or sweeper runs: activities
+   * this server executed itself (backups, checks, prunes, restores) that are
+   * still `running` were cut off by a restart or crash — no process of this
+   * one owns them. They are failed so they stop blocking retries and checks.
+   * Returns the job runs to settle (retry/notify) once the app is up.
+   */
+  async failInterruptedRuns(): Promise<string[]> {
+    const now = new Date();
+    const runs = await this.db
+      .updateTable('job_runs')
+      .set({ status: 'failed', finished_at: now, error: SERVER_RESTART_MESSAGE })
+      .where('status', '=', 'running')
+      .where('agent_id', 'is', null)
+      .returning(['id', 'kind'])
+      .execute();
+    // A local restore is dispatched right after it is queued, so a queued one
+    // never started either.
+    const restores = await this.db
+      .updateTable('restore_runs')
+      .set({ status: 'failed', finished_at: now, error: SERVER_RESTART_MESSAGE })
+      .where('status', 'in', ['queued', 'running'])
+      .where('agent_id', 'is', null)
+      .returning('id')
+      .execute();
+    if (runs.length || restores.length) {
+      this.logger.warn(
+        `Failed ${runs.length} run(s) and ${restores.length} restore(s) interrupted by a server restart`,
+      );
+    }
+    // A prune is part of its backup's retention and was never notified on its own.
+    return runs.filter((r) => r.kind !== 'prune').map((r) => r.id);
+  }
+
+  /** Settles the runs `failInterruptedRuns` failed (queues retries, notifies). */
+  async finalizeInterrupted(runIds: string[]): Promise<void> {
+    for (const id of runIds) await this.retries.finalize(id);
   }
 
   /**
@@ -161,6 +224,7 @@ export class JobRunnerService implements OnApplicationShutdown {
       .where('id', '=', jobRunId)
       .execute();
 
+    let interrupted = false;
     try {
       const resolved = await this.targets.resolveForJob(repo);
       const resticCtx = {
@@ -182,7 +246,14 @@ export class JobRunnerService implements OnApplicationShutdown {
         );
       }
 
-      await this.restic.ensureInitialized(resticCtx);
+      // Initialise a new repository, but never re-create one that already
+      // held backups (an unmounted target would otherwise get a fresh repo).
+      const repoInitialized = await repositoryKnownInitialized(this.db, repositoryId);
+      await this.restic.ensureInitialized(resticCtx, {
+        repoInitialized,
+        onLog: appendLog,
+      });
+      await markRepositoryInitialized(this.db, repositoryId).catch(() => undefined);
 
       let lastWrite = 0;
       const backup = await this.restic.backup(
@@ -263,6 +334,11 @@ export class JobRunnerService implements OnApplicationShutdown {
       }
     } catch (err) {
       const aborted = abort.signal.aborted;
+      if (aborted && this.shuttingDown) {
+        // Left `running` for failInterruptedRuns at the next start.
+        interrupted = true;
+        return;
+      }
       appendLog(String(err));
       // On-failure script runs after any real failure (including a failed
       // pre-script), but not when the user cancelled the run. Best-effort.
@@ -296,7 +372,7 @@ export class JobRunnerService implements OnApplicationShutdown {
       this.running.delete(jobRunId);
       // Queue a retry of a failed run, or fire the configured notifications
       // for the now-terminal run (best-effort).
-      void this.retries.finalize(jobRunId);
+      if (!interrupted) void this.retries.finalize(jobRunId);
     }
   }
 

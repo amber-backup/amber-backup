@@ -25,7 +25,7 @@ func TestEnsureInitializedConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- r.ensureInitialized(context.Background(), task)
+			errs <- r.ensureInitialized(context.Background(), task, nil)
 		}()
 	}
 	wg.Wait()

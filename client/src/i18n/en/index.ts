@@ -17,6 +17,7 @@ import { settings } from './settings';
 import { integrity } from './integrity';
 import { backendFields } from './backendFields';
 import { storageChart } from './storageChart';
+import { runs } from './runs';
 
 export const en = {
   common,
@@ -38,6 +39,7 @@ export const en = {
   integrity,
   backendFields,
   storageChart,
+  runs,
 };
 
 export type Messages = typeof en;

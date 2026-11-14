@@ -142,8 +142,10 @@ export const proxmox = {
     replace: 'Replace the original guest (same VMID)',
     replaceHelp: 'The original is stopped and overwritten with the snapshot.',
     replaceConfirmTitle: 'Replace the original?',
-    replaceConfirm: (name: string, vmid: number) =>
-      `Guest ${vmid} "${name}" will be stopped and overwritten with the snapshot. Its current disks are lost.`,
+    replaceConfirm: (name: string, vmid: number, snapshot: string, node: string) =>
+      `Guest ${vmid} "${name}" will be stopped on node ${node} and overwritten with the snapshot from ${snapshot}. Its current disks are lost.`,
+    replaceConfirmAction: 'Replace original',
+    replaceAction: 'Restore and replace',
     storage: 'Target storage',
     storageOriginal: 'Original storages',
     unique: 'New MAC addresses and unique ids (--unique)',

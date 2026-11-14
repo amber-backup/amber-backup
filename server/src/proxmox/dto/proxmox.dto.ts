@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { truncateMiddle } from '../../common/truncate';
 import {
   ArrayMaxSize,
   IsArray,
@@ -226,7 +227,12 @@ export class ProxmoxGuestResultDto {
   @IsOptional() @IsNumber() @Min(0) bytesRead?: number;
   @IsOptional() @IsNumber() @Min(0) totalBytes?: number;
   @IsOptional() @IsNumber() @Min(0) durationSeconds?: number;
-  @IsOptional() @IsString() @MaxLength(20_000) error?: string;
+  // Shortened rather than rejected: the guest's outcome must not be lost to a long error.
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? truncateMiddle(value, 20_000) : value))
+  @MaxLength(20_000)
+  error?: string;
 
   @IsOptional()
   @IsArray()

@@ -10,10 +10,16 @@
     --bg-3: #2E2921;
     --border: #38322A;
     --border-strong: #4A4238;
+    /* Edges of form controls (inputs, selects, checkboxes): ~3:1 against
+       their bg-0 fill so a field is recognisable by more than its fill. */
+    --border-input: #6A6152;
 
     --text-1: #F3EDE1;
     --text-2: #B8AF9E;
-    --text-3: #7D766A;
+    /* Tertiary text (subtitles, ids, timestamps): >= 4.5:1 on bg-1..bg-3. */
+    --text-3: #9A9283;
+    /* Decorative only (scrollbar thumbs, chevrons) — never for content. */
+    --text-4: #7D766A;
 
     --success: #4FB98A;
     --success-bg: rgba(79, 185, 138, 0.12);
@@ -21,6 +27,11 @@
     --danger-bg: rgba(232, 117, 110, 0.12);
     --info: #6BA8DE;
     --info-bg: rgba(107, 168, 222, 0.12);
+    /* Warnings in running text (no guest agent, vzdump fallback, stale
+       snapshots). Lighter than the brand amber and always paired with the
+       alert icon, so a warning never reads like a name or a link. */
+    --warn: #E8B44A;
+    --warn-bg: rgba(232, 180, 74, 0.12);
     --offline: #6E675C;
 
     --radius: 8px;
@@ -104,7 +115,7 @@ input, select, textarea {
 }
 
 ::-webkit-scrollbar-thumb:active {
-    background: var(--text-3);
+    background: var(--text-4);
     background-clip: padding-box;
 }
 
@@ -373,6 +384,29 @@ input, select, textarea {
 .btn-danger:hover {
     background: var(--danger);
     color: #1A1206;
+}
+
+/* The confirm button of an irreversible action (delete, replace original):
+   filled red so it never looks like an ordinary save. */
+.btn-danger-solid {
+    background: var(--danger);
+    color: #1A1206;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.btn-danger-solid:hover {
+    background: #F08C86;
+    transform: translateY(-1px);
+}
+
+.btn:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+}
+
+.btn-danger-solid:focus-visible {
+    outline-color: var(--danger);
 }
 
 .btn-icon {
@@ -784,7 +818,7 @@ input, select, textarea {
 .row-chevron {
     display: flex;
     flex-shrink: 0;
-    color: var(--text-3);
+    color: var(--text-4);
     transition: color .15s ease, transform .15s ease;
 }
 
@@ -809,7 +843,7 @@ input, select, textarea {
 .schedule-next {
     font-size: 12px;
     font-weight: 500;
-    color: var(--amber);
+    color: var(--text-2);
 }
 
 .row.compact .row-sub {
@@ -1060,6 +1094,43 @@ input, select, textarea {
     color: var(--text-3);
 }
 
+/* A warning inside running text; pair it with <Icon name="alert" />. */
+.warn-text {
+    color: var(--warn);
+}
+
+.warn-text svg, .danger-text svg {
+    display: inline-block;
+    vertical-align: -2px;
+    margin-right: 3px;
+}
+
+.danger-text {
+    color: var(--danger);
+}
+
+/* A name that refers to another object (agent, target, repository). */
+.ref {
+    color: var(--text-1);
+}
+
+/* A link to another object inside running text: quiet until hovered. */
+.ref-link {
+    color: var(--text-1);
+    text-decoration: underline dashed var(--text-4);
+    text-underline-offset: 3px;
+}
+
+.ref-link:hover, .ref-link:focus-visible {
+    color: var(--amber);
+    text-decoration-color: var(--amber);
+}
+
+/* A relative time ("2 min ago", "in 8 h") in a row's meta column. */
+.when {
+    color: var(--text-2);
+}
+
 .empty {
     padding: 40px 20px;
     text-align: center;
@@ -1115,7 +1186,28 @@ input, select, textarea {
     display: grid;
     gap: 14px;
     align-items: center;
-    grid-template-columns: 158px 1.1fr 1.3fr 1fr 78px;
+    grid-template-columns: 158px minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 1fr) 78px;
+}
+
+/* A long actor ("Administrator", an e-mail) is cut off instead of running
+   into the action column. */
+.audit-grid .row-title, .audit-grid .row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Tablet / split screen: drop the Resource column (4th) — it is in the
+   detail dialog — and give actor and action the room. */
+@media (max-width: 1140px) {
+    .audit-grid {
+        grid-template-columns: 132px minmax(0, 1fr) minmax(0, 1.3fr) 64px;
+        gap: 12px;
+    }
+
+    .audit-grid > :nth-child(4) {
+        display: none;
+    }
 }
 
 @media (max-width: 640px) {
@@ -1159,6 +1251,10 @@ input, select, textarea {
     border-radius: var(--radius-lg);
     width: 100%;
     max-width: 540px;
+}
+
+.modal:focus {
+    outline: none;
 }
 
 .modal-head {
@@ -1210,7 +1306,7 @@ input, select, textarea {
 
 .field input, .field select, .field textarea {
     background: var(--bg-0);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-input);
     border-radius: var(--radius);
     padding: 9px 12px;
     color: var(--text-1);
@@ -1238,7 +1334,7 @@ input, select, textarea {
 /* Standalone themed controls (filter/toolbar inputs outside a .field). */
 .input, .select {
     background: var(--bg-0);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-input);
     border-radius: var(--radius);
     padding: 9px 12px;
     color: var(--text-1);
@@ -1250,7 +1346,7 @@ input, select, textarea {
 }
 
 .input:hover, .select:hover {
-    border-color: var(--border-strong);
+    border-color: var(--text-4);
 }
 
 .input:focus, .select:focus {
@@ -1351,7 +1447,7 @@ input[type="checkbox"] {
     height: 18px;
     margin: 0;
     padding: 0;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-input);
     border-radius: 5px;
     background: var(--bg-0);
     cursor: pointer;
@@ -1426,7 +1522,7 @@ input[type="checkbox"]:disabled {
 
 .cron-preview {
     font-size: 12px;
-    color: var(--amber);
+    color: var(--text-2);
     margin-top: 2px;
 }
 
@@ -1751,6 +1847,34 @@ input[type="checkbox"]:disabled {
 .fb-crumbs .crumb {
     cursor: pointer;
     color: var(--amber);
+    font-size: inherit;
+    padding: 0 2px;
+    border-radius: 4px;
+}
+
+.fb-crumbs .crumb:hover {
+    color: var(--amber-light);
+    text-decoration: underline;
+}
+
+.fb-crumbs .crumb[aria-current] {
+    color: var(--text-1);
+}
+
+/* Folder name in the snapshot browser: a button that looks like the text. */
+.fb-item .fb-open {
+    text-align: left;
+    font-size: inherit;
+    padding: 0;
+}
+
+.fb-item .fb-open:hover {
+    color: var(--amber-light);
+}
+
+.fb-crumbs .crumb:focus-visible, .fb-item .fb-open:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
 }
 
 /* spinner */
@@ -1810,12 +1934,46 @@ input[type="checkbox"]:disabled {
     .panel.fill-col .panel-scroll {
         max-height: 60vh;
     }
+
+    /* With the sidebar still open, a row's wide meta column (Proxmox guests,
+       jobs) used to squeeze the title block to a few words per line. The
+       title block now keeps at least 300 px; a meta column that does not
+       fit next to it moves to a second line. */
+    .row {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .row-main {
+        flex-basis: 300px;
+    }
+
+    .row-actions {
+        margin-left: auto;
+    }
+
+    .pve-guest-meta {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        text-align: left !important;
+    }
+
+    /* The guest rows' restore button drops its text label here. */
+    .row-actions .btn-label {
+        display: none;
+    }
 }
 
 /* ---------- Mobile: off-canvas sidebar drawer ---------- */
 @media (max-width: 860px) {
+    /* The sidebar is a fixed drawer here, so only the topbar and the main
+       area are grid rows: the topbar keeps its height and the main area
+       takes the rest — no gap above short pages. */
     .app {
         grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        align-content: start;
     }
 
     .mobile-topbar {
@@ -1924,12 +2082,9 @@ input[type="checkbox"]:disabled {
         flex-wrap: wrap;
     }
 
-    /* Proxmox guest rows: protection/last-backup text wraps instead of
-       pushing the row wider than the screen. */
-    .pve-guest-meta {
-        flex-shrink: 1;
-        min-width: 0;
-        overflow-wrap: anywhere;
+    /* On their own line there is room for the restore label again. */
+    .row-actions .btn-label {
+        display: inline;
     }
 
     .row.compact .run-meta.pve-item-meta {
@@ -2039,4 +2194,279 @@ input[type="checkbox"]:disabled {
     display: flex;
     justify-content: flex-end;
     gap: 10px;
+}
+
+/* ---------- Run detail dialog ---------- */
+.run-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+}
+
+.run-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px 22px;
+}
+
+.run-fact {
+    min-width: 0;
+}
+
+.run-fact-label, .run-detail-heading {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+
+.run-fact-value {
+    font-size: 13.5px;
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+}
+
+.run-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.run-detail-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.run-detail-sub {
+    margin-left: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+}
+
+.run-detail-list {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.run-detail-error {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.run-detail-note {
+    font-size: 12.5px;
+    color: var(--text-3);
+}
+
+.run-detail .run-log {
+    max-height: 45vh;
+}
+
+/* A text-styled button inside running text (e.g. "Show the previous attempt"). */
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--amber);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.link-btn:hover {
+    color: var(--amber-light);
+}
+
+.link-btn:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* The title of an activity row: a button that opens the run detail. */
+.run-open {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.run-open:hover {
+    color: var(--amber);
+}
+
+.run-open:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+.row.run-clickable {
+    cursor: pointer;
+}
+
+.row.run-clickable:hover {
+    background: var(--bg-2);
+}
+
+/* A job's status dot that opens its latest run. */
+.status-dot-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    margin: -6px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.status-dot-btn:hover {
+    background: var(--bg-3);
+}
+
+.status-dot-btn:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 1px;
+}
+
+.status-dot-btn .status-dot {
+    margin: 0;
+}
+
+/* A stat card that acts on click (e.g. "Failed (7 d)" opens the failures). */
+button.stat {
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+}
+
+button.stat:hover {
+    border-color: var(--border-strong);
+}
+
+button.stat:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+}
+
+/* ---------- Repository password ---------- */
+.secret-row {
+    flex-wrap: wrap;
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.secret-row input {
+    flex: 1 1 200px;
+    min-width: 0;
+    font-family: var(--font-mono);
+}
+
+.secret-row .btn {
+    flex-shrink: 0;
+}
+
+.info-box {
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    font-size: 12.5px;
+    color: var(--text-2);
+}
+
+.warn-callout {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    font-size: 12.5px;
+    color: var(--text-1);
+}
+
+.consequences {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* ---------- Restore summary ---------- */
+.summary-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.summary-list dt {
+    color: var(--text-3);
+}
+
+.summary-list dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.path-list {
+    margin: 4px 0 0;
+    padding-left: 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+.dry-run-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    background: var(--info-bg);
+    border: 1px solid var(--info);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    font-size: 12.5px;
+    color: var(--text-1);
+}
+
+/* A dialog body of stacked blocks (boxes, fields, notes). */
+.dialog-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }

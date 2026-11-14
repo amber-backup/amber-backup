@@ -101,8 +101,10 @@ export const hyperv: HypervMessages = {
     connectNetworkHelp:
       'Standardmäßig aus: Eine Kopie neben dem Original würde im Netzwerk kollidieren. Switch-Name und VLAN bleiben in jedem Fall erhalten.',
     replaceConfirmTitle: 'Original-VM ersetzen?',
-    replaceConfirm: (name: string) =>
-      `"${name}" wird vor dem Restore ausgeschaltet und abgemeldet. Das lässt sich in Amber nicht rückgängig machen.`,
+    replaceConfirm: (name: string, snapshot: string, host: string) =>
+      `„${name}“ auf ${host} wird ausgeschaltet, abgemeldet und durch den Snapshot vom ${snapshot} ersetzt. Das lässt sich in Amber nicht rückgängig machen.`,
+    replaceConfirmAction: 'Original ersetzen',
+    replaceAction: 'Wiederherstellen und ersetzen',
     started: 'Restore gestartet – den Verlauf sehen Sie unter Snapshots',
     failed: 'Restore fehlgeschlagen',
     note: 'Die VM wird aus dem Backup neu aufgebaut (Prozessoren, Arbeitsspeicher, Disks, Netzwerk, Secure Boot) und startet ohne Checkpoints. Ein virtuelles TPM erhält neue Schlüssel.',

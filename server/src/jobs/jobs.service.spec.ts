@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import { JobsService } from './jobs.service';
 import { AccessControlService } from '../common/access-control.service';
 import { SecretsService } from '../crypto/secrets.service';
@@ -30,9 +31,14 @@ describe('JobsService credential overrides', () => {
 
     const pick = (table: string, repo: ChainBuilder, other: ChainBuilder) =>
       table.startsWith('repositories') ? repo : other;
+    const trxDeletes: Record<string, ChainBuilder> = {};
+    const restoreUpdate = chain();
     const trx = {
       insertInto: jest.fn((t: string) => pick(t, repoInsert, jobInsert)),
-      updateTable: jest.fn((t: string) => pick(t, repoUpdate, jobUpdate)),
+      updateTable: jest.fn((t: string) =>
+        t === 'restore_runs' ? restoreUpdate : pick(t, repoUpdate, jobUpdate),
+      ),
+      deleteFrom: jest.fn((t: string) => (trxDeletes[t] ??= chain())),
     };
 
     const db = {
@@ -68,7 +74,7 @@ describe('JobsService credential overrides', () => {
       secrets as unknown as SecretsService,
       { getTimezone: () => 'UTC' } as unknown as SettingsService,
     );
-    return { service, secrets, repoInsert, repoUpdate };
+    return { service, secrets, repoInsert, repoUpdate, trx, trxDeletes, restoreUpdate };
   }
 
   const createDto = {
@@ -203,17 +209,132 @@ describe('JobsService credential overrides', () => {
       expect(repoUpdate.set.mock.calls[0][0]).not.toHaveProperty('credential_secret_id');
       expect(secrets.remove).not.toHaveBeenCalled();
     });
+
+    it('forgets that the repository existed when it moves to another path', async () => {
+      const { service, repoUpdate } = make();
+
+      await service.update(user, 'job-1', { repoConfig: { path: 'elsewhere' } });
+
+      expect(repoUpdate.set.mock.calls[0][0]).toMatchObject({
+        initialized_at: null,
+        relocated_at: expect.any(Date),
+      });
+    });
+
+    it('forgets that the repository existed when it moves to another connection', async () => {
+      const { service, repoUpdate } = make();
+
+      await service.update(user, 'job-1', { targetId: 't2' });
+
+      expect(repoUpdate.set.mock.calls[0][0]).toMatchObject({
+        initialized_at: null,
+        relocated_at: expect.any(Date),
+      });
+    });
+
+    it('keeps what it knows when the same location is saved again', async () => {
+      const { service, repoUpdate } = make();
+
+      await service.update(user, 'job-1', { targetId: 't1', repoConfig: { path: 'repo' } });
+
+      expect(repoUpdate.set.mock.calls[0][0]).not.toHaveProperty('relocated_at');
+      expect(repoUpdate.set.mock.calls[0][0]).not.toHaveProperty('initialized_at');
+    });
   });
 
   describe('remove', () => {
-    it('deletes the override secret along with the job', async () => {
-      const { service, secrets } = make({ credential_secret_id: 'sec-old' });
+    it('deletes job, repository and both secrets in one transaction', async () => {
+      const { service, trx, trxDeletes } = make({ credential_secret_id: 'sec-old' });
 
       await service.remove(user, 'job-1');
 
-      expect(secrets.remove).toHaveBeenCalledWith('sec-password');
-      expect(secrets.remove).toHaveBeenCalledWith('sec-old');
+      expect(trx.deleteFrom.mock.calls.map((c) => c[0])).toEqual([
+        'backup_jobs',
+        'repositories',
+        'secrets',
+      ]);
+      expect(trxDeletes.repositories.where).toHaveBeenCalledWith('id', '=', 'repo-1');
+      expect(trxDeletes.secrets.where).toHaveBeenCalledWith('id', 'in', [
+        'sec-password',
+        'sec-old',
+      ]);
     });
+
+    it('fails restores of the job that have not started yet', async () => {
+      const { service, restoreUpdate } = make();
+
+      await service.remove(user, 'job-1');
+
+      expect(restoreUpdate.set).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' }),
+      );
+      expect(restoreUpdate.where).toHaveBeenCalledWith('job_id', '=', 'job-1');
+      expect(restoreUpdate.where).toHaveBeenCalledWith('status', '=', 'queued');
+    });
+  });
+});
+
+describe('JobsService.revealRepositoryPassword', () => {
+  const admin = { id: 'u1', isAdmin: true, authVia: 'session' } as RequestUser;
+  const job = { id: 'job-1', repo_password_secret_id: 'sec-password' };
+
+  async function make(passwordHash: string | null) {
+    const db = {
+      selectFrom: jest.fn((t: string) =>
+        t === 'users'
+          ? chain({ executeTakeFirst: { password_hash: passwordHash } })
+          : chain({ executeTakeFirst: job }),
+      ),
+    } as unknown as Db;
+    const secrets = { reveal: jest.fn().mockResolvedValue('restic-secret') };
+    const service = new JobsService(
+      db,
+      {} as AccessControlService,
+      secrets as unknown as SecretsService,
+      { getTimezone: () => 'UTC' } as unknown as SettingsService,
+    );
+    return { service, secrets };
+  }
+
+  it('reveals the password after the admin re-entered their own', async () => {
+    const { service, secrets } = await make(await argon2.hash('login-pw'));
+
+    await expect(service.revealRepositoryPassword(admin, 'job-1', 'login-pw')).resolves.toEqual({
+      password: 'restic-secret',
+    });
+    expect(secrets.reveal).toHaveBeenCalledWith('sec-password');
+  });
+
+  it('refuses a wrong or missing current password', async () => {
+    const { service, secrets } = await make(await argon2.hash('login-pw'));
+
+    await expect(
+      service.revealRepositoryPassword(admin, 'job-1', 'wrong'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.revealRepositoryPassword(admin, 'job-1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(secrets.reveal).not.toHaveBeenCalled();
+  });
+
+  it('lets an SSO-only admin (no local password) reveal without one', async () => {
+    const { service } = await make(null);
+
+    await expect(service.revealRepositoryPassword(admin, 'job-1')).resolves.toEqual({
+      password: 'restic-secret',
+    });
+  });
+
+  it('is for administrator sessions only', async () => {
+    const { service, secrets } = await make(null);
+
+    await expect(
+      service.revealRepositoryPassword({ ...admin, isAdmin: false }, 'job-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.revealRepositoryPassword({ ...admin, authVia: 'apikey' }, 'job-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(secrets.reveal).not.toHaveBeenCalled();
   });
 });
 
@@ -240,5 +361,24 @@ describe('JobsService next run timezone', () => {
 
   it('returns null for an expression it cannot parse', () => {
     expect(make('UTC').nextRun('not a cron')).toBeNull();
+  });
+
+  // The scheduler (`cron`) rejects these; cron-parser used to accept them, so
+  // such a job was saved, showed a next run, and never ran.
+  it.each(['0 0 L * *', '0 0 * * 5L', '0 0 * * 1#2', '0 0 ? * *', '0 0 31 2 *'])(
+    'reports %s as unschedulable and shows no next run',
+    (expr) => {
+      const service = make('UTC');
+      expect(service.scheduleError(expr)).toEqual(expect.any(String));
+      expect(service.nextRun(expr)).toBeNull();
+    },
+  );
+
+  it('accepts what the scheduler runs', () => {
+    const service = make('Europe/Berlin');
+    for (const expr of ['0 3 * * *', '*/15 * * * *', '0 2 * * 1-5', '@daily']) {
+      expect(service.scheduleError(expr)).toBeNull();
+      expect(service.nextRun(expr)).toBeInstanceOf(Date);
+    }
   });
 });

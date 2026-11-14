@@ -66,6 +66,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       expect(result.installCommand).toContain('amber-agent:');
       expect(result.installCommand).toContain(`AMBER_TOKEN: ${result.token}`);
       expect(result.installCommand).toContain('- amber-agent:/var/lib/amber-agent');
+      expect(result.installCommand).toContain('stop_grace_period: 60s');
     });
 
     it('emits a docker run command for the docker method', async () => {
@@ -77,6 +78,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
       });
 
       expect(result.installCommand).toMatch(/^docker run /);
+      expect(result.installCommand).toContain('--stop-timeout 60');
       expect(result.installCommand).toContain(`AMBER_TOKEN=${result.token}`);
     });
 
@@ -479,7 +481,7 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
     });
 
     it('settles a backup result through the retry service', async () => {
-      const service = makeService(chain({ execute: [] }));
+      const service = makeService(chain({ execute: [], executeTakeFirst: { id: 'run-1' } }));
       (retries.finalize as jest.Mock).mockClear();
 
       await service.submitBackupResult('agent-1', 'run-1', {
@@ -760,7 +762,8 @@ describe('AgentsService (enrollment tokens & agent keys)', () => {
         selectFrom: chain({
           executeTakeFirst: owned,
         }),
-        updateTable: chain({ execute: [] }),
+        // The result settles the still-running run.
+        updateTable: chain({ execute: [], executeTakeFirst: { id: 'run-1' } }),
       });
       const repos = {
         recordStats: jest.fn().mockResolvedValue(undefined),

@@ -6,9 +6,9 @@ import {
   Migrator,
   PostgresDialect,
 } from 'kysely';
-import { Pool } from 'pg';
 import { loadConfig } from '../config/configuration';
 import { Database } from './database.types';
+import { createPool, waitForDatabase } from './pool';
 
 /**
  * Applies (or rolls back) migrations using a short-lived connection. Shared by
@@ -19,10 +19,14 @@ export async function runMigrations(
   log: (message: string) => void = console.log,
 ): Promise<void> {
   const config = loadConfig();
+  // No statement_timeout here: a migration may legitimately run long.
+  const pool = createPool({
+    connectionString: config.databaseUrl,
+    connectionTimeoutMs: config.dbConnectionTimeoutMs,
+    name: 'Migrations',
+  });
   const db = new Kysely<Database>({
-    dialect: new PostgresDialect({
-      pool: new Pool({ connectionString: config.databaseUrl }),
-    }),
+    dialect: new PostgresDialect({ pool }),
   });
   const migrator = new Migrator({
     db,
@@ -35,6 +39,9 @@ export async function runMigrations(
   });
 
   try {
+    // On boot the DB container may still be starting: wait for it with backoff
+    // instead of crashing (and crash-looping) on the first refused connection.
+    await waitForDatabase(pool, { log });
     const { error, results } =
       direction === 'down'
         ? await migrator.migrateDown()

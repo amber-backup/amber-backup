@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError, type Run, type Job, type Agent, type RepositoryStatsHistory } from '../core/api';
 import { Icon } from '../core/icons';
 import {
@@ -18,6 +18,7 @@ import { useToast } from '../ui/toast';
 import { StorageChart, StorageSummary } from '../ui/storage-chart';
 import { checkLevelLabel } from '../ui/integrity';
 import { useModal } from '../ui/modal';
+import { RunDetailModal } from '../ui/run-detail';
 import { ProxmoxAttention, ProxmoxRunItemsModal } from './proxmox';
 import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
@@ -237,6 +238,33 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
     }
   }, []);
 
+  const { open } = useModal();
+  // Every activity opens its detail: status, timing, error and the log tail.
+  const openRun = (r: Pick<Run, 'id' | 'kind' | 'job_id' | 'job_name'>) =>
+    open((close) => (
+      <RunDetailModal
+        run={{ id: r.id, kind: r.kind, job_id: r.job_id, job_name: r.job_name }}
+        proxmox={r.kind === 'backup' && proxmoxJobIds.has(r.job_id ?? '')}
+        agents={agents}
+        onClose={close}
+        onEditJob={(jobId) => navigate(`/jobs?edit=${encodeURIComponent(jobId)}`)}
+        onStarted={() => void poll()}
+      />
+    ));
+
+  // "Failed (7 d)": narrow the feed to failures and open the latest failed backup.
+  const activityRef = useRef<HTMLDivElement>(null);
+  const showFailures = async () => {
+    if (!onlyFailed) toggleOnlyFailed(true);
+    activityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try {
+      const [latest] = await api.get<Run[]>('/runs?kind=backup&status=failed&limit=1');
+      if (latest && Date.now() - new Date(latest.created_at).getTime() <= 7 * 86400_000) openRun(latest);
+    } catch {
+      /* the filtered feed still shows them */
+    }
+  };
+
   const markCancelled = (id: string) => {
     cancelledRef.current.add(id);
     const now = new Date().toISOString();
@@ -265,7 +293,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         }
       />
 
-      <Stats dash={dash} agents={agents} />
+      <Stats dash={dash} agents={agents} onShowFailures={() => void showFailures()} />
 
       <HypervAttention />
 
@@ -275,7 +303,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
         <div className="main-stack fill-col">
           <StoragePanel />
 
-          <div className="panel fill-col">
+          <div className="panel fill-col" ref={activityRef}>
             <div className="panel-head">
               <h2>{t.dashboard.activity.title}</h2>
               <div className="panel-head-actions">
@@ -296,9 +324,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                   />
                   {t.dashboard.activity.onlyFailed}
                 </label>
-                <span className="link" onClick={() => navigate('/jobs')}>
+                <Link to="/jobs" className="link">
                   {t.dashboard.activity.allJobs}
-                </span>
+                </Link>
               </div>
             </div>
             <div className="panel-scroll" ref={scrollRef}>
@@ -309,6 +337,7 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
                     run={r}
                     proxmox={r.kind === 'backup' && proxmoxJobIds.has(r.job_id ?? '')}
                     onCancelled={() => markCancelled(r.id)}
+                    onOpen={() => openRun(r)}
                   />
                 ))}
                 {pageLoading && (
@@ -337,9 +366,9 @@ function DashboardView({ dash0, jobs, agents0 }: { dash0: DashboardData; jobs: J
               <h2>{t.dashboard.schedules.title}</h2>
               <div className="panel-head-actions">
                 <ListSearch value={scheduleQuery} onChange={setScheduleQuery} />
-                <span className="link" onClick={() => navigate('/jobs')}>
+                <Link to="/jobs" className="link">
                   {t.dashboard.schedules.edit}
-                </span>
+                </Link>
               </div>
             </div>
             <div className="panel-scroll">
@@ -405,7 +434,15 @@ function StoragePanel() {
   );
 }
 
-function Stats({ dash, agents }: { dash: DashboardData; agents: Agent[] }) {
+function Stats({
+  dash,
+  agents,
+  onShowFailures,
+}: {
+  dash: DashboardData;
+  agents: Agent[];
+  onShowFailures: () => void;
+}) {
   const t = useT();
   const s = t.dashboard.stats;
   const online = agents.filter((a) => a.status === 'online').length;
@@ -419,6 +456,8 @@ function Stats({ dash, agents }: { dash: DashboardData; agents: Agent[] }) {
         trend={dash.failedLastWeek > 0 ? s.needsAttention : s.allGood}
         trendClass={dash.failedLastWeek > 0 ? 'down' : 'up'}
         icon="job"
+        onClick={dash.failedLastWeek > 0 ? onShowFailures : undefined}
+        actionLabel={s.showFailures}
       />
       <StatCard label={s.runningOperations} value={String(dash.running)} trend={s.active} trendClass="neutral" icon="play" />
       <StatCard
@@ -443,15 +482,20 @@ function StatCard({
   trend,
   trendClass,
   icon,
+  onClick,
+  actionLabel,
 }: {
   label: string;
   value: React.ReactNode;
   trend: string;
   trendClass: string;
   icon: string;
+  /** Makes the card a button (e.g. to open the failures). */
+  onClick?: () => void;
+  actionLabel?: string;
 }) {
-  return (
-    <div className="stat">
+  const content = (
+    <>
       <div className="stat-head">
         <span className="stat-label">{label}</span>
         <span className="stat-icon">
@@ -460,19 +504,30 @@ function StatCard({
       </div>
       <div className="stat-value">{value}</div>
       <div className={`stat-trend ${trendClass}`}>{trend}</div>
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" className="stat" onClick={onClick} title={actionLabel}>
+        {content}
+      </button>
+    );
+  }
+  return <div className="stat">{content}</div>;
 }
 
 function RunRow({
   run: r,
   proxmox = false,
   onCancelled,
+  onOpen,
 }: {
   run: Run;
   /** A backup of a Proxmox job: its per-guest rows can be opened. */
   proxmox?: boolean;
   onCancelled: () => void;
+  /** Opens the run detail. */
+  onOpen: () => void;
 }) {
   const t = useT();
   const a = t.dashboard.activity;
@@ -531,7 +586,10 @@ function RunRow({
       title={a.cancelTitle}
       aria-label={a.cancelTitle}
       disabled={cancelling}
-      onClick={() => void cancel()}
+      onClick={(e) => {
+        e.stopPropagation();
+        void cancel();
+      }}
     >
       <Icon name="x" size={12} />
     </button>
@@ -618,11 +676,31 @@ function RunRow({
                 : statusLabel(r.status);
 
   return (
-    <div className="row compact" data-run-id={r.id}>
+    // The whole row opens the detail for the mouse; the title is the real
+    // button for the keyboard and screen readers.
+    <div
+      className="row compact run-clickable"
+      data-run-id={r.id}
+      onClick={() => {
+        // Selecting text (e.g. to copy an error) is not a click on the row.
+        if (window.getSelection()?.toString()) return;
+        onOpen();
+      }}
+    >
       <span className={`status-dot ${r.status}`} />
       <div className="row-main">
         <div className="row-title">
-          {r.job_name ?? a.jobFallback}
+          <button
+            type="button"
+            className="run-open"
+            title={t.runs.detail.open}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          >
+            {r.job_name ?? a.jobFallback}
+          </button>
           {r.kind !== 'backup' && (
             <span className={`badge ${r.check_info?.damaged ? 'danger' : 'muted'} row-kind`}>
               {a.kinds[r.kind] ?? r.kind}
@@ -634,7 +712,10 @@ function RunRow({
               className="badge muted row-kind"
               style={{ cursor: 'pointer', border: 'none' }}
               title={t.proxmox.runItems.open}
-              onClick={openGuests}
+              onClick={(e) => {
+                e.stopPropagation();
+                openGuests();
+              }}
             >
               {proxmoxGuestsLabel(r, t)}
             </button>
@@ -675,7 +756,8 @@ function isMaintenance(r: Run): boolean {
 /**
  * Current state of one row. A restore lives outside `/runs`: take only the
  * fields the row shows from it and leave its log, destination and repository
- * details out.
+ * details out. Logs are not kept on the feed (they can be megabytes); the run
+ * detail dialog loads its own.
  */
 async function refetchRun(r: Run): Promise<Run> {
   if (r.kind === 'restore') {
@@ -684,7 +766,7 @@ async function refetchRun(r: Run): Promise<Run> {
     >(`/restores/${r.id}`);
     return { ...r, status, started_at, finished_at, stats, error };
   }
-  const { log: _log, ...fresh } = await api.get<Run & { log?: unknown }>(`/runs/${r.id}`);
+  const { log: _log, ...fresh } = await api.get<Run>(`/runs/${r.id}`);
   return { ...r, ...fresh };
 }
 
@@ -714,7 +796,7 @@ function HypervAttention() {
   if (!data || (data.unprotected.length === 0 && data.failed.length === 0)) return null;
   const items = [
     ...data.failed.map((v) => ({ ...v, label: m.failed, color: 'var(--red, #e5534b)' })),
-    ...data.unprotected.map((v) => ({ ...v, error: undefined, label: m.unprotected, color: 'var(--amber)' })),
+    ...data.unprotected.map((v) => ({ ...v, error: undefined, label: m.unprotected, color: 'var(--warn)' })),
   ];
   return (
     <div className="panel" style={{ marginBottom: 20 }}>

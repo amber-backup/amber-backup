@@ -161,6 +161,10 @@ export interface Job {
   repo_stats_at?: string | null;
   /** Last refresh failure (figures then reflect the previous read), if any. */
   repo_stats_error?: string | null;
+  /** Why the job's schedule cannot run (the scheduler rejects its cron); null when fine. */
+  schedule_error?: string | null;
+  /** Same for the integrity check's schedule. */
+  check_schedule_error?: string | null;
   /** Verdict of the repository's last finished integrity check; null ⇒ never checked. */
   repo_check_status?: 'passed' | 'damaged' | null;
   repo_check_at?: string | null;
@@ -287,6 +291,8 @@ export interface Run {
   snapshot_id: string | null;
   stats: Record<string, unknown> | null;
   error: string | null;
+  /** Output of the run; only `GET /runs/:id` and `GET /restores/:id` return it. */
+  log?: string | null;
   created_at: string;
 }
 

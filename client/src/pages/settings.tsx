@@ -283,7 +283,7 @@ function CliPanel() {
               href={`https://github.com/amber-backup/amber-backup/releases/tag/v${version}`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: 'var(--amber)' }}
+              className="ref-link"
             >
               {m.release(version)}
             </a>
@@ -325,6 +325,7 @@ function KeyRow({ apiKey: k, reload }: { apiKey: ApiKey; reload: () => void }) {
               reload();
             },
             true,
+            { confirmLabel: t.common.revoke },
           )
         }
       >
@@ -704,6 +705,7 @@ function PasskeysPanel() {
                     reload();
                   },
                   true,
+                  { confirmLabel: t.common.remove },
                 )
               }
             >

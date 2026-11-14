@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { isValidAllowlistEntry } from '../../common/ip-allowlist';
+import { truncateMiddle } from '../../common/truncate';
 import { HypervInventoryDto } from '../../hyperv/dto/hyperv.dto';
 import {
   ProxmoxAgentInfoDto,
@@ -26,6 +27,19 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+
+/** Longest log an agent result keeps (longer ones keep their start and end). */
+export const RESULT_LOG_MAX = 200_000;
+/** Longest error text an agent result keeps. */
+export const RESULT_ERROR_MAX = 20_000;
+
+/**
+ * Shortens an over-long text field instead of rejecting the whole result: an
+ * agent's outcome must never be lost to a chatty log (head and tail are kept).
+ */
+export function TruncateTo(max: number): PropertyDecorator {
+  return Transform(({ value }) => (typeof value === 'string' ? truncateMiddle(value, max) : value));
+}
 
 export class CreateEnrollmentTokenDto {
   @ApiPropertyOptional({ description: 'Suggested agent name' })
@@ -177,6 +191,21 @@ export class PollDto {
   @ValidateNested()
   @Type(() => ProxmoxAgentInfoDto)
   proxmox?: ProxmoxAgentInfoDto;
+
+  @ApiPropertyOptional({
+    type: [String],
+    nullable: true,
+    description:
+      'Every task the agent received and has not yet reported (queued, running, or result awaiting delivery). ' +
+      'Running tasks claimed before the previous poll that are missing here are failed. null counts as an empty list; ' +
+      'omitted by older agents.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4096)
+  @IsString({ each: true })
+  @MaxLength(128, { each: true })
+  runningTaskIds?: string[] | null;
 }
 
 export class TaskProgressDto {
@@ -203,16 +232,18 @@ export class PruneResultDto {
   @IsDateString()
   finishedAt!: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Longer texts are shortened (start and end kept)' })
   @IsOptional()
   @IsString()
-  @MaxLength(20_000)
+  @TruncateTo(RESULT_ERROR_MAX)
+  @MaxLength(RESULT_ERROR_MAX)
   error?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Longer logs are shortened (start and end kept)' })
   @IsOptional()
   @IsString()
-  @MaxLength(200_000)
+  @TruncateTo(RESULT_LOG_MAX)
+  @MaxLength(RESULT_LOG_MAX)
   log?: string;
 }
 
@@ -269,7 +300,8 @@ export class TaskResultDto {
   @ApiPropertyOptional({ description: 'Why reading the repository figures failed' })
   @IsOptional()
   @IsString()
-  @MaxLength(20_000)
+  @TruncateTo(RESULT_ERROR_MAX)
+  @MaxLength(RESULT_ERROR_MAX)
   repoStatsError?: string;
 
   @ApiPropertyOptional({
@@ -306,15 +338,17 @@ export class TaskResultDto {
   @IsBoolean()
   damaged?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Longer texts are shortened (start and end kept)' })
   @IsOptional()
   @IsString()
-  @MaxLength(20_000)
+  @TruncateTo(RESULT_ERROR_MAX)
+  @MaxLength(RESULT_ERROR_MAX)
   error?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Longer logs are shortened (start and end kept)' })
   @IsOptional()
   @IsString()
-  @MaxLength(200_000)
+  @TruncateTo(RESULT_LOG_MAX)
+  @MaxLength(RESULT_LOG_MAX)
   log?: string;
 }

@@ -23,6 +23,71 @@ interface RunOptions {
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * Keep the whole stdout in `RunOutcome.stdout`. Defaults to true only for
+   * commands without `onStdoutLine`; a streaming command keeps just a tail.
+   */
+  collectStdout?: boolean;
+}
+
+/** How much of a streaming command's stdout and of any stderr is kept. */
+export const OUTPUT_TAIL_BYTES = 64 * 1024;
+
+/** A partial (newline-less) line longer than this is cut, never buffered on. */
+const MAX_PARTIAL_LINE = 1024 * 1024;
+
+function capPartialLine(buf: string): string {
+  return buf.length > MAX_PARTIAL_LINE ? buf.slice(-MAX_PARTIAL_LINE) : buf;
+}
+
+class FullBuffer {
+  private text = '';
+  append(chunk: string): void {
+    this.text += chunk;
+  }
+  toString(): string {
+    return this.text;
+  }
+}
+
+/**
+ * Keeps only the last `limit` characters written to it (a ring buffer in
+ * effect). Trimming happens once the text reaches twice the limit, so appends
+ * stay cheap. The result notes how much was dropped.
+ */
+export class TailBuffer {
+  private text = '';
+  private dropped = 0;
+  constructor(private readonly limit: number) {}
+  append(chunk: string): void {
+    this.text += chunk;
+    if (this.text.length > this.limit * 2) this.trim();
+  }
+  private trim(): void {
+    const cut = this.text.length - this.limit;
+    if (cut > 0) {
+      this.dropped += cut;
+      this.text = this.text.slice(cut);
+    }
+  }
+  toString(): string {
+    this.trim();
+    return this.dropped > 0
+      ? `… ${this.dropped} bytes truncated …\n${this.text}`
+      : this.text;
+  }
+}
+
+/**
+ * Exit code with which restic (>= 0.17) reports that the repository does not
+ * exist. Only this code may lead to `restic init`; any other failure of
+ * `cat config` (wrong password, lock, network, permissions) must surface.
+ */
+export const RESTIC_EXIT_REPO_NOT_FOUND = 10;
+
+/** Why a backup refuses to re-create a repository that already held data. */
+export function repositoryMissingMessage(repository: string): string {
+  return `Repository not found at ${repository} — is the target mounted and reachable? Amber does not re-create a repository that already held backups.`;
 }
 
 interface RunOutcome {
@@ -91,6 +156,9 @@ export class ResticService {
       RESTIC_REPOSITORY: ctx.repository,
       RESTIC_PASSWORD: ctx.password,
       RESTIC_CACHE_DIR: this.cacheDir,
+      // One JSON status line per second is plenty for the live progress and
+      // keeps CPU and log volume down (restic's default is ~60 per second).
+      RESTIC_PROGRESS_FPS: '1',
       ...ctx.env,
     };
 
@@ -123,50 +191,74 @@ export class ResticService {
   ): Promise<RunOutcome> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, args, { env });
-      let stdout = '';
-      let stderr = '';
+      // A streaming command (backup, restore, ls, check, prune) hands every
+      // stdout line to its callback: keeping the full text as well would grow
+      // without bound over a long backup (restic emits status lines
+      // continuously) until the string exceeds V8's limit and the process
+      // dies. So streaming commands keep only a bounded tail; commands that
+      // parse the whole output (snapshots, stats, forget) collect it in full.
+      const collectStdout = opts.collectStdout ?? !opts.onStdoutLine;
+      const stdout = collectStdout
+        ? new FullBuffer()
+        : new TailBuffer(OUTPUT_TAIL_BYTES);
+      const stderr = new TailBuffer(OUTPUT_TAIL_BYTES);
       let stdoutBuf = '';
       let stderrBuf = '';
 
       if (opts.signal) {
-        opts.signal.addEventListener('abort', () => child.kill('SIGTERM'), {
-          once: true,
-        });
+        const kill = () => child.kill('SIGTERM');
+        if (opts.signal.aborted) kill();
+        else opts.signal.addEventListener('abort', kill, { once: true });
       }
 
       child.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString();
-        stdout += text;
+        stdout.append(text);
+        if (!opts.onStdoutLine) return;
         stdoutBuf += text;
         let idx: number;
         while ((idx = stdoutBuf.indexOf('\n')) >= 0) {
           const line = stdoutBuf.slice(0, idx);
           stdoutBuf = stdoutBuf.slice(idx + 1);
-          if (line.trim()) opts.onStdoutLine?.(line);
+          if (line.trim()) opts.onStdoutLine(line);
         }
+        stdoutBuf = capPartialLine(stdoutBuf);
       });
       child.stderr.on('data', (chunk: Buffer) => {
         // Scrub credentials before they reach logs, thrown errors or API clients.
         const text = scrubSecretsInText(chunk.toString());
-        stderr += text;
+        stderr.append(text);
+        if (!opts.onStderrLine) return;
         stderrBuf += text;
         let idx: number;
         while ((idx = stderrBuf.indexOf('\n')) >= 0) {
           const line = stderrBuf.slice(0, idx);
           stderrBuf = stderrBuf.slice(idx + 1);
-          if (line.trim()) opts.onStderrLine?.(line);
+          if (line.trim()) opts.onStderrLine(line);
         }
+        stderrBuf = capPartialLine(stderrBuf);
       });
       child.on('error', reject);
       child.on('close', (code) => {
-        resolve({ code: code ?? -1, stdout, stderr });
+        // A last line without a trailing newline still counts.
+        if (stdoutBuf.trim()) opts.onStdoutLine?.(stdoutBuf);
+        if (stderrBuf.trim()) opts.onStderrLine?.(stderrBuf);
+        resolve({
+          code: code ?? -1,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
+        });
       });
     });
   }
 
   // --- High-level operations ------------------------------------------------
 
-  /** Validates repository reachability; initializes it if missing. */
+  /**
+   * Validates repository reachability; initializes it when restic reports
+   * that it does not exist (exit 10). Any other failure is reported as is —
+   * a wrong password or an unreachable backend must not lead to `init`.
+   */
   async testConnection(
     ctx: ResticContext,
   ): Promise<{ ok: boolean; initialized: boolean; message: string }> {
@@ -174,7 +266,13 @@ export class ResticService {
     if (cat.code === 0) {
       return { ok: true, initialized: false, message: 'Repository reachable' };
     }
-    // Not initialized yet? Try to init.
+    if (cat.code !== RESTIC_EXIT_REPO_NOT_FOUND) {
+      return {
+        ok: false,
+        initialized: false,
+        message: cat.stderr.trim() || `restic cat config exited ${cat.code}`,
+      };
+    }
     const init = await this.run(ctx, ['init', '--json']);
     if (init.code === 0) {
       return {
@@ -190,13 +288,41 @@ export class ResticService {
     };
   }
 
-  async ensureInitialized(ctx: ResticContext): Promise<void> {
-    const cat = await this.run(ctx, ['cat', 'config']);
-    if (cat.code === 0) return;
-    const init = await this.run(ctx, ['init']);
+  /**
+   * Makes sure the repository exists before a backup. `restic init` runs only
+   * when `cat config` exits 10 ("repository does not exist") and the server
+   * has never seen this repository exist (`repoInitialized`): a repository
+   * that held backups and is now missing is almost always an unmounted or
+   * unreachable target, and initialising a fresh one there would silently
+   * divert the backups. stderr of both commands goes to `onLog`.
+   * Resolves with whether it initialised the repository.
+   */
+  async ensureInitialized(
+    ctx: ResticContext,
+    opts: { repoInitialized?: boolean; onLog?: LogCallback } = {},
+  ): Promise<{ initialized: boolean }> {
+    const cat = await this.run(ctx, ['cat', 'config'], {
+      collectStdout: false,
+      onStderrLine: (line) => opts.onLog?.(`[cat config] ${line}`),
+    });
+    if (cat.code === 0) return { initialized: false };
+    if (cat.code !== RESTIC_EXIT_REPO_NOT_FOUND) {
+      throw new Error(
+        `restic cat config failed (exit ${cat.code}): ${cat.stderr.trim() || 'no output'}`,
+      );
+    }
+    if (opts.repoInitialized === true) {
+      throw new Error(repositoryMissingMessage(ctx.repository));
+    }
+    opts.onLog?.('[init] repository does not exist yet - initializing');
+    const init = await this.run(ctx, ['init'], {
+      onStdoutLine: (line) => opts.onLog?.(`[init] ${scrubSecretsInText(line)}`),
+      onStderrLine: (line) => opts.onLog?.(`[init] ${line}`),
+    });
     if (init.code !== 0) {
       throw new Error(`restic init failed: ${init.stderr.trim()}`);
     }
+    return { initialized: true };
   }
 
   async snapshots(

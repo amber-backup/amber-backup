@@ -111,6 +111,7 @@ function UserRow({ user: u, reload }: { user: User; reload: () => void }) {
                 reload();
               },
               true,
+              { confirmLabel: t.common.delete },
             )
           }
         >

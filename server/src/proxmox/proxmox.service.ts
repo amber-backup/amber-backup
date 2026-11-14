@@ -25,8 +25,19 @@ import { JobsService } from '../jobs/jobs.service';
 import { RunRetryService } from '../jobs/run-retry.service';
 import { PruneRunnerService } from '../jobs/prune-runner.service';
 import { RepositoriesService } from '../repositories/repositories.service';
+import { repositoryKnownInitialized } from '../repositories/repository-initialized';
 import type { AgentTask } from '../agents/agents.service';
 import type { TaskResultDto } from '../agents/dto/agent.dto';
+import {
+  AGENT_LOST_TASK_MESSAGE,
+  AGENT_STOPPED_REPORTING_MESSAGE,
+  agentWaitSeconds,
+  LEASE_EXPIRED_MESSAGES,
+  configuredLeaseTimeouts,
+  leaseExpiredSql,
+  runIds,
+} from '../agents/run-lease';
+import { loadConfig } from '../config/configuration';
 import {
   PROXMOX_INVENTORY_TASK_PREFIX,
   PROXMOX_RETENTION_TASK_PREFIX,
@@ -68,10 +79,6 @@ const INVENTORY_MAX_AGE_MS = 15 * 60_000;
 const EXPANSION_INVENTORY_MAX_AGE_MS = 10 * 60_000;
 /** … or waits this long for a fresh one before using what it has. */
 const EXPANSION_WAIT_MS = 2 * 60_000;
-/** Queued items fail after this long (or the job's time limit, when set). */
-const ITEM_QUEUE_TIMEOUT_MS = 6 * 3600_000;
-/** Running items fail when their agent has been offline this long. */
-const ITEM_AGENT_OFFLINE_MS = 30 * 60_000;
 /** A pending finishing task nobody claims is skipped after this long. */
 const RETENTION_UNCLAIMED_MS = 30 * 60_000;
 /** A claimed finishing task without a result is given up after this long. */
@@ -86,6 +93,7 @@ interface NodeAgent {
   name: string;
   status: string;
   last_seen_at: Date | null;
+  poll_interval_seconds?: number;
   info: ProxmoxAgentInfo;
 }
 
@@ -93,6 +101,8 @@ interface NodeAgent {
 @Injectable()
 export class ProxmoxService {
   private readonly logger = new Logger(ProxmoxService.name);
+  /** Leases never count from before this process started (the server may have been down). */
+  private readonly startedAt = new Date();
 
   constructor(
     @Inject(KYSELY) private readonly db: Db,
@@ -183,10 +193,12 @@ export class ProxmoxService {
   async update(id: string, dto: UpdateProxmoxClusterDto): Promise<ProxmoxClusterDetail> {
     const cluster = await this.getRow(id);
     const patch: Record<string, unknown> = { updated_at: new Date() };
-    if (dto.name !== undefined) {
-      patch.name = dto.name;
-      patch.slug = await uniqueSlug(this.db, 'proxmox_clusters', dto.name, id);
-    }
+    // The slug is frozen at creation: it is part of the restic host and the
+    // cluster tag of every snapshot (`pveResticHost`, `pveClusterTag`), which
+    // retention and the per-guest snapshot list filter by. Re-deriving it on a
+    // rename would orphan all earlier snapshots (never forgotten, no longer
+    // listed). A rename changes the display name only.
+    if (dto.name !== undefined) patch.name = dto.name;
     const moveAgent =
       dto.primaryAgentId !== undefined && dto.primaryAgentId !== cluster.primary_agent_id;
     if (moveAgent) {
@@ -285,12 +297,23 @@ export class ProxmoxService {
   async nodeAgents(pveClusterId: string): Promise<NodeAgent[]> {
     const rows = await this.db
       .selectFrom('agents')
-      .select(['id', 'name', 'status', 'last_seen_at', 'proxmox_info'])
+      .select(['id', 'name', 'status', 'last_seen_at', 'poll_interval_seconds', 'proxmox_info'])
       .where(sql<string>`proxmox_info->>'clusterId'`, '=', pveClusterId)
       .execute();
     return rows.flatMap((r) => {
       const info = parseJson<ProxmoxAgentInfo>(r.proxmox_info);
-      return info ? [{ id: r.id, name: r.name, status: r.status, last_seen_at: r.last_seen_at, info }] : [];
+      return info
+        ? [
+            {
+              id: r.id,
+              name: r.name,
+              status: r.status,
+              last_seen_at: r.last_seen_at,
+              poll_interval_seconds: r.poll_interval_seconds,
+              info,
+            },
+          ]
+        : [];
     });
   }
 
@@ -774,9 +797,10 @@ export class ProxmoxService {
 
     const tasks: AgentTask[] = [];
     for (const id of pickClaimable(candidates, onNode, inCluster)) {
+      const now = new Date();
       const item = await this.db
         .updateTable('proxmox_run_items')
-        .set({ status: 'running', agent_id: agentId, started_at: new Date() })
+        .set({ status: 'running', agent_id: agentId, started_at: now, heartbeat_at: now })
         .where('id', '=', id)
         .where('status', '=', 'queued')
         .returningAll()
@@ -831,6 +855,7 @@ export class ProxmoxService {
       extraArgs: resolved.extraArgs,
       paths: [],
       options: guestOptions,
+      repoInitialized: await repositoryKnownInitialized(this.db, job.repository_id),
       proxmox,
     };
   }
@@ -885,22 +910,34 @@ export class ProxmoxService {
     const result: ProxmoxGuestResult | null = g
       ? { ...g, snapshotId: g.snapshotId ?? dto.snapshotId }
       : null;
-    const updated = await this.db
-      .updateTable('proxmox_run_items')
-      .set({
-        status,
-        finished_at: new Date(),
-        result: result ? JSON.stringify(result) : null,
-        method: g?.method ?? null,
-        error,
-        log: dto.log ?? null,
-        progress: null,
-      })
-      .where('id', '=', itemId)
-      // A cancel on the server wins over a late result.
-      .where('status', '=', 'running')
-      .returning('id')
-      .executeTakeFirst();
+    const patch = {
+      status,
+      finished_at: new Date(),
+      result: result ? JSON.stringify(result) : null,
+      method: g?.method ?? null,
+      error,
+      log: dto.log ?? null,
+      progress: null,
+    };
+    const updated =
+      (await this.db
+        .updateTable('proxmox_run_items')
+        .set(patch)
+        .where('id', '=', itemId)
+        // A cancel on the server wins over a late result.
+        .where('status', '=', 'running')
+        .returning('id')
+        .executeTakeFirst()) ??
+      // A guest the server gave up on (lease expired) still records its real
+      // outcome, so its snapshot becomes the next run's parent.
+      (await this.db
+        .updateTable('proxmox_run_items')
+        .set(patch)
+        .where('id', '=', itemId)
+        .where('status', '=', 'failed')
+        .where('error', 'in', LEASE_EXPIRED_MESSAGES)
+        .returning('id')
+        .executeTakeFirst());
     if (updated && status !== 'skipped') {
       await this.recordGuestState(item, status, result, dto);
     }
@@ -944,6 +981,9 @@ export class ProxmoxService {
         node: movedTo,
         agent_id: null,
         started_at: null,
+        heartbeat_at: null,
+        // The wait for the new node's agent starts now.
+        queued_at: new Date(),
         progress: null,
         moves: item.moves + 1,
       })
@@ -1016,7 +1056,7 @@ export class ProxmoxService {
     if (!item) return false;
     await this.db
       .updateTable('proxmox_run_items')
-      .set({ progress: JSON.stringify(stats) })
+      .set({ progress: JSON.stringify(stats), heartbeat_at: new Date() })
       .where('id', '=', itemId)
       .where('status', '=', 'running')
       .execute();
@@ -1043,6 +1083,15 @@ export class ProxmoxService {
     if (taskId.startsWith(PROXMOX_RETENTION_TASK_PREFIX)) {
       const runId = taskId.slice(PROXMOX_RETENTION_TASK_PREFIX.length);
       if (!UUID_RE.test(runId)) throw new NotFoundException('Task not found for this agent');
+      // Asked every few seconds while the task runs: renews its lease.
+      await this.db
+        .updateTable('job_runs')
+        .set({ heartbeat_at: new Date() })
+        .where('id', '=', runId)
+        .where('agent_id', '=', agentId)
+        .where('proxmox_phase', '=', 'retention_running')
+        .where('status', '=', 'running')
+        .execute();
       const run = await this.db
         .selectFrom('job_runs')
         .select(['status', 'agent_id'])
@@ -1064,7 +1113,18 @@ export class ProxmoxService {
       // Moved to another node meanwhile: this agent's copy is obsolete.
       return { cancelled: true };
     }
-    return { cancelled: item.status === 'cancelled' || item.run_status === 'cancelled' };
+    const cancelled = item.status === 'cancelled' || item.run_status === 'cancelled';
+    if (!cancelled && item.status === 'running') {
+      // Asked every few seconds while the guest is backed up: renews its lease.
+      await this.db
+        .updateTable('proxmox_run_items')
+        .set({ heartbeat_at: new Date() })
+        .where('id', '=', taskId)
+        .where('agent_id', '=', agentId)
+        .where('status', '=', 'running')
+        .execute();
+    }
+    return { cancelled };
   }
 
   // --- Settling & the finishing task ---------------------------------------------------
@@ -1134,30 +1194,44 @@ export class ProxmoxService {
       .execute();
     const tasks: AgentTask[] = [];
     for (const run of runs) {
+      const now = new Date();
       const claimed = await this.db
         .updateTable('job_runs')
-        .set({ proxmox_phase: 'retention_running', proxmox_phase_at: new Date(), agent_id: agentId })
+        .set({
+          proxmox_phase: 'retention_running',
+          proxmox_phase_at: now,
+          heartbeat_at: now,
+          agent_id: agentId,
+        })
         .where('id', '=', run.id)
         .where('proxmox_phase', '=', 'retention')
         .returning(['id', 'job_id'])
         .executeTakeFirst();
       if (!claimed) continue;
-      const job = await this.jobs.getRow(claimed.job_id);
-      const options = parseJson<ResticOptions>(job.restic_options) ?? {};
-      const resolved = await this.targets.resolveForJob(job);
-      tasks.push({
-        type: 'proxmox-retention',
-        taskId: PROXMOX_RETENTION_TASK_PREFIX + run.id,
-        jobId: job.id,
-        jobName: job.name,
-        repository: resolved.repository,
-        password: resolved.password,
-        env: resolved.env,
-        credentialFiles: resolved.credentialFiles,
-        extraArgs: resolved.extraArgs,
-        options: options.retention ? { retention: options.retention } : {},
-        proxmox: { clusterId: cluster.id, clusterSlug: cluster.slug },
-      });
+      try {
+        const job = await this.jobs.getRow(claimed.job_id);
+        const options = parseJson<ResticOptions>(job.restic_options) ?? {};
+        const resolved = await this.targets.resolveForJob(job);
+        tasks.push({
+          type: 'proxmox-retention',
+          taskId: PROXMOX_RETENTION_TASK_PREFIX + run.id,
+          jobId: job.id,
+          jobName: job.name,
+          repository: resolved.repository,
+          password: resolved.password,
+          env: resolved.env,
+          credentialFiles: resolved.credentialFiles,
+          extraArgs: resolved.extraArgs,
+          options: options.retention ? { retention: options.retention } : {},
+          proxmox: { clusterId: cluster.id, clusterSlug: cluster.slug },
+        });
+      } catch (e) {
+        // The guests are backed up; the run finishes without its retention.
+        this.logger.error(`Preparing the finishing task of run ${run.id} failed: ${e}`);
+        await this.finishRun(run.id, `Retention skipped: preparing the task failed: ${errorText(e)}`).catch(
+          (err) => this.logger.error(`Could not finish run ${run.id}: ${err}`),
+        );
+      }
     }
     return tasks;
   }
@@ -1182,6 +1256,9 @@ export class ProxmoxService {
     if (!run || run.agent_id !== agentId) {
       throw new NotFoundException('Task not found for this agent');
     }
+    // Already finished (a repeated result, or the run was given up on):
+    // acknowledged without recording the prune or the figures twice.
+    if (run.proxmox_phase !== 'retention_running') return;
     if (dto.forgetResult) {
       await this.db
         .updateTable('job_runs')
@@ -1286,41 +1363,155 @@ export class ProxmoxService {
       .execute();
     for (const r of orphaned) runs.add(r.run_id);
 
-    const queued = await this.db
-      .selectFrom('proxmox_run_items as i')
-      .innerJoin('backup_jobs as j', 'j.id', 'i.job_id')
-      .select(['i.id', 'i.run_id', 'i.created_at', 'i.node', 'j.restic_options'])
-      .where('i.status', '=', 'queued')
-      .execute();
-    for (const item of queued) {
-      const limit = parseJson<ResticOptions>(item.restic_options)?.timeLimitSeconds;
-      const timeout = limit ? limit * 1000 : ITEM_QUEUE_TIMEOUT_MS;
-      if (Date.now() - new Date(item.created_at).getTime() < timeout) continue;
-      await this.finishItem(item.id, 'failed', {
-        error: `Not picked up within ${Math.round(timeout / 60_000)} min — is the agent on node ${item.node} online?`,
-      });
-      runs.add(item.run_id);
-    }
+    for (const runId of await this.failUnclaimedItems()) runs.add(runId);
 
-    const offlineBefore = new Date(Date.now() - ITEM_AGENT_OFFLINE_MS);
-    const lost = await this.db
-      .selectFrom('proxmox_run_items as i')
-      .innerJoin('agents as a', 'a.id', 'i.agent_id')
-      .select(['i.id', 'i.run_id', 'a.name'])
-      .where('i.status', '=', 'running')
-      .where('a.status', '=', 'offline')
-      .where('a.last_seen_at', '<', offlineBefore)
-      .execute();
-    for (const item of lost) {
-      await this.finishItem(item.id, 'failed', {
-        error: `The agent ${item.name} went offline while backing up this guest`,
-      });
-      runs.add(item.run_id);
+    // Guests whose agent stopped reporting on them (restart, crash, lost poll answer).
+    const timeouts = configuredLeaseTimeouts();
+    if (timeouts) {
+      const now = new Date();
+      const lost = await this.db
+        .updateTable('proxmox_run_items')
+        .from('agents')
+        .set({ status: 'failed', finished_at: now, error: AGENT_STOPPED_REPORTING_MESSAGE, progress: null })
+        .whereRef('agents.id', '=', 'proxmox_run_items.agent_id')
+        .where('proxmox_run_items.status', '=', 'running')
+        .where(leaseExpiredSql('proxmox_run_items', 'agents', timeouts, now, this.startedAt))
+        .returning(['proxmox_run_items.id', 'proxmox_run_items.run_id'])
+        .execute();
+      for (const item of lost) {
+        this.logger.warn(`Item ${item.id}: the agent stopped reporting on it`);
+        runs.add(item.run_id);
+      }
     }
     for (const runId of runs) await this.settleIfDone(runId);
   }
 
+  /**
+   * Fails queued guests nobody can pick up: their node has no agent, or its
+   * agent is offline and has not been seen for the queue timeout (at least
+   * two of its poll intervals plus a minute) since the guest became
+   * claimable. Guests waiting for a free slot behind others on a node whose
+   * agent is online wait as long as it takes — the job's time limit is about
+   * one backup, not about the queue. Returns the runs touched.
+   */
+  private async failUnclaimedItems(): Promise<string[]> {
+    const timeout = loadConfig().runQueueTimeoutSeconds;
+    if (timeout <= 0) return [];
+    const queued = await this.db
+      .selectFrom('proxmox_run_items as i')
+      .innerJoin('backup_jobs as j', 'j.id', 'i.job_id')
+      .innerJoin('proxmox_clusters as c', 'c.id', 'j.proxmox_cluster_id')
+      .select(['i.id', 'i.run_id', 'i.node', 'i.queued_at', 'c.pve_cluster_id'])
+      .where('i.status', '=', 'queued')
+      .execute();
+    const agentsOf = new Map<string, NodeAgent[]>();
+    const runs: string[] = [];
+    for (const item of queued) {
+      let agents = agentsOf.get(item.pve_cluster_id);
+      if (!agents) {
+        agents = await this.nodeAgents(item.pve_cluster_id);
+        agentsOf.set(item.pve_cluster_id, agents);
+      }
+      const agent = agents.find((a) => a.info.node === item.node);
+      if (agent?.status === 'online') continue;
+      const since = Math.max(
+        new Date(item.queued_at).getTime(),
+        agent?.last_seen_at ? new Date(agent.last_seen_at).getTime() : 0,
+      );
+      const wait = agentWaitSeconds(timeout, agent?.poll_interval_seconds);
+      if (Date.now() - since < wait * 1000) continue;
+      const minutes = Math.round(wait / 60);
+      await this.finishItem(item.id, 'failed', {
+        error: agent
+          ? `Not picked up — the agent on node ${item.node} has been offline for over ${minutes} min`
+          : `Not picked up within ${minutes} min — no Amber agent runs on node ${item.node}`,
+      });
+      runs.push(item.run_id);
+    }
+    return runs;
+  }
+
+  /** Renews the guests and finishing tasks a poll lists as still held by the agent. */
+  async renewAgentTasks(agentId: string, taskIds: string[], now: Date): Promise<void> {
+    const items = runIds(taskIds);
+    if (items.length) {
+      await this.db
+        .updateTable('proxmox_run_items')
+        .set({ heartbeat_at: now })
+        .where('agent_id', '=', agentId)
+        .where('status', '=', 'running')
+        .where('id', 'in', items)
+        .execute();
+    }
+    const retention = runIds(taskIds, PROXMOX_RETENTION_TASK_PREFIX);
+    if (retention.length) {
+      await this.db
+        .updateTable('job_runs')
+        .set({ heartbeat_at: now })
+        .where('agent_id', '=', agentId)
+        .where('status', '=', 'running')
+        .where('proxmox_phase', '=', 'retention_running')
+        .where('id', 'in', retention)
+        .execute();
+    }
+  }
+
+  /**
+   * Fails the guests and finishes the finishing tasks this agent claimed
+   * before its previous poll and no longer lists (it restarted, or the poll
+   * answer was lost).
+   */
+  async reconcileAgentTasks(agentId: string, taskIds: string[], previousPollAt: Date): Promise<void> {
+    const items = runIds(taskIds);
+    let lostItems = this.db
+      .updateTable('proxmox_run_items')
+      .set({ status: 'failed', finished_at: new Date(), error: AGENT_LOST_TASK_MESSAGE, progress: null })
+      .where('agent_id', '=', agentId)
+      .where('status', '=', 'running')
+      .where('started_at', '<', previousPollAt);
+    if (items.length) lostItems = lostItems.where('id', 'not in', items);
+    const lost = await lostItems.returning('run_id').execute();
+    for (const runId of new Set(lost.map((i) => i.run_id))) await this.settleIfDone(runId);
+
+    const retention = runIds(taskIds, PROXMOX_RETENTION_TASK_PREFIX);
+    let lostRetention = this.db
+      .selectFrom('job_runs')
+      .select('id')
+      .where('agent_id', '=', agentId)
+      .where('status', '=', 'running')
+      .where('proxmox_phase', '=', 'retention_running')
+      .where('proxmox_phase_at', '<', previousPollAt);
+    if (retention.length) lostRetention = lostRetention.where('id', 'not in', retention);
+    for (const run of await lostRetention.execute()) {
+      await this.finishRun(run.id, `Retention result never arrived: ${AGENT_LOST_TASK_MESSAGE}`);
+    }
+  }
+
   private async sweepRetention(): Promise<void> {
+    const timeouts = configuredLeaseTimeouts();
+    if (timeouts) {
+      const lost = await this.db
+        .selectFrom('job_runs')
+        .innerJoin('agents', 'agents.id', 'job_runs.agent_id')
+        .select('job_runs.id')
+        .where('job_runs.status', '=', 'running')
+        .where('job_runs.proxmox_phase', '=', 'retention_running')
+        .where(
+          leaseExpiredSql(
+            'job_runs',
+            'agents',
+            timeouts,
+            new Date(),
+            // A finishing task's started_at is the run's; its lease starts at its claim.
+            this.startedAt,
+          ),
+        )
+        .execute();
+      for (const run of lost) {
+        this.logger.warn(`Run ${run.id}: the agent stopped reporting on its finishing task`);
+        await this.finishRun(run.id, `Retention result never arrived: ${AGENT_STOPPED_REPORTING_MESSAGE}`);
+      }
+    }
     const now = Date.now();
     const stuck = await this.db
       .selectFrom('job_runs')
@@ -1382,6 +1573,11 @@ export function nodeViews(inventory: ProxmoxInventory | null, agents: NodeAgent[
         agentStatus: agent?.status ?? null,
       };
     });
+}
+
+/** The message of a thrown value. */
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 function parseJson<T>(v: unknown): T | null {

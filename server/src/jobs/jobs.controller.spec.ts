@@ -23,6 +23,7 @@ describe('JobsController', () => {
       list: jest.fn().mockResolvedValue([row]),
       get: jest.fn().mockResolvedValue(row),
       nextRun: jest.fn().mockReturnValue(null),
+      scheduleError: jest.fn().mockReturnValue(null),
       lastBackupRuns: jest.fn().mockResolvedValue(lastRuns),
     };
     const targets = {

@@ -275,3 +275,51 @@ describe('RestoreService.create (proxmox vm-files and live restore)', () => {
     await expect(create(service, { overlayStorage: 'local' })).rejects.toThrow(/only applies to a live restore/);
   });
 });
+
+describe('RestoreService.create (file restore of an agent job)', () => {
+  function setupFile(job: { location: string; agent_id: string | null }) {
+    const insert = chain({ executeTakeFirstOrThrow: { id: 'rs-new' } });
+    const { db } = createDbMock({ insertInto: insert });
+    const acl = { assert: jest.fn(async () => undefined) } as unknown as AccessControlService;
+    const jobs = {
+      getRow: jest.fn(async () => ({
+        id: 'j1',
+        source_kind: 'files',
+        target_id: 't1',
+        repo_config: {},
+        repo_password_secret_id: 's1',
+        credential_secret_id: null,
+        ...job,
+      })),
+    } as unknown as JobsService;
+    const runner = { dispatch: jest.fn(async () => undefined) } as unknown as RestoreRunnerService;
+    return { service: new RestoreService(db, acl, jobs, runner), insert };
+  }
+
+  it("restores to the job's agent host when the caller names no agent", async () => {
+    const { service, insert } = setupFile({ location: 'agent', agent_id: 'agent-1' });
+    await service.create(admin, { jobId: 'j1', snapshotId: 'snap-1', mode: 'original' });
+    expect(insert.values).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'original', agent_id: 'agent-1' }),
+    );
+  });
+
+  it('keeps an explicitly named agent and leaves server jobs and downloads on the server', async () => {
+    const a = setupFile({ location: 'agent', agent_id: 'agent-1' });
+    await a.service.create(admin, {
+      jobId: 'j1',
+      snapshotId: 'snap-1',
+      mode: 'alternate_path',
+      destination: { path: '/restore', agentId: 'agent-9' },
+    });
+    expect(a.insert.values).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'agent-9' }));
+
+    const local = setupFile({ location: 'local', agent_id: null });
+    await local.service.create(admin, { jobId: 'j1', snapshotId: 'snap-1', mode: 'original' });
+    expect(local.insert.values).toHaveBeenCalledWith(expect.objectContaining({ agent_id: null }));
+
+    const dl = setupFile({ location: 'agent', agent_id: 'agent-1' });
+    await dl.service.create(admin, { jobId: 'j1', snapshotId: 'snap-1', mode: 'download' });
+    expect(dl.insert.values).toHaveBeenCalledWith(expect.objectContaining({ agent_id: null }));
+  });
+});

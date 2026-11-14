@@ -143,6 +143,7 @@ function TargetRow({
                 reload();
               },
               true,
+              { confirmLabel: msgs.common.delete },
             )
           }
         >

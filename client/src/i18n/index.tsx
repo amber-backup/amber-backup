@@ -7,7 +7,7 @@ import { de } from './de';
 // Lightweight, dependency-free i18n. Messages are plain typed objects — English
 // is the source of truth (`Messages`), every other locale must match its shape,
 // so a missing or misspelled key fails `tsc`. Strings with parameters are
-// functions: `t.jobs.deleteConfirm(name)`.
+// functions: `t.jobs.deleteDialog.title(name)`.
 
 export type Locale = 'en' | 'de';
 

@@ -10,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateIf,
@@ -183,6 +184,17 @@ export class TestRepoDto {
   @IsString()
   @MinLength(1)
   repoPassword!: string;
+}
+
+export class RevealRepositoryPasswordDto {
+  @ApiPropertyOptional({
+    description:
+      "The caller's own login password. Required when the account has a local password; SSO-only accounts omit it.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  currentPassword?: string;
 }
 
 export class UpdateJobDto {

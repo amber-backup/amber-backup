@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   api,
+  ApiError,
   isWindowsAgent,
   type Job,
   type Target,
@@ -26,9 +27,13 @@ import { describeCron } from '../core/cron';
 import { matchesSearch } from '../core/search';
 import { useAsync } from '../hooks/useAsync';
 import { useToast } from '../ui/toast';
-import { useModal, FormModal } from '../ui/modal';
+import { useModal, FormModal, ModalFrame } from '../ui/modal';
 import { PageHeader, ActionButton, Field, Loading, Empty, BusyButton, ListSearch } from '../ui/primitives';
 import { BackendFields } from '../ui/backend-fields';
+import { RunDetailModal } from '../ui/run-detail';
+import { RevealPasswordModal, generateRepoPassword } from '../ui/repo-password';
+import { useAuth } from '../core/auth';
+import { copyToClipboard } from '../core/clipboard';
 import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 
@@ -53,6 +58,34 @@ export function Jobs() {
   const { open } = useModal();
   const t = useT();
   const [query, setQuery] = useState('');
+  // `#/jobs?edit=<id|slug>` opens that job's editor, e.g. from the run detail
+  // on the overview. The parameter is dropped once handled.
+  const [params, setParams] = useSearchParams();
+  const editParam = params.get('edit');
+  // StrictMode runs the effect twice in development; open the editor once.
+  const handledEdit = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editParam || !data || handledEdit.current === editParam) return;
+    handledEdit.current = editParam;
+    const [jobs0, targets0, agents0, channels0, backends0, hypervHosts0, proxmoxClusters0] = data;
+    const job = jobs0.find((j) => j.id === editParam || j.slug === editParam);
+    setParams({}, { replace: true });
+    if (!job) return;
+    open((close) => (
+      <JobEditor
+        targets={targets0}
+        agents={agents0}
+        channels={channels0}
+        backends={backends0}
+        hypervHosts={hypervHosts0}
+        proxmoxClusters={proxmoxClusters0}
+        job={job}
+        onClose={close}
+        onSaved={reload}
+      />
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editParam, data]);
 
   if (loading || !data) return <Loading label={t.common.loading} />;
   const [jobs, targets, agents, channels, backends, hypervHosts, proxmoxClusters] = data;
@@ -136,7 +169,7 @@ function JobRow({
   reload: () => void;
 }) {
   const toast = useToast();
-  const { open, confirmDialog } = useModal();
+  const { open } = useModal();
   const t = useT();
   const m = t.jobs.row;
 
@@ -178,16 +211,59 @@ function JobRow({
       : '';
   const dotTitle = (j.enabled ? lastStatus : `${m.statusDisabled}\n${lastStatus}`) + lastError;
 
+  const openEditor = (duplicate = false) =>
+    open((close) => (
+      <JobEditor
+        targets={targets}
+        agents={agents}
+        channels={channels}
+        backends={backends}
+        hypervHosts={hypervHosts}
+        proxmoxClusters={proxmoxClusters}
+        job={j}
+        duplicate={duplicate}
+        onClose={close}
+        onSaved={reload}
+      />
+    ));
+
+  // The status dot (and the "last …" time) open the latest run with its error and log.
+  const openLastRun = () => {
+    if (!last) return;
+    open((close) => (
+      <RunDetailModal
+        run={{ id: last.id, kind: 'backup', job_id: j.id, job_name: j.name }}
+        proxmox={j.source_kind === 'proxmox'}
+        agents={agents}
+        onClose={close}
+        onEditJob={() => openEditor()}
+        onStarted={reload}
+      />
+    ));
+  };
+
   return (
     <div className="row">
-      <span className={`status-dot ${dotClass}`} title={dotTitle} />
+      {last ? (
+        <button
+          type="button"
+          className="status-dot-btn"
+          title={`${dotTitle}\n${m.lastRunDetails}`}
+          aria-label={`${lastStatus} — ${m.lastRunDetails}`}
+          onClick={openLastRun}
+        >
+          <span className={`status-dot ${dotClass}`} />
+        </button>
+      ) : (
+        <span className={`status-dot ${dotClass}`} title={dotTitle} />
+      )}
       <div className="row-main">
         <div className="row-title">{j.name}</div>
         <div className="row-sub">
           {j.source_kind === 'hyperv' && (
             <>
               <Icon name="vm" size={13} />{' '}
-              <span style={{ color: 'var(--amber)' }}>
+              <span className="ref">
                 {t.hyperv.job.rowSource(
                   hypervHosts.find((h) => h.id === j.hyperv_host_id)?.name ?? '?',
                   j.hyperv_config?.allVms
@@ -201,7 +277,7 @@ function JobRow({
           {j.source_kind === 'proxmox' && (
             <>
               <Icon name="server" size={13} />{' '}
-              <span style={{ color: 'var(--amber)' }}>
+              <span className="ref">
                 {t.proxmox.job.rowSource(
                   proxmoxClusters.find((c) => c.id === j.proxmox_cluster_id)?.name ?? '?',
                   j.proxmox_config?.allGuests
@@ -212,24 +288,42 @@ function JobRow({
               {' · '}
             </>
           )}
-          {m.agent} <span style={{ color: 'var(--amber)' }}>{agentName}</span>
-          {' · '}{m.target} <span style={{ color: 'var(--amber)' }}>{targetName}</span>
-          {' · '}{m.repository} <span style={{ color: 'var(--amber)' }}>{repoName}</span>
+          {m.agent} <span className="ref">{agentName}</span>
+          {' · '}{m.target} <span className="ref">{targetName}</span>
+          {' · '}{m.repository} <span className="ref">{repoName}</span>
         </div>
       </div>
       <div className="row-meta" style={{ fontSize: 12, color: 'var(--text-2)' }}>
         {last && (
-          <span title={lastStatus}>
-            {m.last} <span style={{ color: 'var(--amber)' }}>{fmtRelative(last.finished_at)}</span>
+          <span>
+            {m.last}{' '}
+            <button
+              type="button"
+              className={`link-btn when${lastFailed ? ' danger-text' : ''}`}
+              title={`${lastStatus}\n${m.lastRunDetails}`}
+              onClick={openLastRun}
+            >
+              {fmtRelative(last.finished_at)}
+            </button>
             {' · '}
           </span>
         )}
-        {j.enabled && j.next_run ? (
+        {j.enabled && j.schedule_error ? (
+          <span className="danger-text" title={j.schedule_error}>
+            <Icon name="alert" size={12} /> {m.scheduleError}
+          </span>
+        ) : j.enabled && j.next_run ? (
           <span>
-            {m.next} <span style={{ color: 'var(--amber)' }}>{fmtRelative(j.next_run)}</span>
+            {m.next} <span className="when">{fmtRelative(j.next_run)}</span>
           </span>
         ) : (
           <span className="muted">{m.disabled}</span>
+        )}
+        {j.enabled && j.check_schedule_error && (
+          <span className="danger-text" title={j.check_schedule_error}>
+            {' · '}
+            <Icon name="alert" size={12} /> {m.checkScheduleError}
+          </span>
         )}
         {/* Keyed on the reading so a list reload shows figures an agent reported. */}
         <RepoSize key={`${j.repo_stats_at ?? ''}|${j.repo_stats_error ?? ''}`} job={j} />
@@ -249,64 +343,22 @@ function JobRow({
         >
           <Icon name="play" size={15} />
         </BusyButton>
-        <button
-          className="btn btn-ghost btn-sm"
-          title={m.edit}
-          onClick={() =>
-            open((close) => (
-              <JobEditor
-                targets={targets}
-                agents={agents}
-                channels={channels}
-                backends={backends}
-                hypervHosts={hypervHosts}
-                proxmoxClusters={proxmoxClusters}
-                job={j}
-                onClose={close}
-                onSaved={reload}
-              />
-            ))
-          }
-        >
+        <button className="btn btn-ghost btn-sm" title={m.edit} aria-label={m.edit} onClick={() => openEditor()}>
           <Icon name="edit" />
         </button>
         <button
           className="btn btn-ghost btn-sm"
           title={m.duplicate}
-          onClick={() =>
-            open((close) => (
-              <JobEditor
-                targets={targets}
-                agents={agents}
-                channels={channels}
-                backends={backends}
-                hypervHosts={hypervHosts}
-                proxmoxClusters={proxmoxClusters}
-                job={j}
-                duplicate
-                onClose={close}
-                onSaved={reload}
-              />
-            ))
-          }
+          aria-label={m.duplicate}
+          onClick={() => openEditor(true)}
         >
           <Icon name="copy" />
         </button>
         <button
           className="btn btn-ghost btn-sm"
-          title={t.common.delete}
-          onClick={() =>
-            confirmDialog(
-              m.deleteTitle,
-              m.deleteConfirm(j.name),
-              async () => {
-                await api.del(`/jobs/${j.id}`);
-                toast(m.deleted, 'success');
-                reload();
-              },
-              true,
-            )
-          }
+          title={m.deleteTitle}
+          aria-label={m.deleteTitle}
+          onClick={() => open((close) => <DeleteJobDialog job={j} onClose={close} onChanged={reload} />)}
         >
           <Icon name="trash" />
         </button>
@@ -372,6 +424,142 @@ function RepoSize({ job }: { job: Job }) {
         <Icon name="refresh" size={12} />
       </BusyButton>
     </div>
+  );
+}
+
+/**
+ * Deleting a job drops its stored repository password, so the snapshots left
+ * in the storage can no longer be restored through Amber. The dialog says so
+ * with the figures it knows, lets an admin note the password first, offers to
+ * disable the job instead, and asks for the job name while snapshots exist (or
+ * their number is unknown).
+ */
+function DeleteJobDialog({ job, onClose, onChanged }: { job: Job; onClose: () => void; onChanged: () => void }) {
+  const t = useT();
+  const m = t.jobs.deleteDialog;
+  const toast = useToast();
+  const { open } = useModal();
+  const { isAdmin } = useAuth();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // The figures are cached; a 0 read before the latest successful backup is
+  // stale and counts as unknown.
+  const statsAt = job.repo_stats_at ? Date.parse(job.repo_stats_at) : null;
+  const backedUpSince =
+    job.last_run?.status === 'success' && (statsAt == null || Date.parse(job.last_run.finished_at) > statsAt);
+  const count =
+    job.repo_snapshot_count == null || (job.repo_snapshot_count === 0 && backedUpSince)
+      ? null
+      : job.repo_snapshot_count;
+  const size = job.repo_size_bytes != null ? fmtBytes(job.repo_size_bytes) : null;
+  // Without a reading, assume there is something to lose.
+  const mayHoldSnapshots = count !== 0;
+  const nameOk = !mayHoldSnapshots || typed === job.name;
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.del(`/jobs/${job.id}`);
+    } catch (err) {
+      // A delete that failed late may still have removed the job; a 404 on a
+      // re-read means it is gone, which is what the user asked for.
+      const gone = await api
+        .get(`/jobs/${job.id}`)
+        .then(() => false)
+        .catch((e) => e instanceof ApiError && e.status === 404);
+      if (!gone) {
+        toast(err instanceof Error ? err.message : m.failed, 'error');
+        setBusy(false);
+        return;
+      }
+    }
+    toast(t.jobs.row.deleted, 'success');
+    onChanged();
+    onClose();
+  };
+
+  const disable = async () => {
+    setBusy(true);
+    try {
+      await api.patch(`/jobs/${job.id}`, { enabled: false });
+      toast(m.disabled, 'success');
+      onChanged();
+      onClose();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : m.disableFailed, 'error');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalFrame
+      title={m.title(job.name)}
+      onClose={onClose}
+      guardChanges={false}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>
+            {t.common.cancel}
+          </button>
+          {job.enabled && (
+            <button className="btn btn-ghost" disabled={busy} onClick={() => void disable()}>
+              {m.disableInstead}
+            </button>
+          )}
+          <button className="btn btn-danger-solid" disabled={busy || !nameOk} onClick={() => void remove()}>
+            <Icon name="trash" size={14} />
+            {m.confirm}
+          </button>
+        </>
+      }
+    >
+      <div className="dialog-stack">
+        <div className="warn-box">
+          {m.intro}
+          <ul className="consequences">
+            <li>
+              {count === 0
+                ? m.noSnapshots
+                : count != null
+                  ? m.snapshotsKept(count, size)
+                  : m.snapshotsUnknown}
+            </li>
+            <li>{m.storageKept}</li>
+          </ul>
+        </div>
+        {mayHoldSnapshots && isAdmin && (
+          <div className="info-box">
+            <div>{m.passwordHint}</div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 8 }}
+              onClick={() =>
+                open((close) => <RevealPasswordModal jobId={job.id} jobName={job.name} onClose={close} />)
+              }
+            >
+              <Icon name="key" size={13} />
+              {m.showPassword}
+            </button>
+          </div>
+        )}
+        {job.enabled && <div className="run-detail-note">{m.disableHint}</div>}
+        {mayHoldSnapshots && (
+          <div className="field">
+            <label htmlFor="delete-job-name">{t.common.typeToConfirm(job.name)}</label>
+            <input
+              id="delete-job-name"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+    </ModalFrame>
   );
 }
 
@@ -584,6 +772,19 @@ export function JobEditor({
     return out;
   });
   const [repoPassword, setRepoPassword] = useState('');
+  // A new repository's password is the only key to its data: the editor can
+  // generate one and requires the user to confirm they stored it. Changing the
+  // password afterwards takes that confirmation back.
+  const [showPassword, setShowPassword] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [passwordStored, setPasswordStored] = useState(false);
+  const changeRepoPassword = (v: string) => {
+    setRepoPassword(v);
+    setPasswordStored(false);
+    setGenerated(false);
+  };
+  const { open: openModal } = useModal();
+  const { isAdmin } = useAuth();
   // Some connections (a REST server with per-repository accounts) allow a job to
   // authenticate with its own credentials. Duplicating a job cannot carry the
   // secrets over, so only a real edit starts with the box ticked.
@@ -787,6 +988,17 @@ export function JobEditor({
       onSuccess,
       onFailure,
     };
+
+    if (!isEdit) {
+      if (!repoPassword) {
+        toast(m.repository.passwordRequired, 'error');
+        return false;
+      }
+      if (!passwordStored) {
+        toast(m.repository.storedRequired, 'error');
+        return false;
+      }
+    }
 
     try {
       if (isEdit) {
@@ -1143,14 +1355,87 @@ export function JobEditor({
               )}
             </>
           )}
-          <Field label={isEdit ? m.repository.changePassword : m.repository.password}>
-            <input
-              type="password"
-              placeholder={isEdit ? m.leaveUnchanged : m.repository.password}
-              value={repoPassword}
-              onChange={(e) => setRepoPassword(e.target.value)}
-            />
-          </Field>
+          {isEdit ? (
+            <>
+              <Field label={m.repository.replacePassword} help={m.repository.replaceHelp}>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={m.leaveUnchanged}
+                  value={repoPassword}
+                  onChange={(e) => setRepoPassword(e.target.value)}
+                />
+              </Field>
+              {repoPassword && <div className="warn-box">{m.repository.replaceWarning}</div>}
+              {isAdmin && (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() =>
+                      openModal((close) => (
+                        <RevealPasswordModal jobId={job!.id} jobName={job!.name} onClose={close} />
+                      ))
+                    }
+                  >
+                    <Icon name="key" size={13} />
+                    {m.repository.showStored}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <Field label={m.repository.password} help={m.repository.passwordHelp}>
+                <div className="secret-row">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    value={repoPassword}
+                    onChange={(e) => changeRepoPassword(e.target.value)}
+                  />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPassword((v) => !v)}>
+                    {showPassword ? t.jobs.password.hide : t.jobs.password.show}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      changeRepoPassword(generateRepoPassword());
+                      setShowPassword(true);
+                      setGenerated(true);
+                    }}
+                  >
+                    <Icon name="key" size={13} />
+                    {m.repository.generate}
+                  </button>
+                  {repoPassword && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        const ok = await copyToClipboard(repoPassword);
+                        toast(ok ? t.common.copied : t.runs.detail.copyFailed, ok ? 'success' : 'error');
+                      }}
+                    >
+                      <Icon name="copy" size={13} />
+                      {t.common.copy}
+                    </button>
+                  )}
+                </div>
+              </Field>
+              {generated && repoPassword && <div className="info-box">{m.repository.generated}</div>}
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={passwordStored}
+                  onChange={(e) => setPasswordStored(e.target.checked)}
+                />
+                {m.repository.stored}
+              </label>
+            </>
+          )}
         </Section>
 
         <Section title={m.schedule.title} sub={m.schedule.sub}>

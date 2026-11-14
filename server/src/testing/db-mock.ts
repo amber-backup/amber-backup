@@ -23,6 +23,8 @@ const CHAIN_METHODS = [
   'select',
   'selectAll',
   'where',
+  'whereRef',
+  'from',
   'innerJoin',
   'leftJoin',
   'orderBy',

@@ -50,6 +50,7 @@ export const dashboard = {
     total: 'total',
     failedWeek: 'Failed (7 d)',
     needsAttention: 'needs attention',
+    showFailures: 'Show the failed backups',
     allGood: 'all good',
     runningOperations: 'Running operations',
     active: 'active',

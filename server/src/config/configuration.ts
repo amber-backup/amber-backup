@@ -24,6 +24,13 @@ export interface AppConfig {
   /** Origins accepted for WebAuthn ceremonies (scheme + host + port). */
   webauthnOrigins: string[];
   databaseUrl: string;
+  /**
+   * Server-side statement timeout for app queries in ms (DB_STATEMENT_TIMEOUT_MS,
+   * default 60 s); <= 0 disables it. Migrations are not subject to it.
+   */
+  dbStatementTimeoutMs: number;
+  /** How long acquiring a pool connection may take in ms (default 10 s). */
+  dbConnectionTimeoutMs: number;
   masterEncryptionKey: string;
   jwtSecret: string;
   jwtExpiresIn: string;
@@ -51,9 +58,27 @@ export interface AppConfig {
   cliScriptDir: string;
   /**
    * How long a backup run may wait in the queue before it is marked failed
-   * (typically because its agent is offline). <= 0 disables the timeout.
+   * (typically because its agent is offline). <= 0 disables the timeout. For
+   * an agent job the wait is at least 2 × the agent's poll interval + 60 s.
    */
   runQueueTimeoutSeconds: number;
+  /**
+   * How long a restore may wait for its agent before it is discarded, so it
+   * cannot run unexpectedly later. <= 0 disables the timeout. At least
+   * 2 × the agent's poll interval + 60 s.
+   */
+  restoreQueueTimeoutSeconds: number;
+  /**
+   * A task an agent runs is failed when the agent has not reported on it
+   * (progress, task-state check, or a poll listing it) for this long. At least
+   * 2 × the agent's poll interval + 60 s. <= 0 disables the lease sweep.
+   */
+  agentTaskHeartbeatTimeoutSeconds: number;
+  /**
+   * The same lease for agents that predate the task list in their poll and
+   * may not report on a task while it waits behind another one.
+   */
+  agentTaskLegacyTimeoutSeconds: number;
   /** Days to keep audit log entries; <= 0 disables purging (keep forever). */
   auditRetentionDays: number;
   /** Periodically look up the newest GitHub release for the UI upgrade hint. */
@@ -123,6 +148,8 @@ export function loadConfig(): AppConfig {
     webauthnOrigins,
     databaseUrl:
       env.DATABASE_URL ?? 'postgres://amber:amber@localhost:5432/amber',
+    dbStatementTimeoutMs: int(env.DB_STATEMENT_TIMEOUT_MS, 60_000),
+    dbConnectionTimeoutMs: int(env.DB_CONNECTION_TIMEOUT_MS, 10_000),
     masterEncryptionKey: env.MASTER_ENCRYPTION_KEY ?? '',
     jwtSecret: env.JWT_SECRET ?? '',
     jwtExpiresIn: env.JWT_EXPIRES_IN ?? '7d',
@@ -147,6 +174,9 @@ export function loadConfig(): AppConfig {
     cliScriptDir:
       env.CLI_SCRIPT_DIR ?? path.resolve(__dirname, '..', '..', '..', 'cli'),
     runQueueTimeoutSeconds: int(env.RUN_QUEUE_TIMEOUT_SECONDS, 300),
+    restoreQueueTimeoutSeconds: int(env.RESTORE_QUEUE_TIMEOUT_SECONDS, 3600),
+    agentTaskHeartbeatTimeoutSeconds: int(env.AGENT_TASK_HEARTBEAT_TIMEOUT_SECONDS, 600),
+    agentTaskLegacyTimeoutSeconds: int(env.AGENT_TASK_LEGACY_TIMEOUT_SECONDS, 86_400),
     auditRetentionDays: int(env.AUDIT_RETENTION_DAYS, 90),
     updateCheckEnabled: bool(env.UPDATE_CHECK_ENABLED, true),
     bootstrapAdminEmail: env.BOOTSTRAP_ADMIN_EMAIL ?? '',
