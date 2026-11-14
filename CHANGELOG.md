@@ -1,3 +1,10 @@
+## [1.41.1](https://github.com/amber-backup/amber-backup/compare/v1.41.0...v1.41.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **agent:** keep the Windows agent tests green ([7ec5b1c](https://github.com/amber-backup/amber-backup/commit/7ec5b1c1f8e5686d2eebf9a6f5d80f1ce4f94b59))
+
 # [1.41.0](https://github.com/amber-backup/amber-backup/compare/v1.40.2...v1.41.0) (2026-11-14)
 
 
