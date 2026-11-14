@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -111,6 +112,12 @@ func TestParseGuestPath(t *testing.T) {
 }
 
 func TestCopyGuestPaths(t *testing.T) {
+	// copyGuestPaths copies a mounted Linux guest filesystem on a PVE host and
+	// keeps POSIX modes and symlinks, which Windows can't represent (modes
+	// read back as 0666, symlinks need a privilege).
+	if runtime.GOOS == "windows" {
+		t.Skip("Linux guest filesystems are only restored on a PVE (Linux) host")
+	}
 	src := t.TempDir()
 	p1 := filepath.Join(src, "p1")
 	p2 := filepath.Join(src, "p2")

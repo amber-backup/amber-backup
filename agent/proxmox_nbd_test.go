@@ -5,14 +5,34 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// listenUnix listens on a unix socket in a fresh temp dir. The NBD and QMP
+// clients are portable code, so they are tested on Windows too, which has
+// AF_UNIX since Windows 10 1803; a Windows without it (or Wine) skips.
+func listenUnix(t *testing.T, name string) (net.Listener, string) {
+	t.Helper()
+	sock := filepath.Join(t.TempDir(), name)
+	ln, err := net.Listen("unix", sock)
+	// WSAEAFNOSUPPORT: this Windows has no AF_UNIX.
+	if err != nil && runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(10047)) {
+		t.Skipf("no AF_UNIX support: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ln, sock
+}
 
 // fakeNBD serves one export over the fixed newstyle protocol with structured
 // replies: data for reads, dirty extents for the meta context.
@@ -128,11 +148,7 @@ transmission:
 }
 
 func TestNBDClient(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "nbd.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ln, sock := listenUnix(t, "nbd.sock")
 	defer ln.Close()
 	data := make([]byte, 1<<20)
 	for i := range data {
@@ -174,11 +190,7 @@ func TestNBDClient(t *testing.T) {
 }
 
 func TestNBDUnknownMetaContext(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "nbd.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ln, sock := listenUnix(t, "nbd.sock")
 	defer ln.Close()
 	go (&fakeNBD{name: "exp", ctxName: "qemu:dirty-bitmap:other", data: make([]byte, 4096)}).serve(t, ln)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -189,11 +201,7 @@ func TestNBDUnknownMetaContext(t *testing.T) {
 }
 
 func TestQMPClient(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "qmp.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ln, sock := listenUnix(t, "qmp.sock")
 	defer ln.Close()
 	var seen []string
 	go func() {
