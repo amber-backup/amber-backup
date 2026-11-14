@@ -1,3 +1,20 @@
+# [1.41.0](https://github.com/amber-backup/amber-backup/compare/v1.40.2...v1.41.0) (2026-11-14)
+
+
+### Bug Fixes
+
+* **agent:** keep other VMs' manifests when one parallel VM backup finishes ([567f167](https://github.com/amber-backup/amber-backup/commit/567f1674868a8322ebebc817d2647d17c6b562e8))
+
+
+### Features
+
+* **agent:** run the agent on Windows with a bundled restic ([31fc70c](https://github.com/amber-backup/amber-backup/commit/31fc70cab505519c7bccb66f89f855be827b55a1))
+* **client:** Hyper-V hosts, VM protection, VM jobs and VM restore ([31a3c0b](https://github.com/amber-backup/amber-backup/commit/31a3c0bb85d92c39d73fbb1ca08b6eb086d96471))
+* **dashboard:** show Hyper-V VMs without a backup job or with a failed last backup ([7d6e0a9](https://github.com/amber-backup/amber-backup/commit/7d6e0a96216cf45e8c30f4c150f693858085063e))
+* **hyperv:** back up and restore Hyper-V VMs through the agent ([7c9ff7d](https://github.com/amber-backup/amber-backup/commit/7c9ff7d3872a400292304a164a0adb94d7c9ef48))
+* **hyperv:** failover clusters and parallel VM backups ([1805364](https://github.com/amber-backup/amber-backup/commit/18053646a270f8df420e568991c38246276a2a00))
+* **proxmox:** back up Proxmox VE VMs and containers ([85e3291](https://github.com/amber-backup/amber-backup/commit/85e32912026e24bb6ade2358f9d44329b5c9bc44))
+
 ## [1.40.2](https://github.com/amber-backup/amber-backup/compare/v1.40.1...v1.40.2) (2026-10-24)
 
 
