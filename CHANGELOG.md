@@ -1,3 +1,16 @@
+# [1.42.0](https://github.com/amber-backup/amber-backup/compare/v1.41.2...v1.42.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **agent:** read a Proxmox guest's config from /etc/pve/local ([b312ce9](https://github.com/amber-backup/amber-backup/commit/b312ce97626e117d64af5f7275b3d9f49f6b9a36))
+* **dashboard:** drop the "not protected" Proxmox guests and Hyper-V VMs ([a8ebb52](https://github.com/amber-backup/amber-backup/commit/a8ebb52133e918f3faa95039b03fec2c1190b957))
+
+
+### Features
+
+* **proxmox:** clusters register themselves through their node agents ([73a7d04](https://github.com/amber-backup/amber-backup/commit/73a7d04062e4d3f272d60be0d208a1633b5e47ad))
+
 ## [1.41.2](https://github.com/amber-backup/amber-backup/compare/v1.41.1...v1.41.2) (2026-11-14)
 
 
