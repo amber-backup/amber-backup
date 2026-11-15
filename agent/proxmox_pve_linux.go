@@ -123,13 +123,23 @@ func (p *realPve) Storages(ctx context.Context) (map[string]*pveStorageCfg, erro
 	return parseStorageCfg(string(data)), nil
 }
 
+// configDir is the directory of a guest type's configs below a node.
+func configDir(typ string) string {
+	if typ == pveTypeLXC {
+		return "lxc"
+	}
+	return "qemu-server"
+}
+
 // configPath of a guest on a node (pmxcfs shows every node's configs).
 func configPath(node, typ string, vmid int) string {
-	dir := "qemu-server"
-	if typ == pveTypeLXC {
-		dir = "lxc"
-	}
-	return filepath.Join(pveEtc, "nodes", node, dir, strconv.Itoa(vmid)+".conf")
+	return filepath.Join(pveEtc, "nodes", node, configDir(typ), strconv.Itoa(vmid)+".conf")
+}
+
+// localConfigPath of a guest on this node: /etc/pve/local links to
+// nodes/<this node> (there is no nodes/local).
+func localConfigPath(typ string, vmid int) string {
+	return filepath.Join(pveEtc, "local", configDir(typ), strconv.Itoa(vmid)+".conf")
 }
 
 func (p *realPve) Inventory(ctx context.Context) (*ProxmoxInventory, error) {
@@ -180,11 +190,7 @@ func (p *realPve) LocateGuest(ctx context.Context, vmid int) (string, string, er
 	// ASSUMPTION(pve): /etc/pve/nodes/<node>/{qemu-server,lxc}/<vmid>.conf
 	// exists exactly on the node that owns the guest.
 	for _, typ := range []string{pveTypeQemu, pveTypeLXC} {
-		dir := "qemu-server"
-		if typ == pveTypeLXC {
-			dir = "lxc"
-		}
-		matches, _ := filepath.Glob(filepath.Join(pveEtc, "nodes", "*", dir, strconv.Itoa(vmid)+".conf"))
+		matches, _ := filepath.Glob(configPath("*", typ, vmid))
 		if len(matches) > 0 {
 			return filepath.Base(filepath.Dir(filepath.Dir(matches[0]))), typ, nil
 		}
@@ -192,9 +198,10 @@ func (p *realPve) LocateGuest(ctx context.Context, vmid int) (string, string, er
 	return "", "", errGuestNotFound
 }
 
-// ASSUMPTION(pve): /etc/pve/local links to this node's directory.
+// GuestConfig reads the config of a guest on this node (found on a real
+// cluster: nodes/local does not exist, /etc/pve/local links to this node).
 func (p *realPve) GuestConfig(ctx context.Context, typ string, vmid int) (*pveConfig, error) {
-	data, err := os.ReadFile(configPath("local", typ, vmid))
+	data, err := os.ReadFile(localConfigPath(typ, vmid))
 	if err != nil {
 		return nil, err
 	}
