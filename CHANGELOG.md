@@ -1,3 +1,10 @@
+## [1.43.1](https://github.com/amber-backup/amber-backup/compare/v1.43.0...v1.43.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **agent:** write the VMA device table the way vma reads it ([ab2055d](https://github.com/amber-backup/amber-backup/commit/ab2055d7edd19afe38264086a6ca38927a1d24d7))
+
 # [1.43.0](https://github.com/amber-backup/amber-backup/compare/v1.42.0...v1.43.0) (2026-11-15)
 
 
