@@ -169,30 +169,44 @@ export function runLog(items: SettledItem[]): string {
 }
 
 /**
- * Aggregated live progress of a run from its items: finished guests count as
- * done, running ones with their own percentage.
+ * Aggregated live progress of a run from its items. Bytes add up over all
+ * guests — a finished guest keeps what it read (its result), a running one
+ * counts with its own figures. The percentage is weighted by bytes once every
+ * guest's size is known, else it is the mean of the guests' percentages
+ * (finished ones count as 1).
  */
 export function aggregateProgress(
-  items: { status: ProxmoxRunItemStatus; progress: Record<string, unknown> | null }[],
+  items: {
+    status: ProxmoxRunItemStatus;
+    progress: Record<string, unknown> | null;
+    result?: Record<string, unknown> | null;
+  }[],
 ): Record<string, number> {
   let done = 0;
   let percent = 0;
   let bytesDone = 0;
   let totalBytes = 0;
+  let sizesKnown = true;
   for (const item of items) {
     if (!isOpen(item.status)) {
       done++;
       percent += 1;
+      const r = item.result ?? {};
+      const read = num(r.totalBytes) || num(r.bytesRead);
+      bytesDone += read;
+      totalBytes += read;
       continue;
     }
     const p = item.progress ?? {};
     percent += num(p.percentDone);
     bytesDone += num(p.bytesDone);
     totalBytes += num(p.totalBytes);
+    if (num(p.totalBytes) <= 0) sizesKnown = false;
   }
   const total = items.length;
+  const byBytes = sizesKnown && totalBytes > 0;
   return {
-    percentDone: total ? Math.min(1, percent / total) : 0,
+    percentDone: total ? Math.min(1, byBytes ? bytesDone / totalBytes : percent / total) : 0,
     bytesDone,
     totalBytes,
     filesDone: done,

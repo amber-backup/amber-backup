@@ -161,4 +161,24 @@ describe('aggregateProgress', () => {
     expect(p.guestsDone).toBe(1);
     expect(p.guestsTotal).toBe(4);
   });
+
+  it('adds up the bytes of every guest and weights by them once all sizes are known', () => {
+    // A 160 GB block guest at 20 % and a finished 9 GB vzdump guest.
+    const p = aggregateProgress([
+      { status: 'running', progress: { percentDone: 0.2, bytesDone: 32, totalBytes: 160 } },
+      { status: 'success', progress: null, result: { bytesRead: 9, totalBytes: 9 } },
+    ]);
+    expect(p.totalBytes).toBe(169);
+    expect(p.bytesDone).toBe(41);
+    expect(p.percentDone).toBeCloseTo(41 / 169);
+  });
+
+  it('falls back to the mean percentage while a guest has no size yet', () => {
+    const p = aggregateProgress([
+      { status: 'running', progress: { percentDone: 0.5, bytesDone: 80, totalBytes: 160 } },
+      { status: 'running', progress: { percentDone: 0, bytesDone: 5 } },
+    ]);
+    expect(p.totalBytes).toBe(160);
+    expect(p.percentDone).toBeCloseTo(0.25);
+  });
 });

@@ -1129,11 +1129,15 @@ export class ProxmoxService {
       .execute();
     const items = await this.db
       .selectFrom('proxmox_run_items')
-      .select(['status', 'progress'])
+      .select(['status', 'progress', 'result'])
       .where('run_id', '=', item.run_id)
       .execute();
     const progress = aggregateProgress(
-      items.map((i) => ({ status: i.status, progress: parseJson<Record<string, unknown>>(i.progress) })),
+      items.map((i) => ({
+        status: i.status,
+        progress: parseJson<Record<string, unknown>>(i.progress),
+        result: parseJson<Record<string, unknown>>(i.result),
+      })),
     );
     await this.db
       .updateTable('job_runs')
