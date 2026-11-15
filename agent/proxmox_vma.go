@@ -8,8 +8,8 @@ package main
 //	  magic "VMA\0", version 1, uuid[16], ctime int64, md5sum[16] (of the
 //	  header with md5sum zeroed), blob_buffer_offset, blob_buffer_size,
 //	  header_size, reserved[1984], config_names[256], config_data[256],
-//	  reserved[4], dev_info[256] × {reserved u64, size u64, reserved[8],
-//	  devname_ptr u32, reserved[4]}
+//	  reserved[4], dev_info[256] × {devname_ptr u32, reserved u32, size u64,
+//	  reserved[16]} (checked against `vma create` on PVE 9)
 //	blob buffer: entries of u16 length (little endian!) + data, starting at
 //	  offset 1 (0 = none), grown in 512-byte steps
 //	extents: 512-byte header {magic "VMAE", reserved u16, block_count u16,
@@ -114,8 +114,8 @@ func newVMAWriter(w io.Writer, configs []vmaConfig, devs []vmaDevice) (*vmaWrite
 			return nil, err
 		}
 		o := devOff + 32*(i+1) // device ids start at 1
+		binary.BigEndian.PutUint32(head[o:], np)
 		binary.BigEndian.PutUint64(head[o+8:], uint64(d.Size))
-		binary.BigEndian.PutUint32(head[o+24:], np)
 	}
 	// The blob buffer grows in 512-byte steps.
 	if pad := (512 - len(blob)%512) % 512; pad > 0 {
@@ -351,7 +351,7 @@ func readVMA(r io.Reader, onCluster func(devID int, cluster uint32, data []byte)
 	for i := 1; i < vmaMaxDevices; i++ {
 		o := devOff + 32*i
 		size := int64(binary.BigEndian.Uint64(full[o+8:]))
-		np := binary.BigEndian.Uint32(full[o+24:])
+		np := binary.BigEndian.Uint32(full[o:])
 		if size == 0 || np == 0 {
 			continue
 		}
