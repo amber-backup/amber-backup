@@ -51,6 +51,9 @@ type mockPveGuest struct {
 	Bitmaps map[string]map[string][]pveExtent `json:"bitmaps,omitempty"`
 	// Knobs.
 	FailSnapshot bool `json:"failSnapshot,omitempty"`
+	FailFleece   bool `json:"failFleece,omitempty"`
+	// Fleecing views made of this guest (for tests).
+	Fleeced int `json:"fleeced,omitempty"`
 }
 
 type mockPveState struct {
@@ -510,6 +513,83 @@ func (m *mockPve) OpenSnapshotDisk(ctx context.Context, vmid int, d ProxmoxGuest
 		return nil, err
 	}
 	return &mockDisk{f: f, n: fi.Size()}, nil
+}
+
+// OpenVolume reads the disk image as it is.
+func (m *mockPve) OpenVolume(ctx context.Context, d ProxmoxGuestDisk) (pveDiskReader, error) {
+	for _, g := range m.mustRead().Guests {
+		for _, gd := range guestDisks(g.Type, parsePveConfig(g.Config)) {
+			if gd.Volid == d.Volid {
+				return openMockDisk(m.diskPath(g.VMID, gd.Key))
+			}
+		}
+	}
+	return nil, fmt.Errorf("volume %s not found", d.Volid)
+}
+
+func (m *mockPve) mustRead() *mockPveState {
+	s, err := m.read()
+	if err != nil {
+		return &mockPveState{}
+	}
+	return s
+}
+
+func openMockDisk(path string) (pveDiskReader, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &mockDisk{f: f, n: fi.Size()}, nil
+}
+
+// FleeceDisks copies the images (the point in time a real fleecing view keeps).
+func (m *mockPve) FleeceDisks(ctx context.Context, vmid int, keys []string, freeze bool, logf func(string, ...any)) (map[string]pveDiskReader, func(), bool, error) {
+	var fail bool
+	var agent bool
+	if err := m.update(func(s *mockPveState) error {
+		g, err := m.guest(s, vmid)
+		if err != nil {
+			return err
+		}
+		if g.Status != "running" {
+			return errors.New("the VM is not running")
+		}
+		fail, agent = g.FailFleece, parsePveConfig(g.Config).Keys["agent"] != ""
+		if !fail {
+			g.Fleeced++
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, false, err
+	}
+	if fail {
+		return nil, nil, false, errors.New("blockdev-backup failed (mock)")
+	}
+	dir := filepath.Join(m.dir, "fleece", strconv.Itoa(vmid))
+	os.RemoveAll(dir)
+	readers := map[string]pveDiskReader{}
+	for _, k := range keys {
+		dst := filepath.Join(dir, k+".img")
+		if err := copyFile(m.diskPath(vmid, k), dst); err != nil {
+			return nil, nil, false, err
+		}
+		r, err := openMockDisk(dst)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		readers[k] = r
+	}
+	return readers, func() { os.RemoveAll(dir) }, freeze && agent, nil
+}
+
+func (m *mockPve) CleanupFleecing(ctx context.Context, vmid int) error {
+	return os.RemoveAll(filepath.Join(m.dir, "fleece", strconv.Itoa(vmid)))
 }
 
 // MountSnapshotVolume copies the snapshot (a real agent bind-mounts it).

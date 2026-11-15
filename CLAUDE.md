@@ -278,9 +278,17 @@ not yet run against a real PVE host**; the agent marks every such point with
   (`pveret-<runId>`) after all items settle. `proxmox_job_guests` holds each
   guest's parent snapshot and change-tracking state.
 - Methods: `vzdump` (stream into `restic --stdin-from-command`, works
-  everywhere), `block` for VMs (PVE snapshot → read-only FUSE segment view;
-  QEMU dirty bitmaps over QMP/NBD give the changed segments, restic `--parent`
-  reads only those), `files` for CTs (snapshot mounted read-only, file backup).
+  everywhere, but VMA streams barely deduplicate), `block` for VMs (PVE
+  snapshot → read-only FUSE segment view; QEMU dirty bitmaps over QMP/NBD give
+  the changed segments, restic `--parent` reads only those), `files` for CTs
+  (snapshot mounted read-only, file backup). A VM disk on storage without
+  snapshots still goes `block`: running, through a QEMU fleecing view
+  (`agent/proxmox_fleece_linux.go`: temp qcow2 per disk in
+  `AMBER_PVE_FLEECE_DIR`, `blockdev-backup sync=none`, NBD export; needs the
+  disks' full size free, else vzdump), stopped, a raw file is read as it is
+  under the backup lock. The dirty bitmap is read from a disabled copy (QEMU
+  exports only disabled bitmaps read-only); `tpmstate0` is untracked and read
+  whole.
   All snapshots of a cluster use `--host pve-<slug>` so migrations keep parents.
 - Restores always go through PVE's tools: the agent streams a synthesized
   vzdump archive (VMA writer / CT tar rewriter) into `qmrestore -` /

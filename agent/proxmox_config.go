@@ -283,6 +283,16 @@ func splitList(s string) []string {
 
 // snapshotStorage tells whether Amber can read a snapshot of a volume of this
 // storage type and format (block / files methods).
+// directReadable reports whether a stopped VM's volume can be read as a
+// raw image without activating anything: a raw file on a file storage.
+func directReadable(storageType, format string) bool {
+	switch storageType {
+	case "dir", "nfs", "cifs", "glusterfs":
+		return format == "raw"
+	}
+	return false
+}
+
 func snapshotStorage(storageType, format string) bool {
 	switch storageType {
 	case "zfspool", "lvmthin", "rbd":
@@ -330,6 +340,11 @@ func resolveMethod(g *ProxmoxGuest, choice string, storages map[string]*pveStora
 			return pveMethodVzdump, fmt.Sprintf("%s is on storage %s (%s), which Amber can't snapshot and mount", d.Key, d.Storage, st.Type)
 		}
 		if !snapshotStorage(st.Type, d.Format) {
+			// A running VM is read through a fleecing view instead, a stopped
+			// one's raw image file as it is (locked).
+			if g.Type == pveTypeQemu && (g.Status == "running" || directReadable(st.Type, d.Format)) {
+				continue
+			}
 			return pveMethodVzdump, fmt.Sprintf("%s is on storage %s (%s, %s), which has no snapshots", d.Key, d.Storage, st.Type, d.Format)
 		}
 	}

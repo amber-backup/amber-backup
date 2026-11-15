@@ -104,7 +104,8 @@ func TestProxmoxE2EInventoryMovedVzdump(t *testing.T) {
 	for _, g := range inv.ProxmoxInventory.Guests {
 		methods[g.VMID] = g.AutoMethod
 	}
-	if methods[100] != pveMethodBlock || methods[101] != pveMethodFiles || methods[102] != pveMethodVzdump {
+	// VM 102 (stopped, raw image on a dir storage) is read as it is: block.
+	if methods[100] != pveMethodBlock || methods[101] != pveMethodFiles || methods[102] != pveMethodBlock {
 		t.Fatalf("auto methods %v", methods)
 	}
 
@@ -119,8 +120,10 @@ func TestProxmoxE2EInventoryMovedVzdump(t *testing.T) {
 		t.Fatalf("missing guest: %+v", gone.ProxmoxGuest)
 	}
 
-	// VM 102 has a raw disk on dir storage → vzdump.
-	r := guestOK(t, run(backupTask("aaaaaaaa-0000-0000-0000-000000000003", 102, pveTypeQemu, "pve1", "", nil)))
+	// The job asks for vzdump.
+	vz := backupTask("aaaaaaaa-0000-0000-0000-000000000003", 102, pveTypeQemu, "pve1", "", nil)
+	vz.Proxmox.VMMethod = pveMethodVzdump
+	r := guestOK(t, run(vz))
 	if r.Method != pveMethodVzdump || r.Consistency != "offline" || r.SnapshotID == "" {
 		t.Fatalf("vzdump result %+v", r)
 	}
@@ -230,6 +233,77 @@ func TestProxmoxE2EBlockIncremental(t *testing.T) {
 	r4 := guestOK(t, run(backupTask("cccccccc-0000-0000-0000-000000000004", 100, pveTypeQemu, "pve1", r3.SnapshotID, r3.NextCbt)))
 	if r4.Cbt != "full" || r4.NextCbt != nil || r4.Consistency != "offline" {
 		t.Fatalf("stopped VM: %+v", r4)
+	}
+}
+
+// VM 102's raw image on a dir storage has no snapshots: stopped it is read as
+// it is, running through a fleecing view (incremental with dirty bitmaps);
+// a failing fleecing view falls back to vzdump.
+func TestProxmoxE2EBlockWithoutSnapshots(t *testing.T) {
+	mock, _, run := pveHarness(t)
+	fleeced := func() int {
+		st, _ := mock.read()
+		g, _ := mock.guest(st, 102)
+		return g.Fleeced
+	}
+	unlocked := func() {
+		t.Helper()
+		st, _ := mock.read()
+		if g, _ := mock.guest(st, 102); g.Lock != "" || len(g.Snapshots) != 0 {
+			t.Fatalf("left lock %q / snapshots %v", g.Lock, g.Snapshots)
+		}
+	}
+
+	first := run(backupTask("abcdabcd-0000-0000-0000-000000000001", 102, pveTypeQemu, "pve1", "", nil))
+	if first.ProxmoxGuest != nil && strings.Contains(first.ProxmoxGuest.Error, "mounting the segment view") {
+		t.Skipf("FUSE not available: %s", first.ProxmoxGuest.Error)
+	}
+	r1 := guestOK(t, first)
+	if r1.Method != pveMethodBlock || r1.Consistency != "offline" || r1.NextCbt != nil || r1.BytesRead != float64(8<<20) || fleeced() != 0 {
+		t.Fatalf("stopped VM read as it is: %+v", r1)
+	}
+	unlocked()
+
+	mock.StartGuest(nil, pveTypeQemu, 102)
+	r2 := guestOK(t, run(backupTask("abcdabcd-0000-0000-0000-000000000002", 102, pveTypeQemu, "pve1", r1.SnapshotID, nil)))
+	// No guest agent in VM 102's config: crash-consistent.
+	if r2.Method != pveMethodBlock || r2.Consistency != "crash" || r2.NextCbt == nil || fleeced() != 1 {
+		t.Fatalf("running VM through fleecing: %+v", r2)
+	}
+	unlocked()
+
+	if err := mock.WriteDisk(102, "virtio0", 1<<20, bytes.Repeat([]byte{0xCD}, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	r3 := guestOK(t, run(backupTask("abcdabcd-0000-0000-0000-000000000003", 102, pveTypeQemu, "pve1", r2.SnapshotID, r2.NextCbt)))
+	if r3.Cbt != "incremental" || fleeced() != 2 {
+		t.Fatalf("second fleecing run not incremental: %+v", r3)
+	}
+	rs := run(restoreTask("abcdabcd-1111-0000-0000-000000000001", r3.SnapshotID,
+		ProxmoxRestoreSpec{VMID: 102, GuestType: pveTypeQemu, Action: "guest", TargetNode: "pve1", NewVMID: 160, Unique: true}))
+	if rs.Status != "success" {
+		t.Fatalf("restore: %+v\n%s", rs, rs.Log)
+	}
+	want, _ := os.ReadFile(mock.diskPath(102, "virtio0"))
+	got, err := os.ReadFile(mock.diskPath(160, "virtio0"))
+	if err != nil || !bytes.Equal(want, got) {
+		t.Fatalf("restored disk differs (%v)", err)
+	}
+
+	mock.update(func(s *mockPveState) error {
+		g, _ := mock.guest(s, 102)
+		g.FailFleece = true
+		return nil
+	})
+	r4 := guestOK(t, run(backupTask("abcdabcd-0000-0000-0000-000000000004", 102, pveTypeQemu, "pve1", r3.SnapshotID, r3.NextCbt)))
+	if r4.Method != pveMethodVzdump || len(r4.Warnings) == 0 || !strings.Contains(r4.Warnings[0], "fleecing") || r4.NextCbt != nil {
+		t.Fatalf("fallback to vzdump: %+v", r4)
+	}
+	unlocked()
+	st, _ := mock.read()
+	if g, _ := mock.guest(st, 102); len(g.Bitmaps) != 1 {
+		// The failed run's new bitmap is gone; the previous one stays for the next run.
+		t.Fatalf("bitmaps after the fallback: %v", g.Bitmaps)
 	}
 }
 

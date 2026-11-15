@@ -108,7 +108,10 @@ type qmpBlockInfo struct {
 	Device   string `json:"device"`
 	Qdev     string `json:"qdev"`
 	Inserted *struct {
-		NodeName     string `json:"node-name"`
+		NodeName string `json:"node-name"`
+		Image    *struct {
+			VirtualSize int64 `json:"virtual-size"`
+		} `json:"image"`
 		DirtyBitmaps []struct {
 			Name string `json:"name"`
 		} `json:"dirty-bitmaps"`

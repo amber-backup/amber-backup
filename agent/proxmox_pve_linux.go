@@ -20,12 +20,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const pveEtc = "/etc/pve"
 
-type realPve struct{}
+type realPve struct {
+	mu sync.Mutex
+	// The fleecing views being read, by vmid: QEMU runs one NBD server, so
+	// DirtyExtents exports the bitmap through it meanwhile, and the disks'
+	// own nodes (holding the bitmaps) sit below a copy-before-write filter.
+	fleeces map[int]*fleeceState
+}
+
+type fleeceState struct {
+	sock  string
+	nodes map[string]string // disk key → its node below the filter
+}
 
 // newRealPveBackend returns the backend on a PVE node, nil elsewhere.
 // ASSUMPTION(pve): a node has /etc/pve (pmxcfs) and the pveversion binary.
@@ -568,41 +580,86 @@ func (p *realPve) RemoveBitmaps(ctx context.Context, vmid int, keys []string, na
 	})
 }
 
+// nbdServerStartArgs are the nbd-server-start arguments for a unix socket.
+func nbdServerStartArgs(sock string) map[string]any {
+	return map[string]any{
+		"addr": map[string]any{"type": "unix", "data": map[string]any{"path": sock}},
+	}
+}
+
+// cbtReadBitmap is the disabled copy of a tracking bitmap DirtyExtents reads.
+func cbtReadBitmap(vmid int) string { return "amber-cbtread-" + strconv.Itoa(vmid) }
+
 func (p *realPve) DirtyExtents(ctx context.Context, vmid int, key, bitmap string) ([]pveExtent, error) {
 	var out []pveExtent
 	err := p.withQMP(ctx, vmid, func(c *qmpClient, blocks []qmpBlockInfo) error {
-		node, b, err := qmpNodeFor(blocks, key)
-		if err != nil {
-			return err
-		}
-		if !b.hasBitmap(bitmap) {
-			return errNoBitmap
-		}
-		dir, err := os.MkdirTemp("", "amber-nbd-")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(dir)
-		sock := filepath.Join(dir, "export.sock")
 		exportID := "amber-cbt-" + strconv.Itoa(vmid)
-		// ASSUMPTION(pve): no other NBD server (e.g. a migration with local
-		// disks) runs in this QEMU while the backup reads the bitmap.
-		if err := c.Execute("nbd-server-start", map[string]any{
-			"addr": map[string]any{"type": "unix", "path": sock},
-		}, nil); err != nil {
-			return fmt.Errorf("starting QEMU's NBD server: %w", err)
+		fl := p.fleece(vmid)
+		sock, node := "", ""
+		hasFrozenCopy := false
+		if fl != nil {
+			// query-block shows the filter now; the bitmaps are on the node below.
+			sock, node = fl.sock, fl.nodes[key]
 		}
-		defer c.Execute("nbd-server-stop", nil, nil)
+		if node == "" {
+			n, b, err := qmpNodeFor(blocks, key)
+			if err != nil {
+				return err
+			}
+			if !b.hasBitmap(bitmap) {
+				return errNoBitmap
+			}
+			node, hasFrozenCopy = n, b.hasBitmap(cbtReadBitmap(vmid))
+		} else {
+			has, err := nodeHasBitmap(c, node, bitmap)
+			if err != nil {
+				return err
+			}
+			if !has {
+				return errNoBitmap
+			}
+			hasFrozenCopy, _ = nodeHasBitmap(c, node, cbtReadBitmap(vmid))
+		}
+		if sock == "" {
+			dir, err := os.MkdirTemp("", "amber-nbd-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(dir)
+			sock = filepath.Join(dir, "export.sock")
+			// ASSUMPTION(pve): no other NBD server (e.g. a migration with local
+			// disks) runs in this QEMU while the backup reads the bitmap.
+			// nbd-server-start takes a SocketAddressLegacy: the address sits in
+			// "data" (QEMU on PVE 9: "Parameter 'addr.data' is missing" otherwise).
+			if err := c.Execute("nbd-server-start", nbdServerStartArgs(sock), nil); err != nil {
+				return fmt.Errorf("starting QEMU's NBD server: %w", err)
+			}
+			defer c.Execute("nbd-server-stop", nil, nil)
+		}
+		// QEMU exports only a disabled bitmap read-only ("Enabled bitmap …
+		// incompatible with readonly export"): read a frozen copy and leave
+		// the tracking one as it is (it stays the fallback if this run fails).
+		frozen := cbtReadBitmap(vmid)
+		if hasFrozenCopy {
+			c.Execute("block-dirty-bitmap-remove", map[string]any{"node": node, "name": frozen}, nil)
+		}
+		if err := c.Execute("transaction", map[string]any{"actions": []map[string]any{
+			{"type": "block-dirty-bitmap-add", "data": map[string]any{"node": node, "name": frozen, "persistent": false, "disabled": true}},
+			{"type": "block-dirty-bitmap-merge", "data": map[string]any{"node": node, "target": frozen, "bitmaps": []string{bitmap}}},
+		}}, nil); err != nil {
+			return fmt.Errorf("copying the dirty bitmap: %w", err)
+		}
+		defer c.Execute("block-dirty-bitmap-remove", map[string]any{"node": node, "name": frozen}, nil)
 		if err := c.Execute("block-export-add", map[string]any{
 			"type": "nbd", "id": exportID, "node-name": node, "name": exportID,
-			"writable": false, "bitmaps": []string{bitmap},
+			"writable": false, "bitmaps": []string{frozen},
 		}, nil); err != nil {
 			return fmt.Errorf("exporting the disk's bitmap: %w", err)
 		}
 		defer c.Execute("block-export-del", map[string]any{"id": exportID, "mode": "hard"}, nil)
 		nctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		nc, err := nbdConnect(nctx, sock, exportID, "qemu:dirty-bitmap:"+bitmap)
+		nc, err := nbdConnect(nctx, sock, exportID, "qemu:dirty-bitmap:"+frozen)
 		if err != nil {
 			return err
 		}

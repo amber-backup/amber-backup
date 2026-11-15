@@ -190,11 +190,16 @@ func TestResolveMethod(t *testing.T) {
 	if m, _ := resolveMethod(vm(lvm, qcow), "auto", st); m != pveMethodBlock {
 		t.Fatalf("lvm-thin + qcow2 → block, got %s", m)
 	}
-	if m, r := resolveMethod(vm(lvm, rawNFS), "auto", st); m != pveMethodVzdump || !strings.Contains(r, "scsi2") {
-		t.Fatalf("raw on nfs → vzdump (%s, %s)", m, r)
+	if m, _ := resolveMethod(vm(lvm, rawNFS), "auto", st); m != pveMethodBlock {
+		t.Fatalf("stopped VM, raw file on nfs → block (read as it is), got %s", m)
 	}
-	if m, _ := resolveMethod(vm(lvm, thick), "auto", st); m != pveMethodVzdump {
-		t.Fatal("thick lvm → vzdump")
+	if m, r := resolveMethod(vm(lvm, thick), "auto", st); m != pveMethodVzdump || !strings.Contains(r, "scsi3") {
+		t.Fatalf("stopped VM on thick lvm → vzdump (%s, %s)", m, r)
+	}
+	running := vm(lvm, thick, rawNFS)
+	running.Status = "running"
+	if m, _ := resolveMethod(running, "auto", st); m != pveMethodBlock {
+		t.Fatalf("running VM without snapshots → block (fleecing), got %s", m)
 	}
 	off := thick
 	off.Backup = false

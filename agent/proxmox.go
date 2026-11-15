@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -71,6 +72,18 @@ type pveBackend interface {
 	// VzdumpCommand is the argv restic runs (--stdin-from-command).
 	VzdumpCommand(ctx context.Context, typ string, vmid int, mode string) ([]string, error)
 	OpenSnapshotDisk(ctx context.Context, vmid int, d ProxmoxGuestDisk, st *pveStorageCfg, snap string) (pveDiskReader, error)
+	// OpenVolume reads a disk volume as it is (a stopped VM's raw image, or
+	// a TPM state the guest rarely writes).
+	OpenVolume(ctx context.Context, d ProxmoxGuestDisk) (pveDiskReader, error)
+	// FleeceDisks makes a point-in-time view of a running VM's disks (QEMU
+	// block nodes) readable without a storage snapshot; freeze asks the
+	// guest agent to freeze the filesystems for the moment it is taken.
+	// cleanup removes the view (readers are closed before). frozen reports
+	// whether the freeze happened. A *fleeceSpaceError means too little room.
+	FleeceDisks(ctx context.Context, vmid int, keys []string, freeze bool, logf func(string, ...any)) (readers map[string]pveDiskReader, cleanup func(), frozen bool, err error)
+	// CleanupFleecing removes what a fleecing view of vmid left (jobs, block
+	// nodes, NBD exports, temporary images), e.g. after a crash.
+	CleanupFleecing(ctx context.Context, vmid int) error
 	// MountSnapshotVolume mounts a CT volume's snapshot read-only at target.
 	MountSnapshotVolume(ctx context.Context, vmid int, d ProxmoxGuestDisk, st *pveStorageCfg, snap, target string) (func() error, error)
 	AddBitmaps(ctx context.Context, vmid int, keys []string, name string) error
@@ -430,6 +443,13 @@ func (a *agent) backupGuest(ctx context.Context, t *Task, res *ProxmoxGuestResul
 	switch method {
 	case pveMethodBlock:
 		err = b.backupBlock(ctx, running)
+		var fb *vzdumpFallback
+		if errors.As(err, &fb) && ctx.Err() == nil {
+			b.logf("using vzdump: %s", fb.reason)
+			res.Warnings = append(res.Warnings, "vzdump fallback: "+fb.reason)
+			res.Method, res.Cbt, res.CbtReason, res.NextCbt = pveMethodVzdump, "", "", nil
+			err = b.backupVzdump(ctx, running)
+		}
 	case pveMethodFiles:
 		err = b.backupFiles(ctx, running)
 	default:
@@ -468,6 +488,11 @@ func (b *pveBackupCtx) cleanupStale(ctx context.Context, cfg *pveConfig) {
 			b.logf("could not remove snapshot %s: %v", s, err)
 		}
 	}
+	if b.res.Type == pveTypeQemu {
+		if err := b.be.CleanupFleecing(ctx, vmid); err != nil {
+			b.logf("could not remove a previous fleecing view: %v", err)
+		}
+	}
 	cleanupMountsBelow(pveGuestRoot(vmid))
 }
 
@@ -492,7 +517,8 @@ func (b *pveBackupCtx) resticBackupArgs() []string {
 }
 
 // runResticBackup runs restic, forwarding progress and filling the result.
-func (b *pveBackupCtx) runResticBackup(ctx context.Context, args []string, bytesRead func() int64) error {
+// estTotal (> 0) stands in for the total restic cannot know (a stdin backup).
+func (b *pveBackupCtx) runResticBackup(ctx context.Context, args []string, bytesRead func() int64, estTotal int64) error {
 	var last time.Time
 	var summary map[string]any
 	code, failure, err := b.a.runner.runCapture(ctx, b.t, args, func(msg map[string]any) {
@@ -507,6 +533,9 @@ func (b *pveBackupCtx) runResticBackup(ctx context.Context, args []string, bytes
 				}
 				if bytesRead != nil {
 					p["bytesRead"] = bytesRead()
+				}
+				if estTotal > 0 && jsonNum(msg, "total_bytes") <= 0 {
+					p["totalBytes"], p["percentDone"] = estTotal, estimatedPercent(jsonNum(msg, "bytes_done"), estTotal)
 				}
 				b.a.postProgress(b.t.TaskID, p)
 			}
@@ -545,6 +574,24 @@ func (b *pveBackupCtx) consistencyOf(running bool, stopMode bool) string {
 
 // --- vzdump method -------------------------------------------------------------
 
+// diskBytes is the size of the guest's backed-up disks: the estimate of a
+// vzdump stream's length (restic cannot know a stdin total).
+func (b *pveBackupCtx) diskBytes() int64 {
+	var n int64
+	for _, d := range guestDisks(b.res.Type, b.cfg) {
+		if d.Backup {
+			n += d.SizeBytes
+		}
+	}
+	return n
+}
+
+// estimatedPercent of done against an estimated total, below 1 until the
+// stream has actually ended (the estimate may be short).
+func estimatedPercent(done float64, total int64) float64 {
+	return math.Min(0.99, done/float64(total))
+}
+
 func vzdumpFileName(typ string, vmid int) string {
 	ext := "vma"
 	if typ == pveTypeLXC {
@@ -566,7 +613,7 @@ func (b *pveBackupCtx) backupVzdump(ctx context.Context, running bool) error {
 	b.logf("vzdump (mode %s) streamed into restic", mode)
 	args := append(b.resticBackupArgs(), "--stdin-from-command", "--stdin-filename", vzdumpFileName(b.res.Type, b.res.VMID), "--")
 	args = append(args, argv...)
-	if err := b.runResticBackup(ctx, args, nil); err != nil {
+	if err := b.runResticBackup(ctx, args, nil, b.diskBytes()); err != nil {
 		return err
 	}
 	b.res.BytesRead = b.res.TotalBytes
@@ -588,6 +635,23 @@ func (b *pveBackupCtx) takeSnapshot(ctx context.Context) (string, func(), error)
 	if err := b.be.Snapshot(ctx, b.res.Type, vmid, snap); err != nil {
 		return "", nil, fmt.Errorf("snapshot failed: %w", err)
 	}
+	unlock := b.lockGuest(ctx)
+	return snap, func() {
+		unlock()
+		cctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := b.be.DeleteSnapshot(cctx, b.res.Type, vmid, snap); err != nil {
+			b.logf("removing snapshot %s failed: %v", snap, err)
+		} else {
+			b.logf("snapshot %s removed", snap)
+		}
+	}, nil
+}
+
+// lockGuest sets the backup lock (best effort) and returns the func that
+// removes it again.
+func (b *pveBackupCtx) lockGuest(ctx context.Context) func() {
+	vmid := b.res.VMID
 	locked := false
 	os.MkdirAll(filepath.Dir(lockMarker(vmid)), 0o700)
 	os.WriteFile(lockMarker(vmid), []byte(b.t.TaskID), 0o600)
@@ -599,22 +663,18 @@ func (b *pveBackupCtx) takeSnapshot(ctx context.Context) (string, func(), error)
 	} else {
 		locked = true
 	}
-	return snap, func() {
+	return func() {
+		if !locked {
+			return
+		}
 		cctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if locked {
-			if err := b.be.SetLock(cctx, b.res.Type, vmid, ""); err != nil {
-				b.logf("unlocking failed: %v", err)
-			} else {
-				os.Remove(lockMarker(vmid))
-			}
-		}
-		if err := b.be.DeleteSnapshot(cctx, b.res.Type, vmid, snap); err != nil {
-			b.logf("removing snapshot %s failed: %v", snap, err)
+		if err := b.be.SetLock(cctx, b.res.Type, vmid, ""); err != nil {
+			b.logf("unlocking failed: %v", err)
 		} else {
-			b.logf("snapshot %s removed", snap)
+			os.Remove(lockMarker(vmid))
 		}
-	}, nil
+	}
 }
 
 // pveManifest is stored with every block/files snapshot.
@@ -662,6 +722,37 @@ func pveShortID(id string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
+// Where the block method reads a VM's disks from.
+const (
+	blockFromSnapshot = "snapshot" // a PVE snapshot of every disk
+	blockFromFleecing = "fleecing" // running VM, some disk without snapshots
+	blockFromVolume   = "volume"   // stopped VM: the (raw) volumes as they are
+)
+
+// vzdumpFallback makes backupGuest switch to vzdump (after the block
+// method's own cleanup ran).
+type vzdumpFallback struct{ reason string }
+
+func (e *vzdumpFallback) Error() string { return "vzdump fallback: " + e.reason }
+
+// blockSource picks how the block method reads the disks.
+func (b *pveBackupCtx) blockSource(disks []ProxmoxGuestDisk, running bool) string {
+	for _, d := range disks {
+		st := b.storages[d.Storage]
+		if st == nil || !snapshotStorage(st.Type, d.Format) {
+			if running {
+				return blockFromFleecing
+			}
+			return blockFromVolume
+		}
+	}
+	return blockFromSnapshot
+}
+
+// tracked reports whether QEMU keeps a dirty bitmap of the disk: a TPM state
+// is no QEMU block device (swtpm owns it), so it is read whole every time.
+func tracked(key string) bool { return key != "tpmstate0" }
+
 func (b *pveBackupCtx) backupBlock(ctx context.Context, running bool) error {
 	vmid := b.res.VMID
 	var disks []ProxmoxGuestDisk
@@ -669,15 +760,18 @@ func (b *pveBackupCtx) backupBlock(ctx context.Context, running bool) error {
 	for _, d := range b.guest.Disks {
 		if d.Backup {
 			disks = append(disks, d)
-			keys = append(keys, d.Key)
+			if tracked(d.Key) {
+				keys = append(keys, d.Key)
+			}
 		}
 	}
 	b.res.Consistency = b.consistencyOf(running, false)
+	source := b.blockSource(disks, running)
 
 	// The new bitmap must exist before the snapshot: it then covers every
 	// write after it, which the next run reads.
 	newBitmap := ""
-	if running {
+	if running && len(keys) > 0 {
 		name := b.bitmapName()
 		if err := b.be.AddBitmaps(ctx, vmid, keys, name); err != nil {
 			b.logf("change tracking unavailable (next run reads everything): %v", err)
@@ -701,26 +795,77 @@ func (b *pveBackupCtx) backupBlock(ctx context.Context, running bool) error {
 		}
 	}()
 
-	snap, release, err := b.takeSnapshot(ctx)
-	if err != nil {
-		return err
-	}
-	defer release()
-
+	var err error
 	readers := map[string]pveDiskReader{}
-	defer func() {
-		for _, r := range readers {
+	closeReaders := func() {
+		for k, r := range readers {
 			r.Close()
+			delete(readers, k)
 		}
-	}()
-	sizes := map[string]int64{}
-	for _, d := range disks {
-		r, err := b.be.OpenSnapshotDisk(ctx, vmid, d, b.storages[d.Storage], snap)
+	}
+	switch source {
+	case blockFromSnapshot:
+		snap, release, err := b.takeSnapshot(ctx)
 		if err != nil {
-			return fmt.Errorf("opening the snapshot of %s: %w", d.Key, err)
+			return err
 		}
-		readers[d.Key] = r
-		sizes[d.Key] = r.Size()
+		defer release()
+		defer closeReaders()
+		for _, d := range disks {
+			r, err := b.be.OpenSnapshotDisk(ctx, vmid, d, b.storages[d.Storage], snap)
+			if err != nil {
+				return fmt.Errorf("opening the snapshot of %s: %w", d.Key, err)
+			}
+			readers[d.Key] = r
+		}
+	case blockFromFleecing:
+		unlock := b.lockGuest(ctx)
+		defer unlock()
+		b.logf("some disk has no snapshots: reading a fleecing view of the running VM")
+		fleeced, cleanup, frozen, err := b.be.FleeceDisks(ctx, vmid, keys, boolVal(b.guest.GuestAgent), b.logf)
+		if err != nil {
+			return &vzdumpFallback{reason: "the fleecing view failed: " + err.Error()}
+		}
+		defer cleanup()
+		defer closeReaders()
+		for k, r := range fleeced {
+			readers[k] = r
+		}
+		if frozen {
+			b.res.Consistency = "application"
+		} else {
+			b.res.Consistency = "crash"
+		}
+		for _, d := range disks {
+			if tracked(d.Key) {
+				continue
+			}
+			r, err := b.be.OpenVolume(ctx, d)
+			if err != nil {
+				return fmt.Errorf("opening %s: %w", d.Key, err)
+			}
+			readers[d.Key] = r
+			b.res.Warnings = append(b.res.Warnings, d.Key+" was read from the live volume")
+		}
+	default:
+		unlock := b.lockGuest(ctx)
+		defer unlock()
+		defer closeReaders()
+		// Locked, the stopped VM can't start while its volumes are read.
+		if status, err := b.be.GuestStatus(ctx, b.res.Type, vmid); err == nil && status == "running" {
+			return errors.New("the VM was started while the backup began; try again")
+		}
+		for _, d := range disks {
+			r, err := b.be.OpenVolume(ctx, d)
+			if err != nil {
+				return fmt.Errorf("opening %s: %w", d.Key, err)
+			}
+			readers[d.Key] = r
+		}
+	}
+	sizes := map[string]int64{}
+	for k, r := range readers {
+		sizes[k] = r.Size()
 	}
 
 	root := pveGuestRoot(vmid)
@@ -781,7 +926,7 @@ func (b *pveBackupCtx) backupBlock(ctx context.Context, running bool) error {
 		args = append(args, "--parent", b.px.ParentSnapshotID)
 	}
 	args = append(args, "--", root)
-	if err := b.runResticBackup(ctx, args, view.BytesRead.Load); err != nil {
+	if err := b.runResticBackup(ctx, args, view.BytesRead.Load, 0); err != nil {
 		return err
 	}
 	b.res.BytesRead = float64(view.BytesRead.Load())
@@ -824,6 +969,10 @@ func (b *pveBackupCtx) changedSegments(ctx context.Context, running bool, disks 
 		size, ok := prev[d.Key]
 		if !ok || size != sizes[d.Key] {
 			return nil, "disk " + d.Key + " was added or resized"
+		}
+		if !tracked(d.Key) {
+			out[d.Key] = dirtySegments([]pveExtent{{Offset: 0, Length: sizes[d.Key]}}, sizes[d.Key], pveSegmentBytes)
+			continue
 		}
 		ext, err := b.be.DirtyExtents(ctx, b.res.VMID, d.Key, c.Bitmap)
 		if err != nil {
@@ -919,7 +1068,7 @@ func (b *pveBackupCtx) backupFiles(ctx context.Context, running bool) error {
 		args = append(args, "--parent", b.px.ParentSnapshotID)
 	}
 	args = append(args, "--", root)
-	if err := b.runResticBackup(ctx, args, nil); err != nil {
+	if err := b.runResticBackup(ctx, args, nil, 0); err != nil {
 		return err
 	}
 	b.res.BytesRead = b.res.TotalBytes
