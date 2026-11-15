@@ -47,6 +47,7 @@ describe('AgentsService (Proxmox dispatch)', () => {
       recordItemResult: jest.fn().mockResolvedValue(false),
       recordItemProgress: jest.fn().mockResolvedValue(false),
       taskState: jest.fn().mockResolvedValue(null),
+      releaseAgent: jest.fn().mockResolvedValue(undefined),
       restorePayload: jest.fn().mockResolvedValue({ clusterId: 'c-1', clusterSlug: 'prod', restore: {} }),
     };
     const service = new AgentsService(
@@ -148,10 +149,18 @@ describe('AgentsService (Proxmox dispatch)', () => {
     );
   });
 
-  it('refuses to delete the primary agent of a cluster', async () => {
-    const { service, mock } = make();
-    mock.selectFrom.mockImplementation(() => chain({ executeTakeFirst: { name: 'Prod' } }));
+  it('releases the clusters of an agent before deleting it', async () => {
+    const { service, mock, proxmox } = make();
+    await service.remove('agent-1');
+    expect(proxmox.releaseAgent).toHaveBeenCalledWith('agent-1');
+    expect(mock.deleteFrom).toHaveBeenCalledWith('agents');
+  });
+
+  it('keeps an agent whose cluster cannot be released', async () => {
+    const { service, mock, proxmox } = make();
+    proxmox.releaseAgent.mockRejectedValue(new ConflictException('last agent'));
     await expect(service.remove('agent-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(mock.deleteFrom).not.toHaveBeenCalled();
   });
 });
 

@@ -3,10 +3,9 @@ export const proxmox = {
     title: 'Proxmox VE',
     subtitle: (clusters: number, guests: number) =>
       `${clusters} ${clusters === 1 ? 'cluster' : 'clusters'} · ${guests} ${guests === 1 ? 'guest' : 'guests'}`,
-    addCluster: 'Add cluster',
     panelTitle: 'Proxmox clusters',
     empty:
-      'No Proxmox clusters yet. Install the Amber agent on every PVE node, then add the cluster here.',
+      'No Proxmox clusters yet. Install the Amber agent (Linux binary) on every PVE node — each cluster appears here by itself with the first poll of one of its agents, together with all its VMs and containers.',
     standalone: 'standalone node',
     nodeCount: (n: number) => (n === 1 ? '1 node' : `${n} nodes`),
     guestCount: (n: number) => (n === 1 ? '1 guest' : `${n} guests`),
@@ -14,21 +13,14 @@ export const proxmox = {
     primary: 'primary agent',
   },
   editor: {
-    titleNew: 'Add Proxmox cluster',
     titleEdit: 'Edit Proxmox cluster',
     name: 'Name',
     nameRequired: 'Name is required',
-    agent: 'Agent on a node',
-    agentHelp:
-      'An Amber agent on any node of the cluster. It becomes the primary agent: it reads the inventory and runs retention, checks and statistics. The other nodes are linked automatically through their agents.',
-    noCandidates:
-      'No agent reports a Proxmox node that is not registered yet. Install the Amber agent (Linux binary) on the PVE nodes and wait for their first poll.',
     candidateOption: (agent: string, node: string, cluster: string | null) =>
       `${agent} — node ${node}${cluster ? ` (cluster ${cluster})` : ' (standalone)'}`,
     primaryAgent: 'Primary agent',
     primaryHelp:
-      'Reads the inventory and runs retention, integrity checks and statistics for every job of this cluster. Jobs move along when it changes.',
-    agentRequired: 'Select an agent',
+      'Reads the inventory and runs retention, integrity checks and statistics for every job of this cluster; while it is offline, another node agent stands in. Each guest is always backed up by the agent of its own node. Jobs move along when it changes.',
     saved: 'Cluster saved',
     saveFailed: 'Saving failed',
   },
@@ -39,7 +31,7 @@ export const proxmox = {
     edit: 'Edit',
     remove: 'Remove cluster',
     removeConfirm: (name: string) =>
-      `Remove cluster "${name}" from Amber? Its jobs must be deleted first; snapshots in the repositories are kept.`,
+      `Remove cluster "${name}" from Amber? Only possible once its jobs are deleted and no agent runs on its nodes anymore (otherwise it registers itself again). Snapshots in the repositories are kept.`,
     removed: 'Cluster removed',
     inventoryError: 'Reading the inventory failed:',
     inventoryAt: (when: string) => `inventory ${when}`,
@@ -92,7 +84,7 @@ export const proxmox = {
   job: {
     kindProxmox: 'Proxmox VE guests',
     cluster: 'Cluster',
-    noClusters: 'Add a Proxmox cluster first (Proxmox VE page).',
+    noClusters: 'No Proxmox cluster yet: install the Amber agent on the PVE nodes, the cluster registers itself.',
     noInventory: 'The cluster has no inventory yet.',
     allGuests: 'All guests (including guests created later)',
     guests: 'Guests',

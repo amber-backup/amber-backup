@@ -393,7 +393,8 @@ export interface HypervHostsTable {
   inventory_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   inventory_error: string | null;
   inventory_requested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
-  owner_id: string;
+  /** Null for a cluster that registered itself (migration 029). */
+  owner_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -426,7 +427,8 @@ export interface ProxmoxClustersTable {
   inventory_error: ColumnType<string | null, string | null | undefined, string | null>;
   /** Set to ask for a fresh inventory on the next poll of a node agent. */
   inventory_requested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
-  owner_id: string;
+  /** Null for a cluster that registered itself (migration 029). */
+  owner_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }

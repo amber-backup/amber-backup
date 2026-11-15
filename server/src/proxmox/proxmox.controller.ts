@@ -15,7 +15,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser } from '../common/auth/request-user';
 import { SlugResolverService } from '../common/slug-resolver.service';
 import { ProxmoxService } from './proxmox.service';
-import { CreateProxmoxClusterDto, UpdateProxmoxClusterDto } from './dto/proxmox.dto';
+import { UpdateProxmoxClusterDto } from './dto/proxmox.dto';
 
 /**
  * Proxmox VE clusters. Like Hyper-V hosts, an admin concern: they decide which
@@ -32,7 +32,9 @@ export class ProxmoxController {
   ) {}
 
   @Get('clusters')
-  @ApiOperation({ summary: 'List Proxmox clusters' })
+  @ApiOperation({
+    summary: 'List Proxmox clusters (each registers itself with the first poll of a node agent)',
+  })
   list() {
     return this.proxmox.list();
   }
@@ -44,15 +46,9 @@ export class ProxmoxController {
   }
 
   @Get('candidates')
-  @ApiOperation({ summary: 'Agents running on PVE nodes (to add a cluster)' })
+  @ApiOperation({ summary: 'Agents running on PVE nodes (choices for a primary agent)' })
   candidates() {
     return this.proxmox.candidates();
-  }
-
-  @Post('clusters')
-  @ApiOperation({ summary: 'Add a Proxmox cluster through one of its node agents' })
-  create(@CurrentUser() user: RequestUser, @Body() dto: CreateProxmoxClusterDto) {
-    return this.proxmox.create(user, dto);
   }
 
   @Get('clusters/:idOrSlug')
@@ -68,7 +64,9 @@ export class ProxmoxController {
   }
 
   @Delete('clusters/:idOrSlug')
-  @ApiOperation({ summary: 'Remove a cluster (no job may back it up anymore)' })
+  @ApiOperation({
+    summary: 'Remove a cluster no agent announces anymore (no job may back it up either)',
+  })
   async remove(@Param('idOrSlug') idOrSlug: string): Promise<void> {
     await this.proxmox.remove(await this.slugs.resolve('proxmox_clusters', idOrSlug));
   }

@@ -315,7 +315,8 @@ export interface PublicProxmoxCluster {
   inventory_requested_at: Date | null;
   guest_count: number | null;
   node_count: number | null;
-  owner_id: string;
+  /** Null when the cluster registered itself through its first node agent. */
+  owner_id: string | null;
   created_at: Date;
   updated_at: Date;
 }

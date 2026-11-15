@@ -19,8 +19,15 @@ Shared types: `server/src/proxmox/proxmox.contract.ts` (mirrored by
 corosync `clusterName`, `node`, `pveVersion`. Stored on `agents.proxmox_info`.
 There is no node table: a cluster's node agents are the agents whose
 `proxmox_info.clusterId` equals `proxmox_clusters.pve_cluster_id`. Creating a
-cluster = picking one announcing agent (`GET /proxmox/candidates`), which
-becomes the **primary agent**.
+cluster is automatic: the first poll of an agent that announces an unknown
+cluster id creates the `proxmox_clusters` row (named after the corosync
+cluster, or the node for a standalone one; `owner_id` null, migration 029),
+and that agent becomes the **primary agent** (changeable later among the
+cluster's node agents, `GET /proxmox/candidates`). Deleting the primary agent
+hands the role and the jobs to another node agent (online first), or deletes
+the cluster with its last agent; a cluster that jobs still back up keeps its
+last agent. `DELETE clusters/:id` only removes a cluster no agent announces
+anymore (it would register itself again).
 
 **Primary agent.** Reads the inventory, runs the per-run retention task, and is
 `backup_jobs.agent_id` of every job of the cluster — so integrity checks and
@@ -79,7 +86,7 @@ inventory lists them. No manual cleanup action in v1.
 agent uses its managed/bundled restic when the host's is older.
 
 **API** (`/api/proxmox`, admin/manage like Hyper-V hosts):
-`GET clusters`, `POST clusters {name, primaryAgentId}`, `GET clusters/:idOrSlug`,
+`GET clusters`, `GET clusters/:idOrSlug`,
 `PATCH clusters/:idOrSlug {name?, primaryAgentId?}`, `DELETE clusters/:idOrSlug`,
 `POST clusters/:idOrSlug/refresh`, `GET candidates`, `GET summary`,
 `GET clusters/:idOrSlug/guests/:vmid/snapshots`, `GET runs/:runId/items`.

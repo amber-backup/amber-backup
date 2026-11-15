@@ -71,7 +71,7 @@ import {
   selectGuests,
   summarize,
 } from './proxmox.logic';
-import { CreateProxmoxClusterDto, UpdateProxmoxClusterDto } from './dto/proxmox.dto';
+import { UpdateProxmoxClusterDto } from './dto/proxmox.dto';
 
 /** An inventory older than this is refreshed on a node agent's next poll. */
 const INVENTORY_MAX_AGE_MS = 15 * 60_000;
@@ -163,79 +163,145 @@ export class ProxmoxService {
     };
   }
 
-  async create(user: RequestUser, dto: CreateProxmoxClusterDto): Promise<ProxmoxClusterDetail> {
-    const info = await this.agentInfo(dto.primaryAgentId);
-    const taken = await this.db
-      .selectFrom('proxmox_clusters')
-      .select('name')
-      .where('pve_cluster_id', '=', info.clusterId)
-      .executeTakeFirst();
-    if (taken) {
-      throw new ConflictException(`This PVE cluster is already registered as "${taken.name}"`);
-    }
-    const row = await this.db
+  /**
+   * Registers the PVE cluster a node agent announces, unless Amber knows it
+   * already. Clusters are not added by hand: the first node agent to poll
+   * creates the row and becomes its primary agent; the other nodes' agents
+   * link up through the same cluster id. Returns the cluster, also when a
+   * concurrent poll of another node created it.
+   */
+  async registerCluster(agentId: string, info: ProxmoxAgentInfo): Promise<ProxmoxCluster | null> {
+    const name = info.clusterName || info.node;
+    const created = await this.db
       .insertInto('proxmox_clusters')
       .values({
-        name: dto.name,
-        slug: await uniqueSlug(this.db, 'proxmox_clusters', dto.name),
+        name,
+        slug: await uniqueSlug(this.db, 'proxmox_clusters', name),
         pve_cluster_id: info.clusterId,
         cluster_name: info.clusterName ?? null,
-        primary_agent_id: dto.primaryAgentId,
-        // The first inventory is read on the next poll of a node agent.
+        primary_agent_id: agentId,
+        // The first inventory is read on this very poll.
         inventory_requested_at: new Date(),
-        owner_id: user.id,
+        owner_id: null,
       })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    return this.get(row.id);
+      .onConflict((oc) => oc.column('pve_cluster_id').doNothing())
+      .returningAll()
+      .executeTakeFirst();
+    if (created) {
+      this.logger.log(`Registered Proxmox cluster "${name}" (announced by the agent on node ${info.node})`);
+      return created;
+    }
+    return this.clusterOf(info);
   }
 
   async update(id: string, dto: UpdateProxmoxClusterDto): Promise<ProxmoxClusterDetail> {
     const cluster = await this.getRow(id);
-    const patch: Record<string, unknown> = { updated_at: new Date() };
+    const patch: { name?: string; cluster_name?: string | null } = {};
     // The slug is frozen at creation: it is part of the restic host and the
     // cluster tag of every snapshot (`pveResticHost`, `pveClusterTag`), which
     // retention and the per-guest snapshot list filter by. Re-deriving it on a
     // rename would orphan all earlier snapshots (never forgotten, no longer
     // listed). A rename changes the display name only.
     if (dto.name !== undefined) patch.name = dto.name;
-    const moveAgent =
-      dto.primaryAgentId !== undefined && dto.primaryAgentId !== cluster.primary_agent_id;
-    if (moveAgent) {
-      const info = await this.agentInfo(dto.primaryAgentId!);
+    let primaryAgentId: string | undefined;
+    if (dto.primaryAgentId !== undefined && dto.primaryAgentId !== cluster.primary_agent_id) {
+      const info = await this.agentInfo(dto.primaryAgentId);
       if (info.clusterId !== cluster.pve_cluster_id) {
         throw new BadRequestException('The agent runs on a node of another PVE cluster');
       }
-      patch.primary_agent_id = dto.primaryAgentId;
+      primaryAgentId = dto.primaryAgentId;
       patch.cluster_name = info.clusterName ?? null;
     }
+    await this.setCluster(id, patch, primaryAgentId);
+    return this.get(id);
+  }
+
+  /** Updates a cluster; a new primary agent takes the cluster's jobs along. */
+  private async setCluster(
+    id: string,
+    patch: { name?: string; cluster_name?: string | null },
+    primaryAgentId?: string,
+  ): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
-      await trx.updateTable('proxmox_clusters').set(patch).where('id', '=', id).execute();
+      await trx
+        .updateTable('proxmox_clusters')
+        .set({
+          ...patch,
+          ...(primaryAgentId ? { primary_agent_id: primaryAgentId } : {}),
+          updated_at: new Date(),
+        })
+        .where('id', '=', id)
+        .execute();
       // The primary agent is the agent of every job of the cluster: they follow.
-      if (moveAgent) {
+      if (primaryAgentId) {
         await trx
           .updateTable('backup_jobs')
-          .set({ agent_id: dto.primaryAgentId!, updated_at: new Date() })
+          .set({ agent_id: primaryAgentId, updated_at: new Date() })
           .where('proxmox_cluster_id', '=', id)
           .execute();
       }
     });
-    return this.get(id);
   }
 
-  async remove(id: string): Promise<void> {
-    await this.getRow(id);
-    const job = await this.db
+  /** The first job that backs up a cluster, or undefined. */
+  private async jobOfCluster(id: string) {
+    return this.db
       .selectFrom('backup_jobs')
       .select('name')
       .where('proxmox_cluster_id', '=', id)
       .executeTakeFirst();
+  }
+
+  /**
+   * Removes a cluster Amber no longer reaches. While an agent still announces
+   * it, its next poll would register it again — such a cluster goes away with
+   * its last agent (`releaseAgent`).
+   */
+  async remove(id: string): Promise<void> {
+    const cluster = await this.getRow(id);
+    const job = await this.jobOfCluster(id);
     if (job) {
       throw new ConflictException(
         `The cluster is still backed up by job "${job.name}"; delete its jobs first`,
       );
     }
+    const [agent] = await this.nodeAgents(cluster.pve_cluster_id);
+    if (agent) {
+      throw new ConflictException(
+        `Agent "${agent.name}" still runs on a node of this cluster and would register it again on its next poll; delete the agents of its nodes instead`,
+      );
+    }
     await this.db.deleteFrom('proxmox_clusters').where('id', '=', id).execute();
+  }
+
+  /**
+   * Before an agent is deleted: every cluster it is the primary agent of goes
+   * to another node agent of that cluster (an online one first), or — with
+   * its last agent — is removed. A cluster that jobs still back up keeps its
+   * last agent (ConflictException).
+   */
+  async releaseAgent(agentId: string): Promise<void> {
+    const clusters = await this.db
+      .selectFrom('proxmox_clusters')
+      .selectAll()
+      .where('primary_agent_id', '=', agentId)
+      .execute();
+    for (const cluster of clusters) {
+      const successor = (await this.nodeAgents(cluster.pve_cluster_id))
+        .filter((a) => a.id !== agentId)
+        .sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online'))[0];
+      if (successor) {
+        await this.setCluster(cluster.id, {}, successor.id);
+        continue;
+      }
+      const job = await this.jobOfCluster(cluster.id);
+      if (job) {
+        throw new ConflictException(
+          `The agent is the last agent of Proxmox cluster "${cluster.name}", which job "${job.name}" still backs up; delete its jobs first`,
+        );
+      }
+      await this.db.deleteFrom('proxmox_clusters').where('id', '=', cluster.id).execute();
+    }
   }
 
   async requestInventory(id: string): Promise<{ requestedAt: Date }> {
@@ -249,7 +315,7 @@ export class ProxmoxService {
     return { requestedAt };
   }
 
-  /** Agents on PVE nodes, for "add cluster". */
+  /** Agents on PVE nodes (the choices for a cluster's primary agent). */
   async candidates(): Promise<ProxmoxCandidate[]> {
     const agents = await this.db
       .selectFrom('agents')
@@ -514,8 +580,9 @@ export class ProxmoxService {
    * the guests of its node that are due, and finishing tasks of settled runs.
    */
   async claimTasks(agentId: string, info: ProxmoxAgentInfo | undefined): Promise<AgentTask[]> {
-    const cluster = await this.clusterOf(info);
-    if (!cluster || !info) return [];
+    if (!info) return [];
+    const cluster = (await this.clusterOf(info)) ?? (await this.registerCluster(agentId, info));
+    if (!cluster) return [];
     const tasks: AgentTask[] = [];
     const coordinate = await this.mayCoordinate(agentId, cluster);
     if (coordinate) {

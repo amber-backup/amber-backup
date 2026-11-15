@@ -5,10 +5,9 @@ export const proxmox: ProxmoxMessages = {
     title: 'Proxmox VE',
     subtitle: (clusters: number, guests: number) =>
       `${clusters} ${clusters === 1 ? 'Cluster' : 'Cluster'} · ${guests} ${guests === 1 ? 'Gast' : 'Gäste'}`,
-    addCluster: 'Cluster hinzufügen',
     panelTitle: 'Proxmox-Cluster',
     empty:
-      'Noch keine Proxmox-Cluster. Installieren Sie den Amber-Agent auf jedem PVE-Node und fügen Sie den Cluster dann hier hinzu.',
+      'Noch keine Proxmox-Cluster. Installieren Sie den Amber-Agent (Linux-Binary) auf jedem PVE-Node — jeder Cluster erscheint hier von selbst mit dem ersten Poll eines seiner Agents, samt aller VMs und Container.',
     standalone: 'einzelner Node',
     nodeCount: (n: number) => (n === 1 ? '1 Node' : `${n} Nodes`),
     guestCount: (n: number) => (n === 1 ? '1 Gast' : `${n} Gäste`),
@@ -16,21 +15,14 @@ export const proxmox: ProxmoxMessages = {
     primary: 'primärer Agent',
   },
   editor: {
-    titleNew: 'Proxmox-Cluster hinzufügen',
     titleEdit: 'Proxmox-Cluster bearbeiten',
     name: 'Name',
     nameRequired: 'Name ist erforderlich',
-    agent: 'Agent auf einem Node',
-    agentHelp:
-      'Ein Amber-Agent auf einem beliebigen Node des Clusters. Er wird zum primären Agent: Er liest das Inventar und führt Aufbewahrung, Prüfungen und Statistiken aus. Die übrigen Nodes werden über ihre Agents automatisch verknüpft.',
-    noCandidates:
-      'Kein Agent meldet einen noch nicht registrierten Proxmox-Node. Installieren Sie den Amber-Agent (Linux-Binary) auf den PVE-Nodes und warten Sie deren ersten Poll ab.',
     candidateOption: (agent: string, node: string, cluster: string | null) =>
       `${agent} — Node ${node}${cluster ? ` (Cluster ${cluster})` : ' (einzelner Node)'}`,
     primaryAgent: 'Primärer Agent',
     primaryHelp:
-      'Liest das Inventar und führt Aufbewahrung, Integritätsprüfungen und Statistiken für alle Jobs dieses Clusters aus. Die Jobs ziehen bei einem Wechsel mit.',
-    agentRequired: 'Bitte wählen Sie einen Agent',
+      'Liest das Inventar und führt Aufbewahrung, Integritätsprüfungen und Statistiken für alle Jobs dieses Clusters aus; ist er offline, springt ein anderer Node-Agent ein. Jeder Gast wird immer vom Agent seines eigenen Nodes gesichert. Die Jobs ziehen bei einem Wechsel mit.',
     saved: 'Cluster gespeichert',
     saveFailed: 'Speichern fehlgeschlagen',
   },
@@ -41,7 +33,7 @@ export const proxmox: ProxmoxMessages = {
     edit: 'Bearbeiten',
     remove: 'Cluster entfernen',
     removeConfirm: (name: string) =>
-      `Cluster „${name}“ aus Amber entfernen? Seine Jobs müssen vorher gelöscht werden; die Snapshots in den Repositories bleiben erhalten.`,
+      `Cluster „${name}“ aus Amber entfernen? Das geht erst, wenn seine Jobs gelöscht sind und auf seinen Nodes kein Agent mehr läuft (sonst registriert er sich erneut). Die Snapshots in den Repositories bleiben erhalten.`,
     removed: 'Cluster entfernt',
     inventoryError: 'Das Inventar konnte nicht gelesen werden:',
     inventoryAt: (when: string) => `Inventar ${when}`,
@@ -94,7 +86,7 @@ export const proxmox: ProxmoxMessages = {
   job: {
     kindProxmox: 'Proxmox-VE-Gäste',
     cluster: 'Cluster',
-    noClusters: 'Fügen Sie zuerst einen Proxmox-Cluster hinzu (Seite Proxmox VE).',
+    noClusters: 'Noch kein Proxmox-Cluster: Installieren Sie den Amber-Agent auf den PVE-Nodes, der Cluster registriert sich selbst.',
     noInventory: 'Für den Cluster liegt noch kein Inventar vor.',
     allGuests: 'Alle Gäste (auch später angelegte)',
     guests: 'Gäste',

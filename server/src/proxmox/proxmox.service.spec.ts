@@ -282,10 +282,47 @@ describe('ProxmoxService — dispatch', () => {
     expect(proven.itemUpdate.set).toHaveBeenCalledTimes(3);
   });
 
-  it('gives an agent of an unknown cluster nothing', async () => {
-    const { service } = make({ select: { proxmox_clusters: chain({ executeTakeFirst: undefined }) } });
-    expect(await service.claimTasks('agent-9', agentPve1.proxmox_info)).toEqual([]);
+  it('registers the cluster an agent of an unknown cluster announces', async () => {
+    const insert = chain({ executeTakeFirst: { ...cluster, primary_agent_id: 'agent-9', inventory_requested_at: new Date() } });
+    const { service } = make({
+      select: { proxmox_clusters: chain({ executeTakeFirst: undefined }) },
+      insert: { proxmox_clusters: insert },
+      update: { proxmox_clusters: chain({ executeTakeFirst: { id: 'cluster-1' } }) },
+    });
+
+    const tasks = await service.claimTasks('agent-9', agentPve1.proxmox_info);
+
+    expect(insert.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'prod',
+        pve_cluster_id: PVE_ID,
+        cluster_name: 'prod',
+        primary_agent_id: 'agent-9',
+        owner_id: null,
+        inventory_requested_at: expect.any(Date),
+      }),
+    );
+    // The new primary reads the first inventory on the same poll.
+    expect(tasks.map((t) => t.type)).toEqual(['proxmox-inventory']);
+  });
+
+  it('names a standalone node after the node and tolerates a concurrent registration', async () => {
+    const insert = chain({ executeTakeFirst: undefined });
+    const { service } = make({
+      select: { proxmox_clusters: chain({ executeTakeFirst: undefined }) },
+      insert: { proxmox_clusters: insert },
+    });
+    const standalone = { clusterId: PVE_ID, clusterName: null, node: 'pve7', pveVersion: '8.2.4' };
+
+    expect(await service.claimTasks('agent-9', standalone)).toEqual([]);
+    expect(insert.values).toHaveBeenCalledWith(expect.objectContaining({ name: 'pve7', cluster_name: null }));
+    expect(insert.onConflict).toHaveBeenCalled();
+  });
+
+  it('gives an agent that announces no PVE node nothing', async () => {
+    const { service, mock } = make({});
     expect(await service.claimTasks('agent-9', undefined)).toEqual([]);
+    expect(mock.insertInto).not.toHaveBeenCalled();
   });
 });
 
@@ -516,27 +553,6 @@ describe('ProxmoxService — task state', () => {
 });
 
 describe('ProxmoxService — clusters', () => {
-  it('refuses to register the same PVE cluster twice', async () => {
-    const { service } = make({
-      select: {
-        agents: chain({ executeTakeFirst: { id: 'agent-1', proxmox_info: agentPve1.proxmox_info } }),
-        proxmox_clusters: chain({ executeTakeFirst: { name: 'Prod' } }),
-      },
-    });
-    await expect(
-      service.create({ id: 'u-1' } as never, { name: 'Again', primaryAgentId: 'agent-1' }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('refuses a primary agent that announces no PVE node', async () => {
-    const { service } = make({
-      select: { agents: chain({ executeTakeFirst: { id: 'agent-1', proxmox_info: null } }) },
-    });
-    await expect(
-      service.create({ id: 'u-1' } as never, { name: 'Prod', primaryAgentId: 'agent-1' }),
-    ).rejects.toThrow(/does not run on a Proxmox VE node/);
-  });
-
   it('keeps the slug (restic host and tag of its snapshots) on a rename', async () => {
     const clusterUpdate = chain();
     const { service, mock } = make({
@@ -563,6 +579,72 @@ describe('ProxmoxService — clusters', () => {
       },
     });
     await expect(service.remove('cluster-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('refuses to delete a cluster an agent still announces (it would come back)', async () => {
+    const { service, mock } = make({
+      select: {
+        proxmox_clusters: chain({ executeTakeFirst: cluster }),
+        backup_jobs: chain({ executeTakeFirst: undefined }),
+        agents: chain({ execute: [agentPve2] }),
+      },
+    });
+    await expect(service.remove('cluster-1')).rejects.toThrow(/would register it again/);
+    expect(mock.deleteFrom).not.toHaveBeenCalled();
+  });
+
+  it('deletes a cluster no agent announces anymore', async () => {
+    const { service, mock } = make({
+      select: {
+        proxmox_clusters: chain({ executeTakeFirst: cluster }),
+        backup_jobs: chain({ executeTakeFirst: undefined }),
+        agents: chain({ execute: [] }),
+      },
+    });
+    await service.remove('cluster-1');
+    expect(mock.deleteFrom).toHaveBeenCalledWith('proxmox_clusters');
+  });
+});
+
+describe('ProxmoxService — releasing an agent', () => {
+  function release(opts: { agents: unknown[]; job?: { name: string } }) {
+    const clusterUpdate = chain();
+    const jobUpdate = chain();
+    const made = make({
+      select: {
+        proxmox_clusters: chain({ execute: [cluster] }),
+        agents: chain({ execute: opts.agents }),
+        backup_jobs: chain({ executeTakeFirst: opts.job }),
+      },
+      update: { proxmox_clusters: clusterUpdate, backup_jobs: jobUpdate },
+    });
+    (made.mock.db as unknown as { transaction: unknown }).transaction = () => ({
+      execute: (cb: (trx: unknown) => Promise<unknown>) => cb(made.mock.db),
+    });
+    return { ...made, clusterUpdate, jobUpdate };
+  }
+
+  it('hands the primary role and the jobs to another node agent, an online one first', async () => {
+    const offline = { ...agentPve2, id: 'agent-3', status: 'offline' };
+    const { service, clusterUpdate, jobUpdate, mock } = release({ agents: [agentPve1, offline, agentPve2] });
+
+    await service.releaseAgent('agent-1');
+
+    expect(clusterUpdate.set).toHaveBeenCalledWith(expect.objectContaining({ primary_agent_id: 'agent-2' }));
+    expect(jobUpdate.set).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'agent-2' }));
+    expect(mock.deleteFrom).not.toHaveBeenCalled();
+  });
+
+  it('removes a cluster with its last agent', async () => {
+    const { service, mock } = release({ agents: [agentPve1] });
+    await service.releaseAgent('agent-1');
+    expect(mock.deleteFrom).toHaveBeenCalledWith('proxmox_clusters');
+  });
+
+  it('keeps the last agent of a cluster that jobs still back up', async () => {
+    const { service, mock } = release({ agents: [agentPve1], job: { name: 'Nightly' } });
+    await expect(service.releaseAgent('agent-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(mock.deleteFrom).not.toHaveBeenCalled();
   });
 });
 

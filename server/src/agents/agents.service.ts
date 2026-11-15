@@ -610,15 +610,20 @@ echo "Amber agent installed and started."
   }
 
   async remove(id: string): Promise<void> {
-    const cluster = await this.db
-      .selectFrom('proxmox_clusters')
-      .select('name')
-      .where('primary_agent_id', '=', id)
-      .executeTakeFirst();
-    if (cluster) {
-      throw new ConflictException(
-        `The agent is the primary agent of Proxmox cluster "${cluster.name}"; pick another one first`,
-      );
+    if (this.proxmox) {
+      // Hands its Proxmox clusters to another node agent, or removes them with it.
+      await this.proxmox.releaseAgent(id);
+    } else {
+      const cluster = await this.db
+        .selectFrom('proxmox_clusters')
+        .select('name')
+        .where('primary_agent_id', '=', id)
+        .executeTakeFirst();
+      if (cluster) {
+        throw new ConflictException(
+          `The agent is the primary agent of Proxmox cluster "${cluster.name}"; pick another one first`,
+        );
+      }
     }
     await this.db.deleteFrom('agents').where('id', '=', id).execute();
   }

@@ -44,21 +44,6 @@ const VZDUMP_MODES: ProxmoxVzdumpMode[] = ['snapshot', 'suspend', 'stop'];
 
 // --- Clusters -------------------------------------------------------------------
 
-export class CreateProxmoxClusterDto {
-  @ApiProperty({ example: 'pve-prod' })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(128)
-  name!: string;
-
-  @ApiProperty({
-    description:
-      'An agent on one of the PVE nodes (GET /proxmox/candidates); it reads the inventory and runs retention',
-  })
-  @IsUUID()
-  primaryAgentId!: string;
-}
-
 export class UpdateProxmoxClusterDto {
   @ApiPropertyOptional()
   @IsOptional()

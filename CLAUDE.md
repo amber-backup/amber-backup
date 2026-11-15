@@ -265,7 +265,12 @@ not yet run against a real PVE host**; the agent marks every such point with
   (cluster id = sha256 of `/etc/pve/pve-root-ca.pem`, node name). A
   `proxmox_clusters` row links all agents with that cluster id; its **primary
   agent** reads the inventory, runs the per-run retention task and is
-  `backup_jobs.agent_id` (so checks/stats work unchanged).
+  `backup_jobs.agent_id` (so checks/stats work unchanged). Clusters are never
+  added by hand: the first poll of an agent announcing an unknown cluster id
+  creates the row (`registerCluster`, migration `029`, `owner_id` null) with
+  that agent as primary. Deleting an agent hands its primary role (and the
+  jobs) to another node agent, or removes the cluster with its last agent
+  (`releaseAgent`).
 - A Proxmox run is split into `proxmox_run_items` (one guest each), claimed by
   the agent of the guest's current node (`proxmox-backup`, task id = item id;
   these run concurrently on the agent, capped by the server). A guest that

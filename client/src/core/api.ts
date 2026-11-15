@@ -583,7 +583,8 @@ export interface ProxmoxCluster {
   inventory_requested_at: string | null;
   guest_count: number | null;
   node_count: number | null;
-  owner_id: string;
+  /** Null when the cluster registered itself through its first node agent. */
+  owner_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -678,8 +679,6 @@ export function proxmoxSnapshotMethod(
 export const proxmoxApi = {
   clusters: () => api.get<ProxmoxCluster[]>('/proxmox/clusters'),
   cluster: (idOrSlug: string) => api.get<ProxmoxClusterDetail>(`/proxmox/clusters/${idOrSlug}`),
-  create: (body: { name: string; primaryAgentId: string }) =>
-    api.post<ProxmoxClusterDetail>('/proxmox/clusters', body),
   update: (idOrSlug: string, body: { name?: string; primaryAgentId?: string }) =>
     api.patch<ProxmoxClusterDetail>(`/proxmox/clusters/${idOrSlug}`, body),
   remove: (idOrSlug: string) => api.del(`/proxmox/clusters/${idOrSlug}`),

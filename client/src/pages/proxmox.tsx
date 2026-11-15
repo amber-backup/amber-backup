@@ -39,36 +39,32 @@ const diskBytes = (g: ProxmoxGuest) => g.disks.reduce((n, d) => n + (d.sizeBytes
 export function Proxmox() {
   const t = useT();
   const m = t.proxmox.page;
-  const { data, loading, reload } = useAsync(() =>
-    Promise.all([proxmoxApi.clusters(), proxmoxApi.candidates().catch(() => [] as ProxmoxCandidate[])]),
-  );
-  const { open } = useModal();
-  const navigate = useNavigate();
+  // Clusters register themselves with the first poll of a node agent.
+  const { data, loading } = useAsync(() => proxmoxApi.clusters());
+  const [live, setLive] = useState<ProxmoxCluster[] | null>(null);
   const [query, setQuery] = useState('');
+  const clusters = live ?? data;
 
-  if (loading || !data) return <Loading label={t.common.loading} />;
-  const [clusters, candidates] = data;
+  // While none has turned up yet, look for one quietly.
+  const waiting = !!clusters && clusters.length === 0;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      proxmoxApi.clusters().then(setLive).catch(() => undefined);
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  if (loading || !clusters) return <Loading label={t.common.loading} />;
   const guests = clusters.reduce((n, c) => n + (c.guest_count ?? 0), 0);
   const shown = clusters.filter((c) => matchesSearch(query, [c.name, c.cluster_name, c.agent_name]));
-
-  const add = () =>
-    open((close) => (
-      <ClusterEditor
-        candidates={candidates}
-        onClose={close}
-        onSaved={(id) => {
-          reload();
-          navigate(`/proxmox/${id}`);
-        }}
-      />
-    ));
 
   return (
     <div>
       <PageHeader
         title={m.title}
         subtitle={m.subtitle(clusters.length, guests)}
-        actions={<ActionButton label={m.addCluster} icon="plus" variant="primary" onClick={add} />}
       />
       <div className="panel">
         <div className="panel-head">
@@ -118,22 +114,19 @@ function ClusterEditor({
   onClose,
   onSaved,
 }: {
-  cluster?: ProxmoxCluster;
+  cluster: ProxmoxCluster;
   candidates: ProxmoxCandidate[];
   onClose: () => void;
-  onSaved: (id: string) => void;
+  onSaved: () => void;
 }) {
   const t = useT();
   const m = t.proxmox.editor;
   const toast = useToast();
-  // New: any agent on a node of a cluster Amber doesn't know yet. Edit: the
-  // agents on this cluster's nodes.
-  const choices = cluster
-    ? candidates.filter((c) => c.info.clusterId === cluster.pve_cluster_id)
-    : candidates.filter((c) => !c.registeredClusterId);
-  const [agentId, setAgentId] = useState(cluster?.primary_agent_id ?? choices[0]?.agentId ?? '');
+  // The agents on this cluster's nodes.
+  const choices = candidates.filter((c) => c.info.clusterId === cluster.pve_cluster_id);
+  const [agentId, setAgentId] = useState(cluster.primary_agent_id);
   const chosen = choices.find((c) => c.agentId === agentId);
-  const [name, setName] = useState(cluster?.name ?? '');
+  const [name, setName] = useState(cluster.name);
   const defaultName = chosen ? (chosen.info.clusterName ?? chosen.info.node) : '';
 
   const submit = async () => {
@@ -142,19 +135,13 @@ function ClusterEditor({
       toast(m.nameRequired, 'error');
       return false;
     }
-    if (!agentId) {
-      toast(m.agentRequired, 'error');
-      return false;
-    }
     try {
-      const saved = cluster
-        ? await proxmoxApi.update(cluster.id, {
-            name: finalName,
-            ...(agentId !== cluster.primary_agent_id ? { primaryAgentId: agentId } : {}),
-          })
-        : await proxmoxApi.create({ name: finalName, primaryAgentId: agentId });
+      await proxmoxApi.update(cluster.id, {
+        name: finalName,
+        ...(agentId !== cluster.primary_agent_id ? { primaryAgentId: agentId } : {}),
+      });
       toast(m.saved, 'success');
-      onSaved(saved.id);
+      onSaved();
     } catch (err) {
       toast(err instanceof Error ? err.message : m.saveFailed, 'error');
       return false;
@@ -162,14 +149,11 @@ function ClusterEditor({
   };
 
   return (
-    <FormModal title={cluster ? m.titleEdit : m.titleNew} onClose={onClose} onSubmit={submit}>
+    <FormModal title={m.titleEdit} onClose={onClose} onSubmit={submit}>
       <div className="modal-form" style={{ gap: 14 }}>
-        <Field
-          label={cluster ? m.primaryAgent : m.agent}
-          help={choices.length ? (cluster ? m.primaryHelp : m.agentHelp) : m.noCandidates}
-        >
+        <Field label={m.primaryAgent} help={m.primaryHelp}>
           <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-            {cluster && !choices.some((c) => c.agentId === cluster.primary_agent_id) && (
+            {!choices.some((c) => c.agentId === cluster.primary_agent_id) && (
               <option value={cluster.primary_agent_id}>{cluster.agent_name ?? cluster.primary_agent_id}</option>
             )}
             {choices.map((c) => (
