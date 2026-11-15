@@ -1,3 +1,15 @@
+# [1.43.0](https://github.com/amber-backup/amber-backup/compare/v1.42.0...v1.43.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **proxmox:** add up every guest's bytes in a run's live progress ([86950ea](https://github.com/amber-backup/amber-backup/commit/86950eae49ff76497d4da5fab18d378ec6a28291))
+
+
+### Features
+
+* **agent:** incremental block backups of VMs on storage without snapshots ([d1a6ae6](https://github.com/amber-backup/amber-backup/commit/d1a6ae6bc19b18a840a9884369573aef5c93ec4c))
+
 # [1.42.0](https://github.com/amber-backup/amber-backup/compare/v1.41.2...v1.42.0) (2026-11-15)
 
 
