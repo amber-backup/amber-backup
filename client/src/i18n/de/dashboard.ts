@@ -61,26 +61,20 @@ export const dashboard: DashboardMessages = {
     allOnline: 'alle online',
   },
   hyperv: {
-    title: (unprotected: number, failed: number) =>
-      [failed && `${failed} Hyper-V-${failed === 1 ? 'VM' : 'VMs'} fehlgeschlagen`, unprotected && `${unprotected} Hyper-V-${unprotected === 1 ? 'VM' : 'VMs'} nicht geschützt`]
-        .filter(Boolean)
-        .join(' · '),
+    title: (failed: number) => `${failed} Hyper-V-${failed === 1 ? 'VM' : 'VMs'} fehlgeschlagen`,
     failed: 'letztes Backup fehlgeschlagen',
-    unprotected: 'kein Backup-Job',
     open: 'Hyper-V',
     more: (n: number) => `und ${n} weitere`,
   },
   proxmox: {
-    title: (unprotected: number, failed: number, nodes: number) =>
+    title: (failed: number, nodes: number) =>
       [
         failed && `${failed} Proxmox-${failed === 1 ? 'Gast' : 'Gäste'} fehlgeschlagen`,
-        unprotected && `${unprotected} Proxmox-${unprotected === 1 ? 'Gast' : 'Gäste'} nicht geschützt`,
         nodes && `${nodes} ${nodes === 1 ? 'Node' : 'Nodes'} ohne Agent`,
       ]
         .filter(Boolean)
         .join(' · '),
     failed: 'letztes Backup fehlgeschlagen',
-    unprotected: 'kein Backup-Job',
     noAgent: 'kein Amber-Agent auf diesem Node',
     node: (node: string) => `Node ${node}`,
     open: 'Proxmox VE',

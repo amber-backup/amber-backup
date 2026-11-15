@@ -820,7 +820,8 @@ export function ProxmoxAttention() {
   const m = t.dashboard.proxmox;
   const navigate = useNavigate();
   const { data } = useAsync(() => proxmoxApi.summary().catch(() => null as ProxmoxSummary | null));
-  if (!data || (data.unprotected.length === 0 && data.failed.length === 0 && data.nodesWithoutAgent.length === 0)) {
+  // Guests without a job are not listed: not every guest needs a backup.
+  if (!data || (data.failed.length === 0 && data.nodesWithoutAgent.length === 0)) {
     return null;
   }
   const red = 'var(--red, #e5534b)';
@@ -843,20 +844,11 @@ export function ProxmoxAttention() {
       error: g.error,
       color: red,
     })),
-    ...data.unprotected.map((g) => ({
-      key: `u:${g.clusterId}:${g.vmid}`,
-      clusterId: g.clusterId,
-      title: `${g.vmid} · ${g.name}`,
-      sub: `${g.clusterName} · `,
-      label: m.unprotected,
-      error: undefined as string | undefined,
-      color: 'var(--warn)',
-    })),
   ];
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <div className="panel-head">
-        <h2>{m.title(data.unprotected.length, data.failed.length, data.nodesWithoutAgent.length)}</h2>
+        <h2>{m.title(data.failed.length, data.nodesWithoutAgent.length)}</h2>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/proxmox')}>
           <Icon name="server" size={14} />
           {m.open}

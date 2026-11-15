@@ -779,29 +779,25 @@ function StatusBadge({ status }: { status: string }) {
 interface HypervSummary {
   hosts: number;
   vms: number;
-  unprotected: { hostId: string; hostName: string; vmId: string; vmName: string }[];
   failed: { hostId: string; hostName: string; vmId: string; vmName: string; error?: string }[];
 }
 
 /**
- * Hyper-V VMs that need attention: not covered by any job, or whose latest
- * backup failed. Hidden when there is nothing to report (or no Hyper-V at all;
- * the summary is admin-only and simply fails for other users).
+ * Hyper-V VMs whose latest backup failed. Hidden when there is nothing to
+ * report (or no Hyper-V at all; the summary is admin-only and simply fails for
+ * other users). VMs without a job are not listed: not every VM needs a backup.
  */
 function HypervAttention() {
   const t = useT();
   const m = t.dashboard.hyperv;
   const navigate = useNavigate();
   const { data } = useAsync(() => api.get<HypervSummary>('/hyperv/summary').catch(() => null));
-  if (!data || (data.unprotected.length === 0 && data.failed.length === 0)) return null;
-  const items = [
-    ...data.failed.map((v) => ({ ...v, label: m.failed, color: 'var(--red, #e5534b)' })),
-    ...data.unprotected.map((v) => ({ ...v, error: undefined, label: m.unprotected, color: 'var(--warn)' })),
-  ];
+  if (!data || data.failed.length === 0) return null;
+  const items = data.failed.map((v) => ({ ...v, label: m.failed, color: 'var(--red, #e5534b)' }));
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <div className="panel-head">
-        <h2>{m.title(data.unprotected.length, data.failed.length)}</h2>
+        <h2>{m.title(data.failed.length)}</h2>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/hyperv')}>
           <Icon name="vm" size={14} />
           {m.open}
